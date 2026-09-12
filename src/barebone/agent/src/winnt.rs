@@ -25,6 +25,8 @@ use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 type ThreadChangeRoutine = unsafe extern "stdcall" fn(usize, usize, u8);
 #[cfg(target_arch = "x86_64")]
 type ThreadChangeRoutine = unsafe extern "win64" fn(usize, usize, u8);
+#[cfg(target_arch = "aarch64")]
+type ThreadChangeRoutine = unsafe extern "C" fn(usize, usize, u8);
 
 macro_rules! windows_fn {
     ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
@@ -41,10 +43,19 @@ macro_rules! windows_fn {
     };
 }
 
+#[cfg(target_arch = "aarch64")]
+macro_rules! windows_fn {
+    ($($argument:ty),* $(,)?) => { unsafe extern "C" fn($($argument),*) };
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "C" fn($($argument),*) -> $result
+    };
+}
+
 pub(crate) use windows_fn;
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/system32/";
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const DEBUG_CONSOLE_PORT: u16 = 0xe9;
 
 pub fn log(msg: &str) {
@@ -61,10 +72,19 @@ pub fn log_hex(value: usize) {
     write_debug_byte(b'\n');
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn write_debug_byte(byte: u8) {
     unsafe {
         core::arch::asm!("out dx, al", in("dx") DEBUG_CONSOLE_PORT, in("al") byte,
             options(nomem, nostack, preserves_flags));
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn write_debug_byte(byte: u8) {
+    let text = [byte, 0];
+    unsafe {
+        (_DbgPrint)(c"%s".as_ptr() as *const u8, text.as_ptr());
     }
 }
 
@@ -156,6 +176,11 @@ unsafe extern "stdcall" fn thread_start(context: *mut c_void) {
 
 #[cfg(target_arch = "x86_64")]
 unsafe extern "win64" fn thread_start(context: *mut c_void) {
+    unsafe { start_on_own_stack(context) }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn thread_start(context: *mut c_void) {
     unsafe { start_on_own_stack(context) }
 }
 
@@ -334,9 +359,9 @@ fn read_system_time(offset: usize) -> i64 {
     }
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const SHARED_DATA: usize = 0xffdf_0000;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const SHARED_DATA: usize = 0xffff_f780_0000_0000;
 pub(crate) const USER_SHARED_DATA: usize = 0x7ffe_0000;
 const INTERRUPT_TIME_OFFSET: usize = 0x08;
@@ -380,7 +405,7 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     unsafe { (_MmMapIoSpace)(phys_addr as i64, size as usize, MM_NON_CACHED) }
 }
@@ -441,6 +466,11 @@ unsafe extern "win64" fn on_hw_int(interrupt: *mut c_void, context: *mut c_void)
     unsafe { serve_hw_int(interrupt, context) }
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn on_hw_int(interrupt: *mut c_void, context: *mut c_void) -> u8 {
+    unsafe { serve_hw_int(interrupt, context) }
+}
+
 unsafe fn serve_hw_int(_interrupt: *mut c_void, _context: *mut c_void) -> u8 {
     unsafe {
         IN_INTERRUPT = true;
@@ -462,6 +492,12 @@ unsafe extern "stdcall" fn deferred_wake(_dpc: *mut c_void, _context: *mut c_voi
 
 #[cfg(target_arch = "x86_64")]
 unsafe extern "win64" fn deferred_wake(_dpc: *mut c_void, _context: *mut c_void,
+        _first: *mut c_void, _second: *mut c_void) {
+    serve_deferred_wake()
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn deferred_wake(_dpc: *mut c_void, _context: *mut c_void,
         _first: *mut c_void, _second: *mut c_void) {
     serve_deferred_wake()
 }
@@ -489,8 +525,8 @@ const LEVEL_SENSITIVE: u32 = 1;
 pub type InterruptHandler =
     unsafe extern "C" fn(target: *mut c_void, refcon: *mut c_void, nub: *mut c_void, source: i32);
 
-// The kernel has no interface to install a handler, thus the code replaces the gates. Each
-// processor has its own table, and these guests have one processor.
+// The kernel has no interface to install a handler, thus the code replaces the gates, which
+// every processor has its own table of.
 pub fn watches_threads() -> bool {
     !in_copy()
 }
@@ -522,6 +558,11 @@ unsafe extern "win64" fn on_thread_change(process: usize, thread: usize, created
     thread_changed(process, thread, created);
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn on_thread_change(process: usize, thread: usize, created: u8) {
+    thread_changed(process, thread, created);
+}
+
 fn thread_changed(_process: usize, thread: usize, created: u8) {
     let told = if created != 0 {
         unsafe { THREAD_APPEARED }
@@ -537,6 +578,7 @@ fn thread_changed(_process: usize, thread: usize, created: u8) {
 static mut THREAD_APPEARED: Option<fn(u32)> = None;
 static mut THREAD_VANISHED: Option<fn(u32)> = None;
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn install_fault_reporter() {
     unsafe {
         FAULT_CHAIN[INVALID_OPCODE as usize] = hook_gate(INVALID_OPCODE, frida_winnt_fault_thunk_ud);
@@ -546,6 +588,7 @@ pub fn install_fault_reporter() {
     }
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn release_fault_reporter() {
     unsafe {
         for vector in [INVALID_OPCODE, GENERAL_PROTECTION, PAGE_FAULT] {
@@ -557,6 +600,151 @@ pub fn release_fault_reporter() {
         }
     }
 }
+
+#[cfg(target_arch = "aarch64")]
+pub fn install_fault_reporter() {
+    let entry = synchronous_entry();
+
+    unsafe {
+        if ORIGINAL_ENTRY != 0 {
+            return;
+        }
+        ORIGINAL_ENTRY = (entry as *const u32).read();
+
+        FAULT_CONTROL = FaultControl {
+            thunk: frida_winnt_fault_thunk as usize as u64,
+            chain: (entry + chain_offset()) as u64,
+        };
+
+        write_entry(entry, |copy| {
+            let control = copy.byte_add(control_offset()) as *mut u64;
+            control.write(&raw const FAULT_CONTROL as u64);
+
+            let onward = onward_branch(entry, ORIGINAL_ENTRY);
+            copy.byte_add(chain_offset() + ONWARD_BRANCH_OFFSET).cast::<u32>().write(onward);
+        });
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn release_fault_reporter() {
+    let entry = synchronous_entry();
+
+    unsafe {
+        if ORIGINAL_ENTRY == 0 {
+            return;
+        }
+
+        let restored = ORIGINAL_ENTRY;
+        ORIGINAL_ENTRY = 0;
+        edit_entry(entry, |at| at.cast::<u32>().write(restored));
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn synchronous_entry() -> usize {
+    let vectors: usize;
+    unsafe {
+        core::arch::asm!("mrs {0}, vbar_el1", out(reg) vectors,
+            options(nomem, nostack, preserves_flags));
+    }
+    vectors + SYNCHRONOUS_ENTRY_OFFSET
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn write_entry(entry: usize, patch: impl FnOnce(*mut u8)) {
+    unsafe {
+        edit_entry(entry, |at| {
+            core::ptr::copy_nonoverlapping(&raw const frida_winnt_fault_vector as *const u8, at,
+                template_size());
+            patch(at);
+        });
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn edit_entry(entry: usize, write: impl FnOnce(*mut u8)) {
+    let restore = crate::winnt_paging::protection_at(entry);
+    crate::winnt_paging::protect(entry as u64, ENTRY_SIZE,
+        GUM_PAGE_READ | crate::winnt_paging::GUM_PAGE_WRITE | GUM_PAGE_EXECUTE);
+
+    write(entry as *mut u8);
+
+    unsafe {
+        for offset in (0..ENTRY_SIZE).step_by(CACHE_LINE_SIZE) {
+            let at = entry + offset;
+            core::arch::asm!("dc cvau, {0}", in(reg) at, options(nostack, preserves_flags));
+        }
+        core::arch::asm!("dsb ish", options(nostack, preserves_flags));
+        for offset in (0..ENTRY_SIZE).step_by(CACHE_LINE_SIZE) {
+            let at = entry + offset;
+            core::arch::asm!("ic ivau, {0}", in(reg) at, options(nostack, preserves_flags));
+        }
+        core::arch::asm!("dsb ish", "isb", options(nostack, preserves_flags));
+    }
+
+    crate::winnt_paging::protect(entry as u64, ENTRY_SIZE, restore);
+}
+
+#[cfg(target_arch = "aarch64")]
+fn onward_branch(entry: usize, original: u32) -> u32 {
+    let reach = ((original & BRANCH_OFFSET_MASK) << BRANCH_SPARE_BITS) as i32 >> BRANCH_SPARE_BITS;
+    let target = entry.wrapping_add((reach as isize * INSTRUCTION_SIZE as isize) as usize);
+    let from = entry + chain_offset() + ONWARD_BRANCH_OFFSET;
+
+    BRANCH
+        | ((target.wrapping_sub(from) / INSTRUCTION_SIZE) as u32 & BRANCH_OFFSET_MASK)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn template_size() -> usize {
+    (&raw const frida_winnt_fault_vector_end as usize)
+        - (&raw const frida_winnt_fault_vector as usize)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn chain_offset() -> usize {
+    (&raw const frida_winnt_fault_vector_chain as usize)
+        - (&raw const frida_winnt_fault_vector as usize)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn control_offset() -> usize {
+    (&raw const frida_winnt_fault_vector_control as usize)
+        - (&raw const frida_winnt_fault_vector as usize)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[repr(C)]
+struct FaultControl {
+    thunk: u64,
+    chain: u64,
+}
+
+#[cfg(target_arch = "aarch64")]
+static mut FAULT_CONTROL: FaultControl = FaultControl { thunk: 0, chain: 0 };
+#[cfg(target_arch = "aarch64")]
+static mut ORIGINAL_ENTRY: u32 = 0;
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" {
+    static frida_winnt_fault_vector: u8;
+    static frida_winnt_fault_vector_chain: u8;
+    static frida_winnt_fault_vector_control: u8;
+    static frida_winnt_fault_vector_end: u8;
+    fn frida_winnt_fault_thunk();
+}
+
+#[cfg(target_arch = "aarch64")]
+const SYNCHRONOUS_ENTRY_OFFSET: usize = 0x000;
+#[cfg(target_arch = "aarch64")]
+const ENTRY_SIZE: usize = 0x80;
+#[cfg(target_arch = "aarch64")]
+const CACHE_LINE_SIZE: usize = 64;
+#[cfg(target_arch = "aarch64")]
+const ONWARD_BRANCH_OFFSET: usize = 8;
+#[cfg(target_arch = "aarch64")]
+const BRANCH: u32 = 0x1400_0000;
 
 #[cfg(target_arch = "x86")]
 unsafe fn restore_gate(vector: u32, handler: usize) {
@@ -643,9 +831,6 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> usize {
 
     let eip_slot = rip_slot;
     let eip = unsafe { frame.add(eip_slot).read() };
-    if !is_ours(eip as u64) {
-        return unsafe { FAULT_CHAIN[fault as usize] };
-    }
 
     let mut cpu_context = unsafe {
         crate::bindings::_GumIA32CpuContext {
@@ -709,9 +894,6 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u64) -> usize {
     }
 
     let rip = unsafe { frame.add(rip_slot).read() };
-    if !is_ours(rip) {
-        return unsafe { FAULT_CHAIN[fault as usize] };
-    }
 
     let mut cpu_context = unsafe {
         crate::bindings::_GumX64CpuContext {
@@ -767,6 +949,58 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u64) -> usize {
 #[cfg(target_arch = "x86_64")]
 const STACK_POINTER_IN_FRAME: usize = 3;
 
+#[cfg(target_arch = "aarch64")]
+#[unsafe(no_mangle)]
+extern "C" fn frida_winnt_on_fault(frame: *mut u64) -> usize {
+    let pc = read_exception_register!("elr_el1");
+    let state = read_exception_register!("spsr_el1");
+
+    let mut cpu_context = crate::bindings::_GumArm64CpuContext {
+        pc,
+        sp: frame as u64 + FRAME_BYTES as u64,
+        nzcv: state,
+        x: unsafe { core::ptr::read(frame.cast::<[u64; 29]>()) },
+        fp: unsafe { frame.add(29).read() },
+        lr: unsafe { frame.add(30).read() },
+    };
+
+    if !handle(read_exception_register!("esr_el1") as u32, pc, &mut cpu_context) {
+        return unsafe { FAULT_CONTROL.chain as usize };
+    }
+
+    unsafe {
+        core::arch::asm!("msr elr_el1, {0}", in(reg) cpu_context.pc,
+            options(nomem, nostack, preserves_flags));
+
+        core::ptr::write(frame.cast::<[u64; 29]>(), cpu_context.x);
+        frame.add(29).write(cpu_context.fp);
+        frame.add(30).write(cpu_context.lr);
+        frame.add(RESUME_STACK_SLOT).write(cpu_context.sp);
+    }
+
+    0
+}
+
+#[cfg(target_arch = "aarch64")]
+macro_rules! read_exception_register {
+    ($name:literal) => {{
+        let value: u64;
+        unsafe {
+            core::arch::asm!(concat!("mrs {0}, ", $name), out(reg) value,
+                options(nomem, nostack, preserves_flags));
+        }
+        value
+    }};
+}
+
+#[cfg(target_arch = "aarch64")]
+use read_exception_register;
+
+#[cfg(target_arch = "aarch64")]
+const FRAME_BYTES: usize = 288;
+#[cfg(target_arch = "aarch64")]
+const RESUME_STACK_SLOT: usize = 31;
+
 fn handle(fault: u32, pc: u64, cpu_context: &mut crate::bindings::GumCpuContext) -> bool {
     let handled = unsafe {
         crate::bindings::gum_barebone_handle_exception(
@@ -780,14 +1014,7 @@ fn handle(fault: u32, pc: u64, cpu_context: &mut crate::bindings::GumCpuContext)
     handled != 0
 }
 
-fn is_ours(address: u64) -> bool {
-    let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
-    if address >= own.base_address && address < own.base_address + own.size as u64 {
-        return true;
-    }
-    crate::gum::is_agent_slab_if_idle(address).unwrap_or(false)
-}
-
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn fault_frame_pc_slot(fault: u32) -> usize {
     const VECTOR: usize = 1;
 
@@ -804,6 +1031,7 @@ const PUSHED_REGISTERS: usize = 8;
 #[cfg(target_arch = "x86_64")]
 const PUSHED_REGISTERS: usize = 16;
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn exception_type_for(fault: u32) -> crate::bindings::GumExceptionType {
     use crate::bindings::*;
 
@@ -813,6 +1041,7 @@ fn exception_type_for(fault: u32) -> crate::bindings::GumExceptionType {
     }
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn faulting_address() -> usize {
     let address: usize;
     unsafe {
@@ -821,6 +1050,35 @@ fn faulting_address() -> usize {
     }
     address
 }
+
+#[cfg(target_arch = "aarch64")]
+fn exception_type_for(syndrome: u32) -> crate::bindings::GumExceptionType {
+    use crate::bindings::*;
+
+    match syndrome >> SYNDROME_CLASS_SHIFT {
+        SYNDROME_UNKNOWN | SYNDROME_ILLEGAL_STATE => {
+            _GumExceptionType_GUM_EXCEPTION_ILLEGAL_INSTRUCTION
+        }
+        SYNDROME_BREAKPOINT | SYNDROME_SOFTWARE_STEP => _GumExceptionType_GUM_EXCEPTION_BREAKPOINT,
+        _ => _GumExceptionType_GUM_EXCEPTION_ACCESS_VIOLATION,
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn faulting_address() -> usize {
+    read_exception_register!("far_el1") as usize
+}
+
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_CLASS_SHIFT: u32 = 26;
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_UNKNOWN: u32 = 0x00;
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_ILLEGAL_STATE: u32 = 0x0e;
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_BREAKPOINT: u32 = 0x30;
+#[cfg(target_arch = "aarch64")]
+const SYNDROME_SOFTWARE_STEP: u32 = 0x32;
 
 static mut FAULT_CHAIN: [usize; 32] = [0; 32];
 
@@ -989,14 +1247,14 @@ unsafe fn try_read_pointer(address: usize) -> Option<usize> {
 
 pub(crate) const POINTER_SIZE: usize = core::mem::size_of::<usize>();
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const MIN_THREAD_ENTRY_OFFSET: usize = 0x100;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const MAX_OBJECT_SIZE: usize = 0x300;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const MIN_THREAD_ENTRY_OFFSET: usize = 0x200;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const MAX_OBJECT_SIZE: usize = 0x700;
 
 const MAX_THREADS_PER_PROCESS: usize = 1024;
@@ -1086,6 +1344,43 @@ pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
     field(0x78, state.rax);
 }
 
+#[cfg(target_arch = "aarch64")]
+pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
+    let field = |offset: usize| unsafe { base.add(offset).cast::<u64>().read_unaligned() };
+
+    let mut x = [0u64; 29];
+    for (index, slot) in x.iter_mut().enumerate() {
+        *slot = field(CONTEXT_X0 as usize + index * 8);
+    }
+
+    CpuState {
+        pc: field(CONTEXT_PC as usize),
+        sp: field(CONTEXT_SP as usize),
+        nzcv: unsafe { base.add(CONTEXT_CPSR).cast::<u32>().read_unaligned() } as u64,
+        x,
+        fp: field(CONTEXT_FP),
+        lr: field(CONTEXT_LR),
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
+    let mut field = |offset: usize, value: u64| unsafe {
+        base.add(offset).cast::<u64>().write_unaligned(value)
+    };
+
+    field(CONTEXT_PC as usize, state.pc);
+    field(CONTEXT_SP as usize, state.sp);
+    for (index, value) in state.x.iter().enumerate() {
+        field(CONTEXT_X0 as usize + index * 8, *value);
+    }
+    field(CONTEXT_FP, state.fp);
+    field(CONTEXT_LR, state.lr);
+    unsafe {
+        base.add(CONTEXT_CPSR).cast::<u32>().write_unaligned(state.nzcv as u32);
+    }
+}
+
 #[cfg(target_arch = "x86")]
 pub(crate) const CONTEXT_SIZE: usize = 716;
 #[cfg(target_arch = "x86")]
@@ -1107,6 +1402,17 @@ pub(crate) const CONTEXT_FLAGS: usize = 0x30;
 pub(crate) const CONTEXT_FULL: u32 = 0x0010_0003;
 #[cfg(target_arch = "x86_64")]
 pub(crate) const CONTEXT_CONTROL: u32 = 0x0010_0001;
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) const CONTEXT_SIZE: usize = 912;
+#[cfg(target_arch = "aarch64")]
+pub(crate) const CONTEXT_ALIGNMENT: usize = 16;
+#[cfg(target_arch = "aarch64")]
+pub(crate) const CONTEXT_FLAGS: usize = 0x00;
+#[cfg(target_arch = "aarch64")]
+pub(crate) const CONTEXT_FULL: u32 = 0x0040_0003;
+#[cfg(target_arch = "aarch64")]
+pub(crate) const CONTEXT_CONTROL: u32 = 0x0040_0001;
 
 pub struct ProcessInfo {
     pub id: u32,
@@ -1221,18 +1527,18 @@ static mut COMMAND_LINE: [u8; MAX_COMMAND_LINE_SIZE] = [0; MAX_COMMAND_LINE_SIZE
 
 const APC_STATE_WORDS: usize = 8;
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const PEB_PARAMETERS_OFFSET: usize = 0x10;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PARAMETERS_IMAGE_PATH_OFFSET: usize = 0x38;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const PARAMETERS_COMMAND_LINE_OFFSET: usize = 0x40;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const PEB_PARAMETERS_OFFSET: usize = 0x20;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PARAMETERS_IMAGE_PATH_OFFSET: usize = 0x60;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const PARAMETERS_COMMAND_LINE_OFFSET: usize = 0x70;
 
 pub(crate) const UNICODE_STRING_BUFFER_OFFSET: usize = POINTER_SIZE;
@@ -1620,13 +1926,13 @@ const CONTEXT_CS: u64 = 0x38;
 const CONTEXT_SS: u64 = 0x42;
 #[cfg(target_arch = "x86_64")]
 const CONTEXT_EFLAGS: u64 = 0x44;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const INITIAL_TEB_SIZE: usize = 40;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const INITIAL_TEB_STACK_BASE: u64 = 0x10;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const INITIAL_TEB_STACK_LIMIT: u64 = 0x18;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 const INITIAL_TEB_ALLOCATION_BASE: u64 = 0x20;
 #[cfg(target_arch = "x86_64")]
 const SERVICE_INDEX_OPCODE: usize = 3;
@@ -1647,6 +1953,44 @@ const ZW_STUB_JMP_REL: usize = 26;
 #[cfg(target_arch = "x86_64")]
 const ZW_STUB_JMP_NEXT: usize = 30;
 
+#[cfg(target_arch = "aarch64")]
+pub(crate) const CONTEXT_PC: u64 = 0x108;
+#[cfg(target_arch = "aarch64")]
+const CONTEXT_SP: u64 = 0x100;
+#[cfg(target_arch = "aarch64")]
+const CONTEXT_X0: u64 = 0x008;
+#[cfg(target_arch = "aarch64")]
+const CONTEXT_FP: usize = 0x0f0;
+#[cfg(target_arch = "aarch64")]
+const CONTEXT_LR: usize = 0x0f8;
+#[cfg(target_arch = "aarch64")]
+const CONTEXT_CPSR: usize = 0x004;
+
+#[cfg(target_arch = "aarch64")]
+const ZW_STUB_SIZE: usize = 24;
+#[cfg(target_arch = "aarch64")]
+const ZW_STUB_BRANCH: usize = 4;
+#[cfg(target_arch = "aarch64")]
+const INSTRUCTION_SIZE: usize = 4;
+#[cfg(target_arch = "aarch64")]
+const INSTRUCTION_IMMEDIATE_SHIFT: u32 = 5;
+#[cfg(target_arch = "aarch64")]
+const INSTRUCTION_IMMEDIATE_MASK: u32 = 0xffff;
+#[cfg(target_arch = "aarch64")]
+const SUPERVISOR_CALL: u32 = 0xd400_0001;
+#[cfg(target_arch = "aarch64")]
+const SUPERVISOR_CALL_MASK: u32 = 0xffe0_001f;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_OFFSET_MASK: u32 = 0x03ff_ffff;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_SPARE_BITS: u32 = 6;
+#[cfg(target_arch = "aarch64")]
+const MOVE_INDEX: u32 = 0xd280_0010;
+#[cfg(target_arch = "aarch64")]
+const LOAD_DISPATCHER: u32 = 0x5800_0071;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_TO_DISPATCHER: u32 = 0xd61f_0220;
+
 #[cfg(target_arch = "x86")]
 pub(crate) const CONTEXT_PC: u64 = 0xb8;
 #[cfg(target_arch = "x86")]
@@ -1663,13 +2007,13 @@ const CONTEXT_ES: u64 = 0x94;
 const CONTEXT_FS: u64 = 0x90;
 #[cfg(target_arch = "x86")]
 const CONTEXT_EFLAGS: u64 = 0xc0;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const INITIAL_TEB_SIZE: usize = 20;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const INITIAL_TEB_STACK_BASE: u64 = 0x08;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const INITIAL_TEB_STACK_LIMIT: u64 = 0x0c;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 const INITIAL_TEB_ALLOCATION_BASE: u64 = 0x10;
 #[cfg(target_arch = "x86")]
 const SERVICE_INDEX_OPCODE: usize = 0;
@@ -1735,6 +2079,23 @@ unsafe fn emit_zw_stub(template: *const u8, stub: *mut u8, index: u32,
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn emit_zw_stub(template: *const u8, _stub: *mut u8, index: u32,
+        put: &mut dyn FnMut(&[u8])) {
+    unsafe {
+        let branch = template.add(ZW_STUB_BRANCH) as *const u32;
+        let reach = ((branch.read() & BRANCH_OFFSET_MASK) << BRANCH_SPARE_BITS) as i32
+            >> BRANCH_SPARE_BITS;
+        let dispatcher = (branch as i64 + (reach as i64 * INSTRUCTION_SIZE as i64)) as u64;
+
+        put(&(MOVE_INDEX | (index << INSTRUCTION_IMMEDIATE_SHIFT)).to_le_bytes());
+        put(&LOAD_DISPATCHER.to_le_bytes());
+        put(&BRANCH_TO_DISPATCHER.to_le_bytes());
+        put(&0u32.to_le_bytes());
+        put(&dispatcher.to_le_bytes());
+    }
+}
+
 // A relative call reaches anywhere in this kernel's half of the address space, so only its
 // displacement has to be worked out again. How much the service takes off the stack is part of
 // the stub, and differs from the one it was read from.
@@ -1759,6 +2120,7 @@ unsafe fn emit_zw_stub(template: *const u8, stub: *mut u8, index: u32,
 }
 
 // ntdll's stub for a service begins by loading the same index that the kernel uses.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn service_index_of(ntdll: usize, name: &[u8]) -> u32 {
     let stub = export(ntdll, name);
     if stub == 0 {
@@ -1771,6 +2133,22 @@ fn service_index_of(ntdll: usize, name: &[u8]) -> u32 {
             return 0;
         }
         (bytes.add(SERVICE_INDEX_OPCODE + 1) as *const u32).read()
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn service_index_of(ntdll: usize, name: &[u8]) -> u32 {
+    let stub = export(ntdll, name);
+    if stub == 0 {
+        return 0;
+    }
+
+    unsafe {
+        let instruction = (stub as *const u32).read();
+        if (instruction & SUPERVISOR_CALL_MASK) != SUPERVISOR_CALL {
+            return 0;
+        }
+        (instruction >> INSTRUCTION_IMMEDIATE_SHIFT) & INSTRUCTION_IMMEDIATE_MASK
     }
 }
 
@@ -1831,12 +2209,11 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
         ((context + CONTEXT_FLAGS as u64) as *mut u32).write(CONTEXT_FULL);
         ((context + CONTEXT_PC) as *mut usize).write(entry as usize);
         ((context + CONTEXT_SP) as *mut usize).write(sp as usize);
-        ((context + CONTEXT_CS) as *mut u16).write(USER_CS as u16);
-        ((context + CONTEXT_SS) as *mut u16).write(USER_SS as u16);
-        ((context + CONTEXT_EFLAGS) as *mut u32).write(INITIAL_EFLAGS as u32);
         #[cfg(target_arch = "x86_64")]
         ((context + CONTEXT_RDI) as *mut u64).write(arena_seen);
-        seed_segments(context);
+        #[cfg(target_arch = "aarch64")]
+        ((context + CONTEXT_X0) as *mut u64).write(arena_seen);
+        seed_processor_mode(context);
 
         core::ptr::write_bytes(teb as *mut u8, 0, INITIAL_TEB_SIZE);
         ((teb + INITIAL_TEB_STACK_BASE) as *mut usize).write(top as usize);
@@ -1855,10 +2232,13 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
     }
 }
 
-// The kernel takes the data segments of a new thread from the context.
+// The kernel takes the privilege a new thread runs at, and its data segments, from the context.
 #[cfg(target_arch = "x86")]
-fn seed_segments(context: u64) {
+fn seed_processor_mode(context: u64) {
     unsafe {
+        ((context + CONTEXT_CS) as *mut u16).write(USER_CS as u16);
+        ((context + CONTEXT_SS) as *mut u16).write(USER_SS as u16);
+        ((context + CONTEXT_EFLAGS) as *mut u32).write(INITIAL_EFLAGS as u32);
         ((context + CONTEXT_DS) as *mut u16).write(USER_DS as u16);
         ((context + CONTEXT_ES) as *mut u16).write(USER_DS as u16);
         ((context + CONTEXT_FS) as *mut u16).write(USER_FS as u16);
@@ -1866,11 +2246,20 @@ fn seed_segments(context: u64) {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn seed_segments(_context: u64) {}
+fn seed_processor_mode(context: u64) {
+    unsafe {
+        ((context + CONTEXT_CS) as *mut u16).write(USER_CS as u16);
+        ((context + CONTEXT_SS) as *mut u16).write(USER_SS as u16);
+        ((context + CONTEXT_EFLAGS) as *mut u32).write(INITIAL_EFLAGS as u32);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn seed_processor_mode(_context: u64) {}
 
 // The argument travels in a register here, and the stack only has to be aligned the way a call
 // would have left it.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn seed_stack(_process: *mut c_void, top: u64, _argument: u64) -> u64 {
     (top - 64) & !15
 }
@@ -2045,6 +2434,7 @@ mod kernel {
                 }
             };
         }
+
         SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel);
     }
 
@@ -2088,13 +2478,13 @@ mod kernel {
     }
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const BLOCK_PROCESS_ID: u32 = 0x20;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const BLOCK_THREAD_ID: u32 = 0x24;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const BLOCK_PROCESS_ID: u32 = 0x40;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const BLOCK_THREAD_ID: u32 = 0x48;
 pub(crate) const CURRENT_PROCESS: *mut c_void = -1isize as *mut c_void;
 pub(crate) const MEM_COMMIT: u32 = 0x1000;
@@ -2258,29 +2648,29 @@ pub(crate) unsafe fn read_u32(address: usize) -> u32 {
     unsafe { (address as *const u32).read() }
 }
 
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const PEB_LDR_OFFSET: usize = 0x0c;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const PEB_LDR_OFFSET: usize = 0x18;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x0c;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const LDR_IN_LOAD_ORDER_OFFSET: usize = 0x10;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const ENTRY_DLL_BASE_OFFSET: usize = 0x18;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const ENTRY_DLL_BASE_OFFSET: usize = 0x30;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const ENTRY_BASE_NAME_OFFSET: usize = 0x2c;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const ENTRY_SIZE_OF_IMAGE_OFFSET: usize = 0x20;
-#[cfg(target_arch = "x86")]
+#[cfg(target_pointer_width = "32")]
 pub(crate) const ENTRY_FULL_NAME_OFFSET: usize = 0x24;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const ENTRY_SIZE_OF_IMAGE_OFFSET: usize = 0x40;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const ENTRY_FULL_NAME_OFFSET: usize = 0x48;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_pointer_width = "64")]
 pub(crate) const ENTRY_BASE_NAME_OFFSET: usize = 0x58;
 const PE_HEADERS_OFFSET: usize = 0x3c;
 const OPTIONAL_HEADER_OFFSET: usize = 0x18;
@@ -2853,6 +3243,11 @@ unsafe extern "win64" fn reader_start(context: *mut c_void) {
     unsafe { read_for_others(context) }
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn reader_start(context: *mut c_void) {
+    unsafe { read_for_others(context) }
+}
+
 unsafe fn read_for_others(_context: *mut c_void) {
     loop {
         wait(request_token(), None, &mut || unsafe {
@@ -3192,6 +3587,122 @@ FAULT_THUNK frida_winnt_fault_thunk_pf, 14, 8
 "#
 );
 
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(
+    r#"
+.global frida_winnt_run_on_stack
+frida_winnt_run_on_stack:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    and x0, x0, #-16
+    mov sp, x0
+    mov x0, x2
+    blr x1
+    mov sp, x29
+    ldp x29, x30, [sp], #16
+    ret
+
+.balign 16
+.global frida_winnt_fault_vector
+frida_winnt_fault_vector:
+    str x16, [sp, #-8]
+    str x17, [sp, #-16]
+    ldr x16, frida_winnt_fault_vector_control
+    ldr x16, [x16, #0]
+    ldr x17, [sp, #-16]
+    br x16
+
+.global frida_winnt_fault_vector_chain
+frida_winnt_fault_vector_chain:
+    ldr x16, [sp, #-8]
+    ldr x17, [sp, #-16]
+    nop
+
+.balign 8
+.global frida_winnt_fault_vector_control
+frida_winnt_fault_vector_control:
+    .quad 0
+.global frida_winnt_fault_vector_end
+frida_winnt_fault_vector_end:
+
+.set FRAME_BYTES, 288
+
+.global frida_winnt_fault_thunk
+frida_winnt_fault_thunk:
+    sub sp, sp, #FRAME_BYTES
+    stp x0, x1, [sp, #0x0]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x8, x9, [sp, #0x40]
+    stp x10, x11, [sp, #0x50]
+    stp x12, x13, [sp, #0x60]
+    stp x14, x15, [sp, #0x70]
+    stp x18, x19, [sp, #0x90]
+    stp x20, x21, [sp, #0xa0]
+    stp x22, x23, [sp, #0xb0]
+    stp x24, x25, [sp, #0xc0]
+    stp x26, x27, [sp, #0xd0]
+    stp x28, x29, [sp, #0xe0]
+    str x30, [sp, #0xf0]
+    ldr x0, [sp, #0x118]
+    ldr x1, [sp, #0x110]
+    stp x0, x1, [sp, #0x80]
+
+    mov x0, sp
+    bl frida_winnt_on_fault
+    cbnz x0, 1f
+
+    mov x16, sp
+    ldr x17, [x16, #0xf8]
+    mov sp, x17
+    ldp x0, x1, [x16, #0x0]
+    ldp x2, x3, [x16, #0x10]
+    ldp x4, x5, [x16, #0x20]
+    ldp x6, x7, [x16, #0x30]
+    ldp x8, x9, [x16, #0x40]
+    ldp x10, x11, [x16, #0x50]
+    ldp x12, x13, [x16, #0x60]
+    ldp x14, x15, [x16, #0x70]
+    ldp x18, x19, [x16, #0x90]
+    ldp x20, x21, [x16, #0xa0]
+    ldp x22, x23, [x16, #0xb0]
+    ldp x24, x25, [x16, #0xc0]
+    ldp x26, x27, [x16, #0xd0]
+    ldp x28, x29, [x16, #0xe0]
+    ldr x30, [x16, #0xf0]
+    ldr x17, [x16, #0x88]
+    ldr x16, [x16, #0x80]
+    eret
+
+1:
+    mov x17, sp
+    str x0, [x17, #0x100]
+    ldr x30, [x17, #0xf0]
+    ldr x16, [x17, #0x80]
+    str x16, [x17, #0x118]
+    ldr x16, [x17, #0x88]
+    str x16, [x17, #0x110]
+    ldp x0, x1, [x17, #0x0]
+    ldp x2, x3, [x17, #0x10]
+    ldp x4, x5, [x17, #0x20]
+    ldp x6, x7, [x17, #0x30]
+    ldp x8, x9, [x17, #0x40]
+    ldp x10, x11, [x17, #0x50]
+    ldp x12, x13, [x17, #0x60]
+    ldp x14, x15, [x17, #0x70]
+    ldp x18, x19, [x17, #0x90]
+    ldp x20, x21, [x17, #0xa0]
+    ldp x22, x23, [x17, #0xb0]
+    ldp x24, x25, [x17, #0xc0]
+    ldp x26, x27, [x17, #0xd0]
+    ldp x28, x29, [x17, #0xe0]
+    ldr x16, [x17, #0x100]
+    add sp, x17, #FRAME_BYTES
+    br x16
+"#
+);
+
 #[cfg(target_arch = "x86")]
 macro_rules! kernel_abi {
     ($($declaration:tt)*) => {
@@ -3217,6 +3728,20 @@ macro_rules! kernel_abi {
         type ServiceRoutine = unsafe extern "win64" fn(*mut c_void, *mut c_void) -> u8;
         type DeferredRoutine =
             unsafe extern "win64" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
+    };
+}
+
+#[cfg(target_arch = "aarch64")]
+macro_rules! kernel_abi {
+    ($($declaration:tt)*) => {
+        unsafe extern "C" {
+            $($declaration)*
+        }
+
+        type ThreadStartRoutine = unsafe extern "C" fn(*mut c_void);
+        type ServiceRoutine = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u8;
+        type DeferredRoutine =
+            unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
     };
 }
 
@@ -3338,4 +3863,16 @@ unsafe extern "C" {
 #[cfg(target_arch = "x86_64")]
 unsafe extern "C" {
     static _MmMapIoSpace: unsafe extern "win64" fn(i64, usize, u32) -> *mut c_void;
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" {
+    static _MmMapIoSpace: unsafe extern "C" fn(i64, usize, u32) -> *mut c_void;
+    static _DbgPrint: unsafe extern "C" fn(*const u8, *const u8) -> u32;
+    static _MmGetVirtualForPhysical: unsafe extern "C" fn(i64) -> *mut c_void;
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn virtual_for_physical(phys_addr: u64) -> *mut u8 {
+    unsafe { (_MmGetVirtualForPhysical)(phys_addr as i64) as *mut u8 }
 }

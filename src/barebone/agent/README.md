@@ -48,7 +48,7 @@ since none follows from the host you build on:
 - `xnu` — a freestanding ELF executable that the Barebone backend
   injects into a running kernel from the outside, over a remote stub.
 - `win9x` — the same, for a 32-bit Windows 9x guest.
-- `winnt` — the same, for a Windows NT guest, either word size.
+- `winnt` — the same, for a Windows NT guest, either word size, on x86 or arm64.
 - `linux` — a static library that becomes a kernel module, loaded from the
   inside. See `linux/README.md`.
 
@@ -62,6 +62,7 @@ and NT's 64-bit half is called in the Microsoft ABI.
 | `win9x` | `none-x86-softfloat_pic`          | `i686-unknown-none-pic.json`     |
 | `winnt` | `none-x86-softfloat_pic`          | `i686-unknown-none-pic.json`     |
 | `winnt` | `none-x86_64-softfloat_pic_msabi` | `x86_64-unknown-none-pic.json`   |
+| `winnt` | `none-arm64-softfloat_pic`        | `aarch64-unknown-none-pic.json`  |
 | `linux` | `none-<arch>-softfloat_nopic`     | see `linux/README.md`            |
 
 Everything above the `kernel` module is shared; each backend supplies the same
