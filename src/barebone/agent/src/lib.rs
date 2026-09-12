@@ -2483,12 +2483,25 @@ pub struct KernelAllocator;
 
 unsafe impl GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        kernel::alloc(layout.size())
+        let mut memory: *mut c_void = ptr::null_mut();
+        let alignment = layout.align().max(SMALLEST_ALIGNMENT);
+        if unsafe { posix_memalign(&mut memory, alignment, layout.size()) } != 0 {
+            return ptr::null_mut();
+        }
+
+        memory as *mut u8
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        kernel::free(ptr, layout.size());
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+        unsafe { free(ptr as *mut c_void) };
     }
+}
+
+const SMALLEST_ALIGNMENT: usize = 2 * core::mem::size_of::<*const u8>();
+
+unsafe extern "C" {
+    fn posix_memalign(memory: *mut *mut c_void, alignment: usize, size: usize) -> i32;
+    fn free(memory: *mut c_void);
 }
 
 #[global_allocator]
