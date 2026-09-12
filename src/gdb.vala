@@ -755,10 +755,17 @@ namespace Frida.GDB {
 				var response = yield query_simple ("qXfer:features:read:%s:%x,1ffff".printf (name, offset), cancellable);
 
 				string payload = response.payload;
-				if (payload.length == 0)
-					throw new Error.NOT_SUPPORTED ("Feature query not supported by the remote stub");
-				if (payload[0] == 'E')
+				if (payload.length == 0 || payload[0] == 'E') {
+					// Some stubs advertise a target.xml that includes standard register documents
+					// but decline to serve those documents (the Android emulator's does). Fall back
+					// to a built-in copy so the register layout is still known.
+					unowned string? builtin = builtin_feature_document (name);
+					if (builtin != null)
+						return FeatureDocument.from_xml (builtin, next_regnum);
+					if (payload.length == 0)
+						throw new Error.NOT_SUPPORTED ("Feature query not supported by the remote stub");
 					throw new Error.INVALID_ARGUMENT ("Feature document '%s' not found", name);
+				}
 
 				status = payload[0];
 
@@ -769,6 +776,92 @@ namespace Frida.GDB {
 
 			return FeatureDocument.from_xml (xml.str, next_regnum);
 		}
+
+		private static unowned string? builtin_feature_document (string name) {
+			switch (name) {
+				case "aarch64-core.xml":	return AARCH64_CORE_FEATURE;
+				case "aarch64-fpu.xml":		return AARCH64_FPU_FEATURE;
+				default:			return null;
+			}
+		}
+
+		private const string AARCH64_CORE_FEATURE = """<?xml version="1.0"?>
+<!DOCTYPE feature SYSTEM "gdb-target.dtd">
+<feature name="org.gnu.gdb.aarch64.core">
+  <reg name="x0" bitsize="64"/>
+  <reg name="x1" bitsize="64"/>
+  <reg name="x2" bitsize="64"/>
+  <reg name="x3" bitsize="64"/>
+  <reg name="x4" bitsize="64"/>
+  <reg name="x5" bitsize="64"/>
+  <reg name="x6" bitsize="64"/>
+  <reg name="x7" bitsize="64"/>
+  <reg name="x8" bitsize="64"/>
+  <reg name="x9" bitsize="64"/>
+  <reg name="x10" bitsize="64"/>
+  <reg name="x11" bitsize="64"/>
+  <reg name="x12" bitsize="64"/>
+  <reg name="x13" bitsize="64"/>
+  <reg name="x14" bitsize="64"/>
+  <reg name="x15" bitsize="64"/>
+  <reg name="x16" bitsize="64"/>
+  <reg name="x17" bitsize="64"/>
+  <reg name="x18" bitsize="64"/>
+  <reg name="x19" bitsize="64"/>
+  <reg name="x20" bitsize="64"/>
+  <reg name="x21" bitsize="64"/>
+  <reg name="x22" bitsize="64"/>
+  <reg name="x23" bitsize="64"/>
+  <reg name="x24" bitsize="64"/>
+  <reg name="x25" bitsize="64"/>
+  <reg name="x26" bitsize="64"/>
+  <reg name="x27" bitsize="64"/>
+  <reg name="x28" bitsize="64"/>
+  <reg name="x29" bitsize="64"/>
+  <reg name="x30" bitsize="64"/>
+  <reg name="sp" bitsize="64" type="data_ptr"/>
+  <reg name="pc" bitsize="64" type="code_ptr"/>
+  <reg name="cpsr" bitsize="32"/>
+</feature>""";
+
+		private const string AARCH64_FPU_FEATURE = """<?xml version="1.0"?>
+<!DOCTYPE feature SYSTEM "gdb-target.dtd">
+<feature name="org.gnu.gdb.aarch64.fpu">
+  <reg name="v0" bitsize="128" type="uint128"/>
+  <reg name="v1" bitsize="128" type="uint128"/>
+  <reg name="v2" bitsize="128" type="uint128"/>
+  <reg name="v3" bitsize="128" type="uint128"/>
+  <reg name="v4" bitsize="128" type="uint128"/>
+  <reg name="v5" bitsize="128" type="uint128"/>
+  <reg name="v6" bitsize="128" type="uint128"/>
+  <reg name="v7" bitsize="128" type="uint128"/>
+  <reg name="v8" bitsize="128" type="uint128"/>
+  <reg name="v9" bitsize="128" type="uint128"/>
+  <reg name="v10" bitsize="128" type="uint128"/>
+  <reg name="v11" bitsize="128" type="uint128"/>
+  <reg name="v12" bitsize="128" type="uint128"/>
+  <reg name="v13" bitsize="128" type="uint128"/>
+  <reg name="v14" bitsize="128" type="uint128"/>
+  <reg name="v15" bitsize="128" type="uint128"/>
+  <reg name="v16" bitsize="128" type="uint128"/>
+  <reg name="v17" bitsize="128" type="uint128"/>
+  <reg name="v18" bitsize="128" type="uint128"/>
+  <reg name="v19" bitsize="128" type="uint128"/>
+  <reg name="v20" bitsize="128" type="uint128"/>
+  <reg name="v21" bitsize="128" type="uint128"/>
+  <reg name="v22" bitsize="128" type="uint128"/>
+  <reg name="v23" bitsize="128" type="uint128"/>
+  <reg name="v24" bitsize="128" type="uint128"/>
+  <reg name="v25" bitsize="128" type="uint128"/>
+  <reg name="v26" bitsize="128" type="uint128"/>
+  <reg name="v27" bitsize="128" type="uint128"/>
+  <reg name="v28" bitsize="128" type="uint128"/>
+  <reg name="v29" bitsize="128" type="uint128"/>
+  <reg name="v30" bitsize="128" type="uint128"/>
+  <reg name="v31" bitsize="128" type="uint128"/>
+  <reg name="fpsr" bitsize="32"/>
+  <reg name="fpcr" bitsize="32"/>
+</feature>""";
 
 		private static uint infer_pointer_size_from_arch (TargetArch arch) {
 			switch (arch) {
