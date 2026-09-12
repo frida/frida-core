@@ -206,10 +206,11 @@ namespace Frida.Barebone {
 		}
 
 		// A kernel allocator gives blocks with an alignment of less than a page, and the caller can
-		// change the protection. Thus allocate more, give out full pages, and keep the start of the
-		// block for the release.
+		// change the protection and write whole pages. Thus allocate enough for every page the
+		// result spans, give out full pages, and keep the start of the block for the release.
 		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
-			size_t padded_size = size + alignment - 1;
+			size_t aligned_size = (size + alignment - 1) & ~(alignment - 1);
+			size_t padded_size = aligned_size + alignment - 1;
 
 			uint64 block = yield machine.invoke (alloc_function,
 				resolve_arguments (alloc_arguments, padded_size, 0), cancellable);
