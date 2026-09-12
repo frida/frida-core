@@ -252,7 +252,7 @@ fn configure_port(port: *mut c_void) {
     control_port(port, SET_BAUD_RATE, baud_rate.as_ptr() as *const u8,
         core::mem::size_of_val(&baud_rate) as u32);
 
-    let line_control = [DATA_BITS, NO_PARITY, ONE_STOP_BIT];
+    let line_control = [ONE_STOP_BIT, NO_PARITY, DATA_BITS];
     control_port(port, SET_LINE_CONTROL, line_control.as_ptr(),
         core::mem::size_of_val(&line_control) as u32);
 
