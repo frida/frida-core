@@ -234,6 +234,7 @@ namespace Frida.Barebone {
 
 		private Machine machine;
 		private uint64 yield_point;
+		private SymbolInfo? bug_check;
 
 		public WinNtKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Error {
 			this.machine = machine;
@@ -244,9 +245,18 @@ namespace Frida.Barebone {
 			if (wait_for_single_object == null)
 				throw new Error.NOT_SUPPORTED ("Missing symbol for NtWaitForSingleObject");
 			yield_point = wait_for_single_object.offset;
+
+			bug_check = symbols["KeBugCheckEx"];
 		}
 
 		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+			var arm64 = machine as Arm64Machine;
+			if (bug_check != null && arm64 != null)
+				arm64.call_landing_zone = bug_check.offset;
+			var arm = machine as ArmMachine;
+			if (bug_check != null && arm != null)
+				arm.call_landing_zone = bug_check.offset;
+
 			yield run_until_yield_point (cancellable);
 		}
 
@@ -256,25 +266,19 @@ namespace Frida.Barebone {
 
 		private async void run_until_yield_point (Cancellable? cancellable) throws Error, IOError {
 			GDB.Client gdb = machine.gdb;
-			var bp = yield gdb.add_breakpoint (SOFT, yield_point, 1, cancellable);
+			var bp = yield gdb.add_breakpoint (SOFT, yield_point, breakpoint_size_for (gdb), cancellable);
 
 			while (true) {
 				var exception = yield gdb.continue_until_exception (cancellable);
-				if (exception.breakpoint == bp && yield stopped_in_ring_zero (gdb, cancellable))
+				if (exception.breakpoint == bp && yield stopped_in_kernel_mode (gdb, cancellable))
 					break;
 			}
 
 			yield bp.remove (cancellable);
 		}
 
-		private async bool stopped_in_ring_zero (GDB.Client gdb, Cancellable? cancellable)
-				throws Error, IOError {
-			uint64 cs = yield gdb.exception.thread.read_register ("cs", cancellable);
-
-			return (cs & RING_MASK) == 0;
+		private static size_t breakpoint_size_for (GDB.Client gdb) {
+			return (gdb.arch == GDB.TargetArch.ARM64) ? 4 : 1;
 		}
-
-		private const uint64 RING_MASK = 3;
-
 	}
 }
