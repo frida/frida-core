@@ -611,9 +611,12 @@ pub fn install_fault_reporter() {
         }
         ORIGINAL_ENTRY = (entry as *const u32).read();
 
+        let (base, size) = crate::own_code();
         FAULT_CONTROL = FaultControl {
             thunk: frida_winnt_fault_thunk as usize as u64,
             chain: (entry + TEMPLATE_OFFSET + chain_offset()) as u64,
+            base: base as u64,
+            size: size as u64,
         };
 
         write_entry(entry, |copy| {
@@ -729,6 +732,8 @@ fn control_offset() -> usize {
 struct FaultControl {
     thunk: u64,
     chain: u64,
+    base: u64,
+    size: u64,
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -749,7 +754,8 @@ const FAULT_STACK_BYTES: usize = 16384;
 const FAULT_STACK_SLOTS: usize = 16;
 
 #[cfg(target_arch = "aarch64")]
-static mut FAULT_CONTROL: FaultControl = FaultControl { thunk: 0, chain: 0 };
+static mut FAULT_CONTROL: FaultControl =
+    FaultControl { thunk: 0, chain: 0, base: 0, size: 0 };
 #[cfg(target_arch = "aarch64")]
 static mut ORIGINAL_ENTRY: u32 = 0;
 
@@ -3645,6 +3651,14 @@ frida_winnt_fault_vector:
     msr spsel, #0
     str x16, [sp, #-8]
     str x17, [sp, #-16]
+    ldr x16, frida_winnt_fault_vector_control
+    ldr x17, [x16, #16]
+    mrs x16, elr_el1
+    sub x16, x16, x17
+    ldr x17, frida_winnt_fault_vector_control
+    ldr x17, [x17, #24]
+    cmp x16, x17
+    b.hs frida_winnt_fault_vector_chain
     ldr x16, frida_winnt_fault_vector_control
     ldr x16, [x16, #0]
     ldr x17, [sp, #-16]
