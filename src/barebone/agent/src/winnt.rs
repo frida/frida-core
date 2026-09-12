@@ -3260,6 +3260,8 @@ fn on_kernel_stack(work: &mut dyn FnMut()) {
         return;
     }
 
+    take_the_handover();
+
     unsafe {
         if READER_RUNNING == 0 {
             READER_RUNNING = 1;
@@ -3274,7 +3276,24 @@ fn on_kernel_stack(work: &mut dyn FnMut()) {
                 &mut || core::ptr::addr_of!(WORK).read().is_none());
         }
     }
+
+    release_the_handover();
 }
+
+fn take_the_handover() {
+    while HANDOVER_LOCK
+        .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        yield_now();
+    }
+}
+
+fn release_the_handover() {
+    HANDOVER_LOCK.store(0, Ordering::Release);
+}
+
+static HANDOVER_LOCK: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 const HANDOVER_SLICE_US: u64 = 1000;
 
