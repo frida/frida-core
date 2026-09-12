@@ -13,9 +13,9 @@ namespace Frida.Barebone {
 			var tokens = find_tokens (raw);
 
 			uint num_syms;
-			uint offsets_pos;
+			uint table_pos;
 			uint64 relative_base;
-			find_offsets (raw, out offsets_pos, out num_syms, out relative_base);
+			bool absolute = find_addresses (raw, out table_pos, out num_syms, out relative_base);
 
 			uint names_pos = find_names (raw, tokens);
 
@@ -26,8 +26,9 @@ namespace Frida.Barebone {
 				p = decode_symbol (raw, p, tokens, out name);
 				if (name.length < 2)
 					continue;
-				int32 offset = read_i32 (raw, offsets_pos + i * 4);
-				uint64 address = relative_base + (int64) offset;
+				uint64 address = absolute
+					? read_u64 (raw, table_pos + i * 8)
+					: relative_base + (int64) read_i32 (raw, table_pos + i * 4);
 				symbols.add (new SymbolInfo () {
 					name = name.substring (1),
 					offset = address,
@@ -129,27 +130,62 @@ namespace Frida.Barebone {
 		}
 
 		/**
-		 * kallsyms_offsets is one signed 32-bit entry per symbol, sorted by address, so it is
-		 * the longest run of non-decreasing int32 in kernel-offset range. kallsyms_relative_base
-		 * -- the address offset 0 is measured from -- is the aligned kernel pointer right after it.
+		 * The address of each symbol is stored one of two ways. A modern kernel keeps a signed
+		 * 32-bit offset per symbol (kallsyms_offsets) and a base to add them to
+		 * (kallsyms_relative_base); an older one keeps the absolute 64-bit address per symbol
+		 * (kallsyms_addresses). Both are sorted by address, so each is the longest ascending run
+		 * of its word size. The relative form is tried first and confirmed by the kernel pointer
+		 * that follows it; failing that, the absolute form is located. Returns whether the table
+		 * is absolute.
 		 */
-		private static void find_offsets (uint8[] raw, out uint offsets_pos, out uint num_syms,
+		private static bool find_addresses (uint8[] raw, out uint table_pos, out uint num_syms,
 				out uint64 relative_base) throws Error {
-			uint words = raw.length / 4;
+			relative_base = 0;
+
+			uint offsets_words;
+			uint offsets_pos = longest_ascending_run (raw, 4, 0, 0x8000000, out offsets_words);
+			if (offsets_words >= 1024) {
+				uint64 candidate = read_u64 (raw, offsets_pos + offsets_words * 4);
+				if (looks_like_kernel_base (candidate)) {
+					table_pos = offsets_pos;
+					num_syms = offsets_words;
+					relative_base = candidate;
+					return false;
+				}
+			}
+
+			uint address_words;
+			uint address_pos = longest_ascending_run (raw, 8, KERNEL_VA_MIN, uint64.MAX, out address_words);
+			if (address_words >= 1024) {
+				table_pos = address_pos;
+				num_syms = address_words;
+				return true;
+			}
+
+			throw new Error.NOT_SUPPORTED ("Unable to locate kallsyms address table in kernel image");
+		}
+
+		/**
+		 * The byte offset of the longest run of non-decreasing little-endian words (4 or 8 bytes)
+		 * whose values lie in [low, high), and its length in words.
+		 */
+		private static uint longest_ascending_run (uint8[] raw, uint word_size, uint64 low, uint64 high,
+				out uint length) {
+			uint words = raw.length / word_size;
 			uint best_pos = 0;
 			uint best_len = 0;
 			uint i = 0;
 			while (i < words) {
-				int32 v = read_i32 (raw, i * 4);
-				if (v < 0 || v >= 0x8000000) {
+				uint64 v = read_word (raw, i * word_size, word_size);
+				if (v < low || v >= high) {
 					i++;
 					continue;
 				}
 				uint j = i + 1;
-				int32 prev = v;
+				uint64 prev = v;
 				while (j < words) {
-					int32 w = read_i32 (raw, j * 4);
-					if (w < 0 || w >= 0x8000000 || w < prev)
+					uint64 w = read_word (raw, j * word_size, word_size);
+					if (w < low || w >= high || w < prev)
 						break;
 					prev = w;
 					j++;
@@ -160,17 +196,19 @@ namespace Frida.Barebone {
 				}
 				i = j;
 			}
-			if (best_len < 1024)
-				throw new Error.NOT_SUPPORTED ("Unable to locate kallsyms offsets in kernel image");
-
-			offsets_pos = best_pos * 4;
-			num_syms = best_len;
-
-			uint64 candidate = read_u64 (raw, offsets_pos + num_syms * 4);
-			if ((candidate & 0xffffff0000000000) == 0)
-				throw new Error.NOT_SUPPORTED ("Unable to locate kallsyms relative base in kernel image");
-			relative_base = candidate;
+			length = best_len;
+			return best_pos * word_size;
 		}
+
+		private static uint64 read_word (uint8[] raw, uint pos, uint word_size) {
+			return (word_size == 8) ? read_u64 (raw, pos) : (uint64) (uint32) read_i32 (raw, pos);
+		}
+
+		private static bool looks_like_kernel_base (uint64 candidate) {
+			return (candidate >> 40) == 0xffffff && (candidate & 0xfff) == 0;
+		}
+
+		private const uint64 KERNEL_VA_MIN = 0xffffff8000000000;
 
 		/**
 		 * kallsyms_names is the run of symbols the offsets index into, each one a length byte
@@ -194,7 +232,7 @@ namespace Frida.Barebone {
 			}
 
 			for (uint start = lo; start <= seed; start++) {
-				if (reaches[start - lo] && leads_with_clean_names (raw, start, tokens))
+				if (reaches[start - lo] && distinct_clean_names (raw, start, tokens, 200))
 					return start;
 			}
 			throw new Error.NOT_SUPPORTED ("Unable to locate kallsyms names in kernel image");
@@ -229,20 +267,6 @@ namespace Frida.Barebone {
 				p = next;
 			}
 			return seen.size >= (count * 9) / 10;
-		}
-
-		private static bool leads_with_clean_names (uint8[] raw, uint pos, string[] tokens) {
-			var seen = new Gee.HashSet<string> ();
-			uint p = pos;
-			for (uint i = 0; i != 20; i++) {
-				string name;
-				uint next = try_decode_symbol (raw, p, tokens, out name);
-				if (next == 0 || name.length < 2 || name.length > 60)
-					return false;
-				seen.add (name);
-				p = next;
-			}
-			return seen.size >= 18;
 		}
 
 		private static uint symbol_size (uint8[] raw, uint pos) {
