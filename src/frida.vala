@@ -2399,6 +2399,18 @@ namespace Frida {
 			default = GDB_REMOTE;
 		}
 
+		/**
+		 * Whether the stub exposes the arm64 MMU system registers (TCR_EL1/TTBR1_EL1). Some
+		 * stubs (the Android emulator's) do not, so set this to false to change page
+		 * protection by calling the kernel's set_memory_* helpers instead of walking the
+		 * page tables from the host.
+		 */
+		public bool mmu_registers_available {
+			get;
+			set;
+			default = true;
+		}
+
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "flavor") {
 				var v = Value (typeof (BareboneStubFlavor));
