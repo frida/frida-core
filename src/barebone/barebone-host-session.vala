@@ -109,10 +109,17 @@ namespace Frida {
 			}
 
 			GDB.Client gdb;
-			if (config.connection.flavor == BareboneStubFlavor.VZ)
-				gdb = yield Barebone.VzStubClient.open (stream, cancellable);
-			else
-				gdb = yield GDB.Client.open (stream, cancellable);
+			switch (config.connection.flavor) {
+				case BareboneStubFlavor.VZ:
+					gdb = yield Barebone.VzStubClient.open (stream, cancellable);
+					break;
+				case BareboneStubFlavor.PARALLELS:
+					gdb = yield Barebone.ParallelsStubClient.open (stream, cancellable);
+					break;
+				default:
+					gdb = yield GDB.Client.open (stream, cancellable);
+					break;
+			}
 
 			try {
 				host_session = yield establish (config, gdb, cancellable);

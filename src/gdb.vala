@@ -637,6 +637,9 @@ namespace Frida.GDB {
 				throws Error, IOError {
 			check_stopped ();
 
+			if (kind == SOFT && "protected-code" in supported_features)
+				kind = HARD;
+
 			var breakpoint = new Breakpoint (kind, address, size, this);
 			yield breakpoint.enable (cancellable);
 			breakpoints[address] = breakpoint;
