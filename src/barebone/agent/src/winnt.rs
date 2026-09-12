@@ -3270,10 +3270,13 @@ fn on_kernel_stack(work: &mut dyn FnMut()) {
         wake(request_token());
 
         while core::ptr::addr_of!(WORK).read().is_some() {
-            wait(done_token(), None, &mut || core::ptr::addr_of!(WORK).read().is_none());
+            wait(done_token(), Some(HANDOVER_SLICE_US),
+                &mut || core::ptr::addr_of!(WORK).read().is_none());
         }
     }
 }
+
+const HANDOVER_SLICE_US: u64 = 1000;
 
 fn spawn_reader() {
     let mut handle: *mut c_void = core::ptr::null_mut();
