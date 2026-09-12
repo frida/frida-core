@@ -994,6 +994,13 @@ pub(crate) unsafe fn set_own_range(base: u64, size: u64) {
     }
 }
 
+#[cfg(feature = "winnt")]
+pub(crate) fn own_code() -> (usize, usize) {
+    let start = entrypoint_blob::_start as usize;
+
+    (start, (&raw const _agent_private_start as usize) - start)
+}
+
 pub(crate) fn own_range() -> (usize, usize) {
     let range = unsafe { ptr::addr_of!(OWN_RANGE).read() };
 

@@ -964,7 +964,7 @@ extern "C" fn frida_winnt_on_fault(frame: *mut u64) -> usize {
         lr: unsafe { frame.add(30).read() },
     };
 
-    if !handle(read_exception_register!("esr_el1") as u32, pc, &mut cpu_context) {
+    if !ours(pc as usize) || !handle(read_exception_register!("esr_el1") as u32, pc, &mut cpu_context) {
         return unsafe { FAULT_CONTROL.chain as usize };
     }
 
@@ -979,6 +979,15 @@ extern "C" fn frida_winnt_on_fault(frame: *mut u64) -> usize {
     }
 
     0
+}
+
+#[cfg(target_arch = "aarch64")]
+fn ours(pc: usize) -> bool {
+    let (base, size) = crate::own_code();
+    if pc >= base && pc - base < size {
+        return true;
+    }
+    crate::gum::is_agent_slab_if_idle(pc as u64).unwrap_or(false)
 }
 
 #[cfg(target_arch = "aarch64")]
