@@ -722,6 +722,23 @@ struct FaultControl {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[unsafe(no_mangle)]
+static mut frida_winnt_fault_stacks: FaultStacks = FaultStacks {
+    memory: [[0; FAULT_STACK_BYTES]; FAULT_STACK_SLOTS],
+};
+
+#[cfg(target_arch = "aarch64")]
+#[repr(C, align(16))]
+struct FaultStacks {
+    memory: [[u8; FAULT_STACK_BYTES]; FAULT_STACK_SLOTS],
+}
+
+#[cfg(target_arch = "aarch64")]
+const FAULT_STACK_BYTES: usize = 16384;
+#[cfg(target_arch = "aarch64")]
+const FAULT_STACK_SLOTS: usize = 16;
+
+#[cfg(target_arch = "aarch64")]
 static mut FAULT_CONTROL: FaultControl = FaultControl { thunk: 0, chain: 0 };
 #[cfg(target_arch = "aarch64")]
 static mut ORIGINAL_ENTRY: u32 = 0;
@@ -3636,6 +3653,8 @@ frida_winnt_fault_vector_control:
 frida_winnt_fault_vector_end:
 
 .set FRAME_BYTES, 288
+.set FAULT_STACK_BYTES, 16384
+.set FAULT_STACK_INDEX_MASK, 15
 
 .global frida_winnt_fault_thunk
 frida_winnt_fault_thunk:
@@ -3659,8 +3678,19 @@ frida_winnt_fault_thunk:
     ldr x1, [sp, #0x110]
     stp x0, x1, [sp, #0x80]
 
-    mov x0, sp
+    mov x19, sp
+    mrs x20, mpidr_el1
+    and x20, x20, #FAULT_STACK_INDEX_MASK
+    add x20, x20, #1
+    adrp x21, frida_winnt_fault_stacks
+    add x21, x21, :lo12:frida_winnt_fault_stacks
+    mov x22, #FAULT_STACK_BYTES
+    madd x23, x20, x22, x21
+    mov sp, x23
+
+    mov x0, x19
     bl frida_winnt_on_fault
+    mov sp, x19
     cbnz x0, 1f
 
     mov x16, sp
