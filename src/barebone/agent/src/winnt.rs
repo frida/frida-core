@@ -613,7 +613,7 @@ pub fn install_fault_reporter() {
 
         FAULT_CONTROL = FaultControl {
             thunk: frida_winnt_fault_thunk as usize as u64,
-            chain: (entry + chain_offset()) as u64,
+            chain: (entry + TEMPLATE_OFFSET + chain_offset()) as u64,
         };
 
         write_entry(entry, |copy| {
@@ -655,9 +655,14 @@ fn synchronous_entry() -> usize {
 unsafe fn write_entry(entry: usize, patch: impl FnOnce(*mut u8)) {
     unsafe {
         edit_entry(entry, |at| {
-            core::ptr::copy_nonoverlapping(&raw const frida_winnt_fault_vector as *const u8, at,
+            let body = at.byte_add(TEMPLATE_OFFSET);
+            core::ptr::copy_nonoverlapping(&raw const frida_winnt_fault_vector as *const u8, body,
                 template_size());
-            patch(at);
+            patch(body);
+
+            publish(at as usize);
+
+            at.cast::<u32>().write(BRANCH | (TEMPLATE_OFFSET / INSTRUCTION_SIZE) as u32);
         });
     }
 }
@@ -670,6 +675,13 @@ unsafe fn edit_entry(entry: usize, write: impl FnOnce(*mut u8)) {
 
     write(entry as *mut u8);
 
+    publish(entry);
+
+    crate::winnt_paging::protect(entry as u64, ENTRY_SIZE, restore);
+}
+
+#[cfg(target_arch = "aarch64")]
+fn publish(entry: usize) {
     unsafe {
         for offset in (0..ENTRY_SIZE).step_by(CACHE_LINE_SIZE) {
             let at = entry + offset;
@@ -682,15 +694,13 @@ unsafe fn edit_entry(entry: usize, write: impl FnOnce(*mut u8)) {
         }
         core::arch::asm!("dsb ish", "isb", options(nostack, preserves_flags));
     }
-
-    crate::winnt_paging::protect(entry as u64, ENTRY_SIZE, restore);
 }
 
 #[cfg(target_arch = "aarch64")]
 fn onward_branch(entry: usize, original: u32) -> u32 {
     let reach = ((original & BRANCH_OFFSET_MASK) << BRANCH_SPARE_BITS) as i32 >> BRANCH_SPARE_BITS;
     let target = entry.wrapping_add((reach as isize * INSTRUCTION_SIZE as isize) as usize);
-    let from = entry + chain_offset() + ONWARD_BRANCH_OFFSET;
+    let from = entry + TEMPLATE_OFFSET + chain_offset() + ONWARD_BRANCH_OFFSET;
 
     BRANCH
         | ((target.wrapping_sub(from) / INSTRUCTION_SIZE) as u32 & BRANCH_OFFSET_MASK)
@@ -760,6 +770,8 @@ const ENTRY_SIZE: usize = 0x80;
 const CACHE_LINE_SIZE: usize = 64;
 #[cfg(target_arch = "aarch64")]
 const ONWARD_BRANCH_OFFSET: usize = 12;
+#[cfg(target_arch = "aarch64")]
+const TEMPLATE_OFFSET: usize = 8;
 #[cfg(target_arch = "aarch64")]
 const BRANCH: u32 = 0x1400_0000;
 
