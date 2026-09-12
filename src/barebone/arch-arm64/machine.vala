@@ -47,7 +47,6 @@ namespace Frida.Barebone {
 
 		private const uint NUM_ARGS_IN_REGS = 8;
 
-		private const string PARALLELS_REGISTER_COMMAND = "printcpu 0 cr oth";
 		private const uint64 INT2_MASK = 0x3ULL;
 		private const uint64 INT6_MASK = 0x3fULL;
 		private const uint64 INT48_MASK = 0xffffffffffffULL;
@@ -64,6 +63,9 @@ namespace Frida.Barebone {
 		}
 
 		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
+			if ("parallels" in gdb.features)
+				return SMALLEST_GRANULE;
+
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
 			return p.granule;
@@ -96,7 +98,7 @@ namespace Frida.Barebone {
 		private async Gee.List<RangeDetails> collect_ranges_using_mmu (Cancellable? cancellable) throws Error, IOError {
 			var result = new Gee.ArrayList<RangeDetails> ();
 
-			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			MMUParameters p = yield load_mmu_parameters (cancellable);
 
 			bool was_running = yield enter_physical_addressing (gdb, cancellable);
 			GLib.Error? failure = null;
@@ -290,7 +292,7 @@ namespace Frida.Barebone {
 			if (physical_memory == null)
 				return yield gdb.read_byte_array (va, size, cancellable);
 
-			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			MMUParameters p = yield load_mmu_parameters (cancellable);
 			var taken = new ByteArray ();
 			size_t offset = 0;
 			while (offset < size) {
@@ -312,7 +314,7 @@ namespace Frida.Barebone {
 				return;
 			}
 
-			MMUParameters p = yield MMUParameters.load (gdb, cancellable);
+			MMUParameters p = yield load_mmu_parameters (cancellable);
 			size_t offset = 0;
 			while (offset < data.length) {
 				uint64 cur_va = va + offset;
@@ -1236,21 +1238,10 @@ namespace Frida.Barebone {
 							regs.sprr_perm = val;
 					}
 				} else if ("parallels" in client.features) {
-					string system_regs = yield client.run_remote_command (PARALLELS_REGISTER_COMMAND,
-						cancellable);
-					foreach (string line in system_regs.split ("\n")) {
-						string[] tokens = line.strip ().split (" ", 2);
-						if (tokens.length != 2)
-							continue;
-						string name = tokens[0].down ();
-						string val = tokens[1].strip ();
-						if (!val.has_prefix ("0x"))
-							continue;
-						if (name == "tcr_el1")
-							regs.tcr = uint64.parse (val, 16);
-						else if (name == "ttbr1_el1")
-							regs.ttbr1 = uint64.parse (val, 16);
-					}
+					// The stub serves no system register, and the monitor command that would
+					// print them aborts the VM whenever another processor is somewhere it
+					// cannot be read from, so leave the caller to manage without them.
+					throw new Error.NOT_SUPPORTED ("Parallels serves no system register");
 				} else {
 					regs.tcr = yield thread.read_register ("tcr_el1", cancellable);
 					regs.ttbr1 = yield thread.read_register ("ttbr1_el1", cancellable);
@@ -1708,6 +1699,7 @@ namespace Frida.Barebone {
 #endif
 
 		private const size_t RED_ZONE_SIZE = 128;
+		private const size_t SMALLEST_GRANULE = 4096;
 		private const string PLATFORM_REGISTER = "x18";
 	}
 }
