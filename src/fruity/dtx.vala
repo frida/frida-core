@@ -362,11 +362,7 @@ namespace Frida.Fruity {
 				.append_object (new NSString (bundle_id));
 			var response = yield channel.invoke ("processIdentifierForBundleIdentifier:", args, cancellable);
 
-			NSNumber? pid = response as NSNumber;
-			if (pid == null)
-				throw new Error.PROTOCOL ("Malformed response");
-
-			return (uint) pid.integer;
+			return parse_uint_response ("processIdentifierForBundleIdentifier:", response);
 		}
 
 		public async bool is_pid_debuggable (uint pid, Cancellable? cancellable = null) throws Error, IOError {
@@ -374,11 +370,7 @@ namespace Frida.Fruity {
 				.append_object (new NSNumber.from_integer (pid));
 			var response = yield channel.invoke ("isPidDebuggable:", args, cancellable);
 
-			NSNumber? is_debuggable = response as NSNumber;
-			if (is_debuggable == null)
-				throw new Error.PROTOCOL ("Malformed response");
-
-			return is_debuggable.boolean;
+			return parse_bool_response ("isPidDebuggable:", response);
 		}
 
 		public async void start_observing_pid (uint pid, Cancellable? cancellable = null) throws Error, IOError {
@@ -426,11 +418,9 @@ namespace Frida.Fruity {
 				"launchSuspendedProcessWithDevicePath:bundleIdentifier:environment:arguments:options:",
 				dtx_args, cancellable);
 
-			NSNumber? pid = response as NSNumber;
-			if (pid == null)
-				throw new Error.PROTOCOL ("Malformed response");
-
-			return (uint) pid.integer;
+			return parse_uint_response (
+				"launchSuspendedProcessWithDevicePath:bundleIdentifier:environment:arguments:options:",
+				response);
 		}
 
 		public async void kill (uint pid, Cancellable? cancellable = null) throws Error, IOError {
@@ -509,6 +499,256 @@ namespace Frida.Fruity {
 	public enum ExistingInstancePolicy {
 		KEEP,
 		KILL
+	}
+
+	private static uint parse_uint_response (string method_name, NSObject? response) throws Error {
+		uint value;
+		if (try_extract_uint_response (response, out value))
+			return value;
+
+		string error_message;
+		if (try_extract_error_response_details (response, out error_message))
+			throw new Error.NOT_SUPPORTED ("%s failed: %s", method_name, error_message);
+
+		throw new Error.PROTOCOL ("Malformed response to %s; expected numeric reply but got %s",
+			method_name, describe_response (response));
+	}
+
+	private static bool parse_bool_response (string method_name, NSObject? response) throws Error {
+		bool value;
+		if (try_extract_bool_response (response, out value))
+			return value;
+
+		string error_message;
+		if (try_extract_error_response_details (response, out error_message))
+			throw new Error.NOT_SUPPORTED ("%s failed: %s", method_name, error_message);
+
+		throw new Error.PROTOCOL ("Malformed response to %s; expected boolean reply but got %s",
+			method_name, describe_response (response));
+	}
+
+	private static bool try_extract_uint_response (NSObject? response, out uint value) {
+		value = 0;
+
+		var number = response as NSNumber;
+		if (number != null) {
+			value = (uint) number.integer;
+			return true;
+		}
+
+		var str = response as NSString;
+		if (str != null)
+			return try_parse_uint_string (str.str, out value);
+
+		var dict = response as NSDictionary;
+		if (dict != null) {
+			string[] candidate_keys = {
+				"pid",
+				"PID",
+				"processIdentifier",
+				"ProcessIdentifier",
+				"processID",
+				"ProcessID",
+				"result",
+				"Result",
+				"value",
+				"Value",
+			};
+
+			foreach (unowned string key in candidate_keys) {
+				if (try_extract_uint_from_dictionary (dict, key, out value))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static bool try_extract_bool_response (NSObject? response, out bool value) {
+		value = false;
+
+		var number = response as NSNumber;
+		if (number != null) {
+			value = number.boolean;
+			return true;
+		}
+
+		var str = response as NSString;
+		if (str != null)
+			return try_parse_bool_string (str.str, out value);
+
+		var dict = response as NSDictionary;
+		if (dict != null) {
+			string[] candidate_keys = {
+				"isDebuggable",
+				"debuggable",
+				"result",
+				"Result",
+				"value",
+				"Value",
+			};
+
+			foreach (unowned string key in candidate_keys) {
+				if (try_extract_bool_from_dictionary (dict, key, out value))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static bool try_extract_uint_from_dictionary (NSDictionary dict, string key, out uint value) {
+		value = 0;
+
+		try {
+			NSNumber? number;
+			if (dict.get_optional_value<NSNumber> (key, out number)) {
+				value = (uint) number.integer;
+				return true;
+			}
+		} catch (Error e) {
+		}
+
+		try {
+			NSString? str;
+			if (dict.get_optional_value<NSString> (key, out str))
+				return try_parse_uint_string (str.str, out value);
+		} catch (Error e) {
+		}
+
+		return false;
+	}
+
+	private static bool try_extract_bool_from_dictionary (NSDictionary dict, string key, out bool value) {
+		value = false;
+
+		try {
+			NSNumber? number;
+			if (dict.get_optional_value<NSNumber> (key, out number)) {
+				value = number.boolean;
+				return true;
+			}
+		} catch (Error e) {
+		}
+
+		try {
+			NSString? str;
+			if (dict.get_optional_value<NSString> (key, out str))
+				return try_parse_bool_string (str.str, out value);
+		} catch (Error e) {
+		}
+
+		return false;
+	}
+
+	private static bool try_extract_error_response_details (NSObject? response, out string message) {
+		message = "";
+
+		var error = response as NSError;
+		if (error != null) {
+			message = format_nserror (error);
+			return true;
+		}
+
+		var str = response as NSString;
+		if (str != null) {
+			message = str.str;
+			return true;
+		}
+
+		var dict = response as NSDictionary;
+		if (dict != null) {
+			string[] error_object_keys = {
+				"NSError",
+				"error",
+				"Error",
+			};
+			foreach (unowned string key in error_object_keys) {
+				try {
+					NSError? dict_error;
+					if (dict.get_optional_value<NSError> (key, out dict_error)) {
+						message = format_nserror (dict_error);
+						return true;
+					}
+				} catch (Error e) {
+				}
+			}
+
+			string[] error_string_keys = {
+				"NSLocalizedDescription",
+				"message",
+				"error",
+				"Error",
+			};
+			foreach (unowned string key in error_string_keys) {
+				try {
+					NSString? dict_str;
+					if (dict.get_optional_value<NSString> (key, out dict_str)) {
+						message = dict_str.str;
+						return true;
+					}
+				} catch (Error e) {
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private static bool try_parse_uint_string (string raw, out uint value) {
+		string unparsed;
+
+		if (!uint.try_parse (raw.strip (), out value, out unparsed))
+			return false;
+
+		return unparsed.length == 0;
+	}
+
+	private static bool try_parse_bool_string (string raw, out bool value) {
+		switch (raw.strip ().down ()) {
+			case "1":
+			case "true":
+			case "yes":
+				value = true;
+				return true;
+			case "0":
+			case "false":
+			case "no":
+				value = false;
+				return true;
+			default:
+				value = false;
+				return false;
+		}
+	}
+
+	private static string format_nserror (NSError error) {
+		NSString? localized_description = null;
+
+		try {
+			error.user_info.get_optional_value ("NSLocalizedDescription", out localized_description);
+		} catch (Error e) {
+		}
+
+		if (localized_description != null)
+			return localized_description.str;
+
+		return ("domain=%s code=%" + int64.FORMAT_MODIFIER + "d").printf (error.domain.str, error.code);
+	}
+
+	private static string describe_response (NSObject? response) {
+		if (response == null)
+			return "null";
+
+		string type_name = Type.from_instance (response).name ();
+		string summary = response.to_string ()
+			.replace ("\r", " ")
+			.replace ("\n", " ");
+
+		if (summary.length > 200)
+			summary = summary[0:197] + "...";
+
+		return "%s %s".printf (type_name, summary);
 	}
 
 	public sealed class CoreProfileService : Object, AsyncInitable {
@@ -1647,7 +1887,7 @@ namespace Frida.Fruity {
 
 		private State _state = OPEN;
 
-		private Gee.HashMap<uint32, Promise<NSObject?>> pending_responses = new Gee.HashMap<uint32, Promise<NSObject?>> ();
+		private Gee.HashMap<uint32, PendingResponse> pending_responses = new Gee.HashMap<uint32, PendingResponse> ();
 
 		public DTXChannel (int32 code, DTXTransport transport) {
 			Object (code: code, transport: transport);
@@ -1664,8 +1904,8 @@ namespace Frida.Fruity {
 			notify_property ("state");
 
 			var error = new Error.TRANSPORT ("Channel closed");
-			foreach (var request in pending_responses.values.to_array ())
-				request.reject (error);
+			foreach (var pending in pending_responses.values.to_array ())
+				pending.request.reject (error);
 
 			if (transport != null) {
 				transport.remove_channel (this);
@@ -1695,7 +1935,7 @@ namespace Frida.Fruity {
 			transport.send_message (message, out identifier);
 
 			var request = new Promise<NSObject?> ();
-			pending_responses[identifier] = request;
+			pending_responses[identifier] = new PendingResponse (method_name, request);
 
 			try {
 				return yield request.future.wait_async (cancellable);
@@ -1736,8 +1976,10 @@ namespace Frida.Fruity {
 		}
 
 		internal void handle_response (DTXMessage message) throws Error {
-			var request = pending_responses[message.identifier];
-			if (request != null) {
+			var pending = pending_responses[message.identifier];
+			if (pending != null) {
+				var request = pending.request;
+
 				switch (message.type) {
 					case OK:
 						request.resolve (null);
@@ -1746,26 +1988,14 @@ namespace Frida.Fruity {
 						request.resolve (NSKeyedArchive.decode (message.payload_data));
 						break;
 					case ERROR: {
-						NSError? error = NSKeyedArchive.decode (message.payload_data) as NSError;
+						NSObject? payload = NSKeyedArchive.decode (message.payload_data);
+						NSError? error = payload as NSError;
 						if (error == null)
-							throw new Error.PROTOCOL ("Malformed error payload");
+							throw new Error.PROTOCOL ("Malformed error payload for %s; got %s",
+								pending.method_name, describe_response (payload));
 
-						var description = new StringBuilder.sized (128);
-
-						var user_info = error.user_info;
-						if (user_info != null) {
-							NSString? val;
-							if (user_info.get_optional_value ("NSLocalizedDescription", out val))
-								description.append (val.str);
-						}
-
-						if (description.len == 0) {
-							description.append_printf ("Invocation failed; domain=%s code=%" +
-									int64.FORMAT_MODIFIER + "d",
-								error.domain.str, error.code);
-						}
-
-						request.reject (new Error.NOT_SUPPORTED ("%s", description.str));
+						request.reject (new Error.NOT_SUPPORTED ("%s failed: %s",
+							pending.method_name, format_nserror (error)));
 
 						break;
 					}
@@ -1791,6 +2021,22 @@ namespace Frida.Fruity {
 		private void check_open () throws Error {
 			if (_state != OPEN)
 				throw new Error.INVALID_OPERATION ("Channel is closed");
+		}
+
+		private sealed class PendingResponse : Object {
+			public string method_name {
+				get;
+				construct;
+			}
+
+			public Promise<NSObject?> request {
+				get;
+				construct;
+			}
+
+			public PendingResponse (string method_name, Promise<NSObject?> request) {
+				Object (method_name: method_name, request: request);
+			}
 		}
 	}
 
