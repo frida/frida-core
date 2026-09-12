@@ -742,7 +742,7 @@ const ENTRY_SIZE: usize = 0x80;
 #[cfg(target_arch = "aarch64")]
 const CACHE_LINE_SIZE: usize = 64;
 #[cfg(target_arch = "aarch64")]
-const ONWARD_BRANCH_OFFSET: usize = 8;
+const ONWARD_BRANCH_OFFSET: usize = 12;
 #[cfg(target_arch = "aarch64")]
 const BRANCH: u32 = 0x1400_0000;
 
@@ -3604,6 +3604,7 @@ frida_winnt_run_on_stack:
 .balign 16
 .global frida_winnt_fault_vector
 frida_winnt_fault_vector:
+    msr spsel, #0
     str x16, [sp, #-8]
     str x17, [sp, #-16]
     ldr x16, frida_winnt_fault_vector_control
@@ -3615,6 +3616,7 @@ frida_winnt_fault_vector:
 frida_winnt_fault_vector_chain:
     ldr x16, [sp, #-8]
     ldr x17, [sp, #-16]
+    msr spsel, #1
     nop
 
 .balign 8
