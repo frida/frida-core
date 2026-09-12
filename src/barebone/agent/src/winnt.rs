@@ -338,7 +338,7 @@ static EVENTS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_E
 static OWNERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
 static SLEEPERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
 
-const EVENT_SIZE: usize = 0x10;
+const EVENT_SIZE: usize = (2 * core::mem::size_of::<usize>()) + (2 * core::mem::size_of::<u32>());
 const SYNCHRONIZATION_EVENT: u32 = 1;
 const EVENT_ALL_ACCESS: u32 = 0x1f_0003;
 const EXECUTIVE: u32 = 0;
