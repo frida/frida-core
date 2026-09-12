@@ -2282,6 +2282,7 @@ namespace Frida {
 		}
 
 		public void check () throws Error {
+			connection.check ();
 			if (allocator != null)
 				allocator.check ();
 			if (agent != null)
@@ -2404,6 +2405,12 @@ namespace Frida {
 			default = GDB_REMOTE;
 		}
 
+		public void check () throws Error {
+			if ((flavor == VZ || flavor == ANDROID_EMULATOR) && pid == 0)
+				throw new Error.INVALID_ARGUMENT (
+					"Config for 'connection.pid' is required to reach the stub's hosting process");
+		}
+
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "flavor") {
 				var v = Value (typeof (BareboneStubFlavor));
@@ -2418,20 +2425,25 @@ namespace Frida {
 
 		private static BareboneStubFlavor parse_stub_flavor (string? name) {
 			switch (name) {
-				case "vz":	return BareboneStubFlavor.VZ;
-				default:	return BareboneStubFlavor.GDB_REMOTE;
+				case "vz":			return BareboneStubFlavor.VZ;
+				case "android-emulator":	return BareboneStubFlavor.ANDROID_EMULATOR;
+				default:			return BareboneStubFlavor.GDB_REMOTE;
 			}
 		}
 	}
 
 	/**
-	 * Selects which GDB-remote dialect to speak. GDB_REMOTE drives the generic client
-	 * (QEMU, Corellium, debugserver); VZ drives the Apple Virtualization.framework kernel
-	 * stub, whose lldb-flavoured quirks the generic client cannot handle.
+	 * Selects which stub the backend is talking to, and thereby what the connection needs.
+	 * GDB_REMOTE drives the generic client (QEMU, Corellium, debugserver) over host/port. VZ
+	 * drives the Apple Virtualization.framework kernel stub, whose lldb-flavoured quirks the
+	 * generic client cannot handle, and reads guest physical memory from the local process at
+	 * pid. ANDROID_EMULATOR speaks the generic dialect over host/port but its gdbstub is unusable
+	 * until instrumented, so it too requires the local process at pid.
 	 */
 	public enum BareboneStubFlavor {
 		GDB_REMOTE,
-		VZ
+		VZ,
+		ANDROID_EMULATOR
 	}
 
 	public abstract class BareboneAllocatorConfig : Object {

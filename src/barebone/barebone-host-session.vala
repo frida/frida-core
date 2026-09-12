@@ -39,6 +39,7 @@ namespace Frida {
 
 		private static Variant _icon;
 		private BareboneHostSession? host_session;
+		private EmulatorInstrumentation? emulator_instrumentation;
 
 		static construct {
 			_icon = make_provider_icon (Frida.Data.Icons.get_barebone_png_blob ().data);
@@ -48,6 +49,10 @@ namespace Frida {
 			if (host_session != null) {
 				yield host_session.close (cancellable);
 				host_session = null;
+			}
+			if (emulator_instrumentation != null) {
+				yield emulator_instrumentation.tear_down (cancellable);
+				emulator_instrumentation = null;
 			}
 		}
 
@@ -107,6 +112,9 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("The specified GDB remote stub cannot be reached: %s", e.message);
 			}
+
+			if (config.connection.flavor == BareboneStubFlavor.ANDROID_EMULATOR)
+				emulator_instrumentation = yield EmulatorInstrumentation.apply (config, cancellable);
 
 			GDB.Client gdb;
 			if (config.connection.flavor == BareboneStubFlavor.VZ)
