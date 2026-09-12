@@ -227,7 +227,10 @@ namespace Frida {
 					alloc_function = relocation.translate (alloc_function);
 					free_function = relocation.translate (free_function);
 				}
-				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size, tfa,
+				Gum.PageProtection pool_protection = (config.kernel == WINNT || config.kernel == WIN9X)
+					? Gum.PageProtection.READ | Gum.PageProtection.WRITE | Gum.PageProtection.EXECUTE
+					: Gum.PageProtection.READ | Gum.PageProtection.WRITE;
+				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size, pool_protection, tfa,
 					alloc_function, free_function);
 			} else {
 				assert_not_reached ();
