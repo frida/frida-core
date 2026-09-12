@@ -16,6 +16,46 @@ pub struct Hostlink {
 
 struct Inner {
     port: *mut c_void,
+    completion: Completion,
+}
+
+#[derive(Clone, Copy)]
+struct Completion {
+    handle: *mut c_void,
+    object: *mut c_void,
+}
+
+fn make_completion() -> Option<Completion> {
+    let mut handle: *mut c_void = ptr::null_mut();
+    let mut object: *mut c_void = ptr::null_mut();
+    unsafe {
+        if (_ZwCreateEvent)(&mut handle, EVENT_ALL_ACCESS, ptr::null_mut(), NOTIFICATION_EVENT, 0)
+                < 0 {
+            return None;
+        }
+        if (_ObReferenceObjectByHandle)(handle, EVENT_ALL_ACCESS, ptr::null_mut(),
+                KERNEL_MODE as u8, &mut object, ptr::null_mut()) < 0 {
+            (_ZwClose)(handle);
+            return None;
+        }
+    }
+    Some(Completion { handle, object })
+}
+
+fn await_completion(completion: Completion, status: i32, status_block: &[usize]) -> Option<usize> {
+    if status == STATUS_PENDING {
+        unsafe {
+            (_KeWaitForSingleObject)(completion.object, EXECUTIVE, KERNEL_MODE, 0, ptr::null());
+        }
+    } else if status < 0 {
+        return None;
+    }
+
+    if (status_block[STATUS_BLOCK_STATUS] as i32) < 0 {
+        return None;
+    }
+
+    Some(status_block[STATUS_BLOCK_COUNT])
 }
 
 unsafe impl Send for Hostlink {}
@@ -24,14 +64,18 @@ impl Hostlink {
     pub fn init(on_rx: Option<fn(&[u8])>, wake_token: *const u8) -> Result<Self, ()> {
         let port = open_first_serial_port()?;
 
+        let reading = make_completion().ok_or(())?;
+        let writing = make_completion().ok_or(())?;
+
         unsafe {
             WAKE_TOKEN = wake_token;
             READER_PORT = port;
+            READER_COMPLETION = Some(reading);
         }
         kernel::spawn_thread(read_from_host, ptr::null_mut());
 
         Ok(Self {
-            state: UnsafeCell::new(Inner { port }),
+            state: UnsafeCell::new(Inner { port, completion: writing }),
             on_rx,
         })
     }
@@ -39,8 +83,8 @@ impl Hostlink {
     pub fn send(&self, payload: &[u8]) {
         let s = unsafe { &*self.state.get() };
 
-        write_all(s.port, &(payload.len() as u32).to_le_bytes());
-        write_all(s.port, payload);
+        write_all(s.port, s.completion, &(payload.len() as u32).to_le_bytes());
+        write_all(s.port, s.completion, payload);
     }
 
     pub fn process(&self) {
@@ -82,6 +126,10 @@ unsafe extern "C" fn read_from_host(_parameter: *mut c_void, _wait_result: i32) 
 }
 
 fn read_exactly(port: *mut c_void, buffer: &mut [u8]) -> bool {
+    let completion = match unsafe { READER_COMPLETION } {
+        Some(c) => c,
+        None => return false,
+    };
     let mut read = 0;
     while read != buffer.len() {
         let mut status_block = [0usize; STATUS_BLOCK_WORDS];
@@ -89,7 +137,7 @@ fn read_exactly(port: *mut c_void, buffer: &mut [u8]) -> bool {
         let status = unsafe {
             (_ZwReadFile)(
                 port,
-                ptr::null_mut(),
+                completion.handle,
                 ptr::null_mut(),
                 ptr::null_mut(),
                 status_block.as_mut_ptr() as *mut c_void,
@@ -99,11 +147,9 @@ fn read_exactly(port: *mut c_void, buffer: &mut [u8]) -> bool {
                 ptr::null_mut(),
             )
         };
-        if status < 0 {
+        let Some(moved) = await_completion(completion, status, &status_block) else {
             return false;
-        }
-
-        let moved = status_block[STATUS_BLOCK_COUNT];
+        };
         if moved == 0 {
             return false;
         }
@@ -113,7 +159,7 @@ fn read_exactly(port: *mut c_void, buffer: &mut [u8]) -> bool {
     true
 }
 
-fn write_all(port: *mut c_void, buffer: &[u8]) {
+fn write_all(port: *mut c_void, completion: Completion, buffer: &[u8]) {
     let mut written = 0;
     while written != buffer.len() {
         let mut status_block = [0usize; STATUS_BLOCK_WORDS];
@@ -121,7 +167,7 @@ fn write_all(port: *mut c_void, buffer: &[u8]) {
         let status = unsafe {
             (_ZwWriteFile)(
                 port,
-                ptr::null_mut(),
+                completion.handle,
                 ptr::null_mut(),
                 ptr::null_mut(),
                 status_block.as_mut_ptr() as *mut c_void,
@@ -131,11 +177,9 @@ fn write_all(port: *mut c_void, buffer: &[u8]) {
                 ptr::null_mut(),
             )
         };
-        if status < 0 {
+        let Some(moved) = await_completion(completion, status, &status_block) else {
             return;
-        }
-
-        let moved = status_block[STATUS_BLOCK_COUNT];
+        };
         if moved == 0 {
             return;
         }
@@ -186,6 +230,7 @@ static mut FRAMES: VecDeque<Vec<u8>> = VecDeque::new();
 static FRAMES_LOCK: AtomicU32 = AtomicU32::new(0);
 static mut WAKE_TOKEN: *const u8 = ptr::null();
 static mut READER_PORT: *mut c_void = ptr::null_mut();
+static mut READER_COMPLETION: Option<Completion> = None;
 
 fn open_first_serial_port() -> Result<*mut c_void, ()> {
     let ports = open_key(SERIAL_PORT_KEY)?;
@@ -243,7 +288,7 @@ fn open_device(path: &[u8]) -> Result<*mut c_void, ()> {
             0,
             0,
             FILE_OPEN,
-            FILE_SYNCHRONOUS_IO_NONALERT,
+            0,
             ptr::null_mut(),
             0,
         )
@@ -324,6 +369,7 @@ fn object_attributes(name: &mut UnicodeString) -> [usize; OBJECT_ATTRIBUTES_WORD
 const FRAME_LENGTH_SIZE: usize = 4;
 const STATUS_BLOCK_WORDS: usize = 2;
 const STATUS_BLOCK_COUNT: usize = 1;
+const STATUS_BLOCK_STATUS: usize = 0;
 const OBJECT_ATTRIBUTES_WORDS: usize = 6;
 
 const SERIAL_PORT_KEY: &[u16] = &[
@@ -350,6 +396,11 @@ const NO_PARITY: u8 = 0;
 const ONE_STOP_BIT: u8 = 0;
 const HAND_FLOW_WORDS: usize = 4;
 const TIMEOUT_WORDS: usize = 5;
+const STATUS_PENDING: i32 = 0x103;
+const NOTIFICATION_EVENT: u32 = 0;
+const EVENT_ALL_ACCESS: u32 = 0x1f_0003;
+const EXECUTIVE: u32 = 0;
+const KERNEL_MODE: u32 = 0;
 
 const KEY_READ: u32 = 0x2_0019;
 const GENERIC_READ: u32 = 0x8000_0000;
@@ -379,4 +430,8 @@ unsafe extern "C" {
         *mut c_void, *mut c_void, *mut c_void, *mut c_void, *mut c_void, u32, *const u8, u32,
         *mut u8, u32 => i32);
     static _ZwClose: windows_fn!(*mut c_void => i32);
+    static _ZwCreateEvent: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
+    static _ObReferenceObjectByHandle: windows_fn!(
+        *mut c_void, u32, *mut c_void, u8, *mut *mut c_void, *mut c_void => i32);
+    static _KeWaitForSingleObject: windows_fn!(*mut c_void, u32, u32, u8, *const i64 => i32);
 }
