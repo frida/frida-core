@@ -166,6 +166,7 @@ pub enum FridaCommand {
     Reply = 128,
     ScriptMessage = 129,
     SpawnAdded = 130,
+    Ready = 131,
 }
 
 impl core::fmt::Display for FridaCommand {
@@ -175,6 +176,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::EnumerateApplications => write!(f, "EnumerateApplications"),
             FridaCommand::EnumerateShortcuts => write!(f, "EnumerateShortcuts"),
             FridaCommand::SpawnAdded => write!(f, "SpawnAdded"),
+            FridaCommand::Ready => write!(f, "Ready"),
             FridaCommand::CreateScript => write!(f, "CreateScript"),
             FridaCommand::LoadScript => write!(f, "LoadScript"),
             FridaCommand::DestroyScript => write!(f, "DestroyScript"),
@@ -337,6 +339,8 @@ mod entrypoint_blob {
                 ),
             };
             transport_set(transport);
+
+            tell_the_host_we_are_listening();
 
             let context = adopt_js_context();
             run_main_loop(context);
@@ -821,6 +825,24 @@ fn transport_set(driver: Transport) {
     unsafe {
         let boxed = Box::into_raw(Box::new(driver));
         TRANSPORT_DRIVER = boxed;
+    }
+}
+
+fn tell_the_host_we_are_listening() {
+    unsafe {
+        let message = g_variant_new(
+            c"(yquv)".as_ptr(),
+            FridaCommand::Ready as u8 as u32,
+            0u32,
+            0u32,
+            g_variant_new(c"()".as_ptr()),
+        );
+
+        if let Some(serialized) = serialize_message(message) {
+            send_frame(&serialized);
+        }
+
+        g_variant_unref(message);
     }
 }
 
