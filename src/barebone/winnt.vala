@@ -5,12 +5,11 @@ namespace Frida.Barebone {
 		var modules = new Gee.ArrayList<ModuleInfo> ();
 		var symbols = new Gee.ArrayList<SymbolInfo> ();
 
-		Shape shape = Shape.of (machine.gdb.pointer_size);
+		Shape shape = Shape.of (machine.gdb);
 
-		uint64 version_block = yield find_version_block (machine, shape, cancellable);
-		uint64 module_list = yield read_loaded_module_list (machine, version_block, shape, cancellable);
+		Anchors anchors = yield find_anchors (machine, shape, cancellable);
 
-		foreach (LoadedModule module in yield read_loaded_modules (machine, module_list, shape, cancellable)) {
+		foreach (LoadedModule module in yield read_loaded_modules (machine, anchors.module_list, shape, cancellable)) {
 			modules.add (new ModuleInfo () {
 				name = module.name,
 				version = "",
@@ -21,7 +20,14 @@ namespace Frida.Barebone {
 			yield add_export_symbols (machine, module, symbols, cancellable);
 		}
 
-		yield add_process_list_symbol (machine, version_block, shape, symbols, cancellable);
+		if (anchors.process_list_head != 0) {
+			symbols.add (new SymbolInfo () {
+				name = PROCESS_LIST_HEAD,
+				offset = anchors.process_list_head,
+				symbol_type = 0xf,
+				section = 0x10,
+			});
+		}
 
 		return new WinNtLayout (modules, symbols);
 	}
@@ -40,6 +46,159 @@ namespace Frida.Barebone {
 		public WinNtLayout (Gee.List<ModuleInfo> modules, Gee.List<SymbolInfo> symbols) {
 			Object (modules: modules, symbols: symbols);
 		}
+	}
+
+	private static async Anchors find_anchors (Machine machine, Shape shape, Cancellable? cancellable)
+			throws Error, IOError {
+		if (shape.machine_type == IMAGE_FILE_MACHINE_ARM64)
+			return yield read_anchors_from_kernel (machine, shape, cancellable);
+
+		uint64 version_block = yield find_version_block (machine, shape, cancellable);
+		uint64 module_list = yield read_loaded_module_list (machine, version_block, shape, cancellable);
+		uint64 process_list_head = yield read_process_list_head (machine, version_block, shape, cancellable);
+
+		return new Anchors () {
+			module_list = module_list,
+			process_list_head = process_list_head,
+		};
+	}
+
+	private class Anchors {
+		public uint64 module_list;
+		public uint64 process_list_head;
+	}
+
+	private static async Anchors read_anchors_from_kernel (Machine machine, Shape shape,
+			Cancellable? cancellable) throws Error, IOError {
+		uint64 kernel = yield find_kernel_image (machine, shape, cancellable);
+
+		uint64 module_list = yield find_export (machine, kernel, LOADED_MODULE_LIST, cancellable);
+		if (!is_kernel_address (module_list, shape))
+			throw new Error.NOT_SUPPORTED ("Unable to find the loaded module list");
+		uint64 process_list_head = yield find_process_list_head (machine, kernel, shape, cancellable);
+
+		return new Anchors () {
+			module_list = module_list,
+			process_list_head = process_list_head,
+		};
+	}
+
+	private static async uint64 find_kernel_image (Machine machine, Shape shape, Cancellable? cancellable)
+			throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		for (uint attempt = 0; attempt != MAX_CATCH_ATTEMPTS; attempt++) {
+			if (yield stopped_in_kernel_mode (gdb, cancellable)) {
+				uint64 region = yield gdb.exception.thread.read_register (KERNEL_PCR_REGISTER, cancellable);
+				if (is_kernel_address (region, shape)) {
+					uint64 image = yield find_image_below_pointers (machine, region, shape, cancellable);
+					if (image != 0)
+						return image;
+				}
+			}
+
+			yield catch_processor_again (gdb, cancellable);
+		}
+
+		throw new Error.NOT_SUPPORTED ("Unable to find the kernel image");
+	}
+
+	private static async uint64 find_image_below_pointers (Machine machine, uint64 region, Shape shape,
+			Cancellable? cancellable) throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+		Buffer page = gdb.make_buffer (yield gdb.read_byte_array (region, PCR_SCAN_SIZE, cancellable));
+
+		var visited = new Gee.HashSet<uint64?> ((n) => (uint) (*(uint64 *) n), (a, b) => *(uint64 *) a == *(uint64 *) b);
+		uint budget = MAX_IMAGE_PROBES;
+		for (size_t offset = 0; offset != PCR_SCAN_SIZE; offset += shape.pointer_size) {
+			uint64 candidate = read_pointer (page, offset, shape);
+			if (!is_kernel_address (candidate, shape))
+				continue;
+
+			uint64 image = candidate - (candidate % KERNEL_IMAGE_ALIGNMENT);
+			for (uint step = 0; step != MAX_IMAGE_STEPS && budget != 0; step++, image -= KERNEL_IMAGE_ALIGNMENT) {
+				if (!visited.add (image))
+					break;
+				budget--;
+
+				if ((yield find_export (machine, image, LOADED_MODULE_LIST, cancellable)) != 0)
+					return image;
+			}
+		}
+
+		return 0;
+	}
+
+	private static async uint64 find_process_list_head (Machine machine, uint64 kernel, Shape shape,
+			Cancellable? cancellable) throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		uint64 holder = yield find_export (machine, kernel, INITIAL_PROCESS, cancellable);
+		if (!is_kernel_address (holder, shape))
+			return 0;
+
+		uint64 process = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (holder, shape.pointer_size,
+			cancellable)), 0, shape);
+		if (!is_kernel_address (process, shape))
+			return 0;
+
+		uint32 image_size = yield read_image_size (machine, kernel, cancellable);
+		Buffer body = gdb.make_buffer (yield gdb.read_byte_array (process, PROCESS_SCAN_SIZE, cancellable));
+
+		for (size_t offset = 0; offset != PROCESS_SCAN_SIZE - (2 * (size_t) shape.pointer_size);
+				offset += shape.pointer_size) {
+			uint64 node = process + offset;
+			if (!(yield links_back_to (machine, node, read_pointer (body, offset, shape), shape, cancellable)))
+				continue;
+
+			uint64 head = yield walk_to_image (machine, node, kernel, image_size, shape, cancellable);
+			if (head != 0)
+				return head;
+		}
+
+		return 0;
+	}
+
+	private static async bool links_back_to (Machine machine, uint64 node, uint64 forward, Shape shape,
+			Cancellable? cancellable) throws Error, IOError {
+		if (!is_kernel_address (forward, shape))
+			return false;
+
+		GDB.Client gdb = machine.gdb;
+		Buffer neighbour;
+		try {
+			neighbour = gdb.make_buffer (yield gdb.read_byte_array (forward, 2 * shape.pointer_size,
+				cancellable));
+		} catch (Error e) {
+			return false;
+		}
+
+		return read_pointer (neighbour, shape.pointer_size, shape) == node;
+	}
+
+	private static async uint64 walk_to_image (Machine machine, uint64 node, uint64 image, uint32 image_size,
+			Shape shape, Cancellable? cancellable) throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		uint64 entry = node;
+		for (uint step = 0; step != MAX_PROCESSES; step++) {
+			Buffer links;
+			try {
+				links = gdb.make_buffer (yield gdb.read_byte_array (entry, shape.pointer_size, cancellable));
+			} catch (Error e) {
+				return 0;
+			}
+
+			entry = read_pointer (links, 0, shape);
+			if (!is_kernel_address (entry, shape))
+				return 0;
+			if (entry == node)
+				return 0;
+			if (entry >= image && entry < image + image_size)
+				return entry;
+		}
+
+		return 0;
 	}
 
 	// The processor control region points to the block that a kernel debugger uses. That block
@@ -143,6 +302,29 @@ namespace Frida.Barebone {
 		return list;
 	}
 
+	// The kernel gives the addresses that a debugger needs here, and no module exports them.
+	private static async uint64 read_process_list_head (Machine machine, uint64 version_block, Shape shape,
+			Cancellable? cancellable) throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		uint64 data_list = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (
+			version_block + DEBUGGER_DATA_LIST_OFFSET, shape.pointer_size, cancellable)), 0, shape);
+		if (!is_kernel_address (data_list, shape))
+			return 0;
+
+		uint64 block = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (data_list, shape.pointer_size,
+			cancellable)), 0, shape);
+		if (!is_kernel_address (block, shape))
+			return 0;
+
+		uint64 head = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (
+			block + PROCESS_LIST_HEAD_OFFSET, shape.pointer_size, cancellable)), 0, shape);
+		if (!is_kernel_address (head, shape))
+			return 0;
+
+		return head;
+	}
+
 	private static async Gee.List<LoadedModule> read_loaded_modules (Machine machine, uint64 head, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
 		var modules = new Gee.ArrayList<LoadedModule> ();
@@ -189,34 +371,6 @@ namespace Frida.Barebone {
 		}
 	}
 
-	// The kernel gives the addresses that a debugger needs here, and no module exports them.
-	private static async void add_process_list_symbol (Machine machine, uint64 version_block, Shape shape,
-			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
-
-		uint64 data_list = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (
-			version_block + DEBUGGER_DATA_LIST_OFFSET, shape.pointer_size, cancellable)), 0, shape);
-		if (!is_kernel_address (data_list, shape))
-			return;
-
-		uint64 block = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (data_list, shape.pointer_size,
-			cancellable)), 0, shape);
-		if (!is_kernel_address (block, shape))
-			return;
-
-		uint64 head = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (
-			block + PROCESS_LIST_HEAD_OFFSET, shape.pointer_size, cancellable)), 0, shape);
-		if (!is_kernel_address (head, shape))
-			return;
-
-		symbols.add (new SymbolInfo () {
-			name = PROCESS_LIST_HEAD,
-			offset = head,
-			symbol_type = 0xf,
-			section = 0x10,
-		});
-	}
-
 	private static async string read_unicode_string (Machine machine, Buffer owner, size_t offset, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
 		uint16 length = owner.read_uint16 (offset);
@@ -230,6 +384,19 @@ namespace Frida.Barebone {
 		} catch (ConvertError e) {
 			return "";
 		}
+	}
+
+	internal static async bool stopped_in_kernel_mode (GDB.Client gdb, Cancellable? cancellable)
+			throws Error, IOError {
+		GDB.Thread thread = gdb.exception.thread;
+
+		if (gdb.arch == GDB.TargetArch.ARM64) {
+			uint64 state = yield thread.read_register ("cpsr", cancellable);
+			return ((state >> EXCEPTION_LEVEL_SHIFT) & EXCEPTION_LEVEL_MASK) == KERNEL_EXCEPTION_LEVEL;
+		}
+
+		uint64 cs = yield thread.read_register ("cs", cancellable);
+		return (cs & RING_MASK) == 0;
 	}
 
 	private static uint64 read_pointer (Buffer buf, size_t offset, Shape shape) {
@@ -253,7 +420,14 @@ namespace Frida.Barebone {
 		public size_t base_name;
 		public size_t name_buffer;
 
-		public static Shape of (uint pointer_size) {
+		public static Shape of (GDB.Client gdb) {
+			Shape shape = for_pointer_size (gdb.pointer_size);
+			if (gdb.arch == GDB.TargetArch.ARM64)
+				shape.machine_type = IMAGE_FILE_MACHINE_ARM64;
+			return shape;
+		}
+
+		private static Shape for_pointer_size (uint pointer_size) {
 			if (pointer_size == 8) {
 				return new Shape () {
 					pointer_size = 8,
@@ -290,6 +464,23 @@ namespace Frida.Barebone {
 	private const size_t DEBUGGER_DATA_LIST_OFFSET = 0x20;
 	private const uint16 IMAGE_FILE_MACHINE_I386 = 0x014c;
 	private const uint16 IMAGE_FILE_MACHINE_AMD64 = 0x8664;
+	private const uint16 IMAGE_FILE_MACHINE_ARM64 = 0xaa64;
+
+	private const string KERNEL_PCR_REGISTER = "x18";
+	private const size_t PCR_SCAN_SIZE = 0x1000;
+	private const uint64 KERNEL_IMAGE_ALIGNMENT = 0x10000;
+	private const uint MAX_IMAGE_STEPS = 512;
+	private const uint MAX_IMAGE_PROBES = 4096;
+
+	private const string LOADED_MODULE_LIST = "PsLoadedModuleList";
+	private const string INITIAL_PROCESS = "PsInitialSystemProcess";
+	private const size_t PROCESS_SCAN_SIZE = 0x800;
+	private const uint MAX_PROCESSES = 512;
+
+	private const uint64 RING_MASK = 3;
+	private const uint EXCEPTION_LEVEL_SHIFT = 2;
+	private const uint64 EXCEPTION_LEVEL_MASK = 3;
+	private const uint64 KERNEL_EXCEPTION_LEVEL = 1;
 
 	public const string PROCESS_LIST_HEAD = "PsActiveProcessHead";
 	private const size_t PROCESS_LIST_HEAD_OFFSET = 0x50;

@@ -47,6 +47,7 @@ namespace Frida.Barebone {
 
 		private const uint NUM_ARGS_IN_REGS = 8;
 
+		private const string PARALLELS_REGISTER_COMMAND = "printcpu 0 cr oth";
 		private const uint64 INT2_MASK = 0x3ULL;
 		private const uint64 INT6_MASK = 0x3fULL;
 		private const uint64 INT48_MASK = 0xffffffffffffULL;
@@ -1218,6 +1219,22 @@ namespace Frida.Barebone {
 							regs.sprr_config = val;
 						else if (name == "sprr_el1br1_el1")
 							regs.sprr_perm = val;
+					}
+				} else if ("parallels" in client.features) {
+					string system_regs = yield client.run_remote_command (PARALLELS_REGISTER_COMMAND,
+						cancellable);
+					foreach (string line in system_regs.split ("\n")) {
+						string[] tokens = line.strip ().split (" ", 2);
+						if (tokens.length != 2)
+							continue;
+						string name = tokens[0].down ();
+						string val = tokens[1].strip ();
+						if (!val.has_prefix ("0x"))
+							continue;
+						if (name == "tcr_el1")
+							regs.tcr = uint64.parse (val, 16);
+						else if (name == "ttbr1_el1")
+							regs.ttbr1 = uint64.parse (val, 16);
 					}
 				} else {
 					regs.tcr = yield thread.read_register ("tcr_el1", cancellable);

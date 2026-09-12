@@ -83,6 +83,29 @@ namespace Frida.Barebone {
 		return exports;
 	}
 
+	/**
+	 * Gives the number of bytes that an image occupies once loaded, or zero when the address
+	 * holds no image.
+	 */
+	public static async uint32 read_image_size (Machine machine, uint64 image, Cancellable? cancellable)
+			throws Error, IOError {
+		GDB.Client gdb = machine.gdb;
+
+		Buffer headers;
+		try {
+			headers = gdb.make_buffer (yield gdb.read_byte_array (image, HEADERS_SIZE, cancellable));
+		} catch (Error e) {
+			return 0;
+		}
+		if (headers.read_uint16 (0) != DOS_SIGNATURE)
+			return 0;
+		uint32 pe = headers.read_uint32 (DOS_HEADERS_OFFSET);
+		if (pe > MAX_PE_OFFSET || headers.read_uint32 (pe) != PE_SIGNATURE)
+			return 0;
+
+		return headers.read_uint32 (pe + OPTIONAL_HEADER_OFFSET + IMAGE_SIZE_OFFSET);
+	}
+
 	// Part of an image can be out of memory. Read one page at a time and let the absent pages
 	// read as zero, because no name or table entry has that value.
 	private static async Bytes read_present_pages (GDB.Client gdb, uint64 address, size_t size,
@@ -169,6 +192,7 @@ namespace Frida.Barebone {
 	private const size_t DOS_HEADERS_OFFSET = 0x3c;
 	private const uint32 PE_SIGNATURE = 0x00004550;
 	private const size_t OPTIONAL_HEADER_OFFSET = 0x18;
+	private const size_t IMAGE_SIZE_OFFSET = 0x38;
 	private const uint16 PE32_MAGIC = 0x010b;
 	private const uint16 PE32_PLUS_MAGIC = 0x020b;
 	private const size_t PE32_DIRECTORIES_OFFSET = 0x78;
