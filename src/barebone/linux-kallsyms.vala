@@ -17,7 +17,7 @@ namespace Frida.Barebone {
 			uint64 relative_base;
 			bool absolute = find_addresses (raw, out table_pos, out num_syms, out relative_base);
 
-			uint names_pos = find_names (raw, tokens);
+			uint names_pos = find_names (raw, tokens, num_syms);
 
 			var symbols = new Gee.ArrayList<SymbolInfo> ();
 			uint p = names_pos;
@@ -108,19 +108,24 @@ namespace Frida.Barebone {
 					var tokens = new string[256];
 					uint printable = 0;
 					uint total = 0;
+					uint non_empty = 0;
 					for (uint k = 0; k != 256; k++) {
 						uint start = table_base + index[k];
 						uint end = start;
 						while (end < index_pos && raw[end] != 0)
 							end++;
 						tokens[k] = slice_to_string (raw, start, end);
+						if (end > start)
+							non_empty++;
 						for (uint b = start; b != end; b++) {
 							total++;
 							if (raw[b] >= 0x20 && raw[b] < 0x7f)
 								printable++;
 						}
 					}
-					if (total != 0 && printable >= (total * 90) / 100)
+					// A real token table is 256 non-trivial byte-pair fragments; a run of
+					// mostly-empty tokens is a lookalike index, not the table.
+					if (non_empty >= 200 && printable >= (total * 90) / 100)
 						return tokens;
 				}
 				if (table_base == 0)
@@ -217,7 +222,7 @@ namespace Frida.Barebone {
 		 * proving positions reach that seed by walking symbol by symbol, and taking the earliest
 		 * such start whose own leading names are short, printable and distinct -- i.e. _text.
 		 */
-		private static uint find_names (uint8[] raw, string[] tokens) throws Error {
+		private static uint find_names (uint8[] raw, string[] tokens, uint num_syms) throws Error {
 			uint seed = find_names_seed (raw, tokens);
 
 			uint lo = (seed > 3000000) ? seed - 3000000 : 0;
@@ -231,11 +236,28 @@ namespace Frida.Barebone {
 					reaches[pos - lo] = true;
 			}
 
+			// The true start decodes exactly num_syms valid symbols, matching the address table,
+			// and the byte after the last is no longer a symbol. A start that is too early keeps
+			// decoding past that count; one too late runs out first. This anchors the names to the
+			// addresses even when an earlier region also decodes cleanly.
 			for (uint start = lo; start <= seed; start++) {
-				if (reaches[start - lo] && distinct_clean_names (raw, start, tokens, 200))
+				if (reaches[start - lo] && decodes_full_table (raw, start, tokens, num_syms))
 					return start;
 			}
 			throw new Error.NOT_SUPPORTED ("Unable to locate kallsyms names in kernel image");
+		}
+
+		private static bool decodes_full_table (uint8[] raw, uint start, string[] tokens, uint num_syms) {
+			uint p = start;
+			for (uint i = 0; i != num_syms; i++) {
+				string name;
+				uint next = try_decode_symbol (raw, p, tokens, out name);
+				if (next == 0)
+					return false;
+				p = next;
+			}
+			string tail;
+			return try_decode_symbol (raw, p, tokens, out tail) == 0;
 		}
 
 		/**
