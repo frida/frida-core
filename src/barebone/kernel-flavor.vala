@@ -167,8 +167,10 @@ namespace Frida.Barebone {
 			yield machine.gdb.continue (cancellable);
 		}
 
-		// Every kernel thread passes through the scheduler, which is a context the agent can be
-		// injected from: on a stack of its own, holding nothing.
+		// A task passing voluntarily through the scheduler is a context the agent can be injected
+		// from: sleepable, on a stack of its own, holding nothing. The CPU idle loop reaches the
+		// scheduler with interrupts masked, and injecting from the idle task deadlocks a sleeping
+		// callee (module_alloc, execmem_alloc), so those hits are skipped and a real task awaited.
 		private async void run_until_schedule (uint64 address, Cancellable? cancellable) throws Error, IOError {
 			GDB.Client gdb = machine.gdb;
 			var bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
@@ -176,11 +178,15 @@ namespace Frida.Barebone {
 			GDB.Exception? exception = null;
 			do {
 				exception = yield gdb.continue_until_exception (cancellable);
-			} while (exception.breakpoint != bp || (yield interrupts_masked (exception.thread, cancellable)));
+				if (exception.breakpoint != bp)
+					continue;
+			} while (yield interrupts_masked (exception.thread, cancellable));
 
 			yield bp.remove (cancellable);
 		}
 
+		// Linux on arm64 runs with FIQ permanently masked, so only the IRQ mask distinguishes a
+		// sleepable task (interrupts on) from the idle loop and interrupt-context reschedules.
 		private async bool interrupts_masked (GDB.Thread thread, Cancellable? cancellable) throws Error, IOError {
 			if (machine is IA32Machine || machine is X64Machine) {
 				uint64 eflags = yield thread.read_register ("eflags", cancellable);
@@ -188,10 +194,10 @@ namespace Frida.Barebone {
 			}
 
 			uint64 cpsr = yield thread.read_register ("cpsr", cancellable);
-			return (cpsr & INTERRUPT_MASK_BITS) != 0;
+			return (cpsr & IRQ_MASK_BIT) != 0;
 		}
 
-		private const uint64 INTERRUPT_MASK_BITS = (1ULL << 7) | (1ULL << 6);
+		private const uint64 IRQ_MASK_BIT = 1ULL << 7;
 		private const uint64 INTERRUPT_ENABLE_BIT = 1ULL << 9;
 		private const uint LINUX_REGISTER_ARGUMENTS = 3;
 	}
