@@ -329,12 +329,33 @@ namespace Frida {
 				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base, bool mmu_registers_available) {
 			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "execmem_alloc");
 			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "execmem_free");
+			if (alloc != null && free != null) {
+				var alloc_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+				uint64 execmem_type = mmu_registers_available ? EXECMEM_MODULE_DATA : EXECMEM_MODULE_TEXT;
+				alloc_arguments.add (new BareboneCallArgument (LITERAL, execmem_type));
+				alloc_arguments.add (new BareboneCallArgument (SIZE, 0));
+
+				var free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+				free_arguments.add (new BareboneCallArgument (ADDRESS, 0));
+
+				return new BareboneTargetFunctionsAllocatorConfig () {
+					alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function",
+						kernel_base + alloc.offset),
+					free_function = new BareboneNonNullMemoryAddress ("allocator.free_function",
+						kernel_base + free.offset),
+					alloc_arguments = alloc_arguments,
+					free_arguments = free_arguments,
+				};
+			}
+
+			// Kernels before execmem hand out executable memory through module_alloc, whose only
+			// argument is the size; module_memfree frees it.
+			alloc = find_symbol (kernel_symbols, "module_alloc");
+			free = find_symbol (kernel_symbols, "module_memfree");
 			if (alloc == null || free == null)
 				return null;
 
 			var alloc_arguments = new Gee.ArrayList<BareboneCallArgument> ();
-			uint64 execmem_type = mmu_registers_available ? EXECMEM_MODULE_DATA : EXECMEM_MODULE_TEXT;
-			alloc_arguments.add (new BareboneCallArgument (LITERAL, execmem_type));
 			alloc_arguments.add (new BareboneCallArgument (SIZE, 0));
 
 			var free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
