@@ -109,6 +109,7 @@ namespace Frida.Barebone {
 		var result = new uint8[size];
 
 		size_t offset = 0;
+		uint present = 0;
 		while (offset != size) {
 			uint64 cursor = address + offset;
 			size_t chunk = size_t.min (size - offset,
@@ -118,11 +119,16 @@ namespace Frida.Barebone {
 				unowned uint8[] page = (yield gdb.read_byte_array (cursor, chunk, cancellable))
 					.get_data ();
 				Memory.copy ((uint8 *) result + offset, page, chunk);
+				present++;
 			} catch (Error e) {
 			}
 
 			offset += chunk;
 		}
+
+		if (present == 0)
+			throw new Error.NOT_SUPPORTED (
+				"Unable to read any page of 0x%" + uint64.FORMAT_MODIFIER + "x", address);
 
 		return new Bytes.take ((owned) result);
 	}

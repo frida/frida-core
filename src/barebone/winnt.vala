@@ -121,7 +121,15 @@ namespace Frida.Barebone {
 					break;
 				budget--;
 
-				if ((yield find_export (machine, image, LOADED_MODULE_LIST, cancellable)) != 0)
+				uint64 module_list;
+				try {
+					module_list = yield find_export (machine, image, LOADED_MODULE_LIST,
+						cancellable);
+				} catch (Error e) {
+					continue;
+				}
+
+				if (module_list != 0)
 					return image;
 			}
 		}
@@ -361,7 +369,14 @@ namespace Frida.Barebone {
 
 	private static async void add_export_symbols (Machine machine, LoadedModule module,
 			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
-		foreach (Export e in yield enumerate_exports (machine, module.base_address, cancellable)) {
+		Gee.List<Export> exports;
+		try {
+			exports = yield enumerate_exports (machine, module.base_address, cancellable);
+		} catch (Error e) {
+			return;
+		}
+
+		foreach (Export e in exports) {
 			symbols.add (new SymbolInfo () {
 				name = e.name,
 				offset = module.base_address + e.rva,
