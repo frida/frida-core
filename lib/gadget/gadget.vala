@@ -210,7 +210,7 @@ namespace Frida.Gadget {
 		public LoadBehavior on_load {
 			get;
 			set;
-			default = LoadBehavior.WAIT;
+			default = LoadBehavior.RESUME;//默认直接继续加载,只注入即可
 		}
 
 		public enum LoadBehavior {
