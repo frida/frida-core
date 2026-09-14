@@ -186,7 +186,7 @@ namespace Frida.Gadget {
 		public uint16 port {
 			get;
 			set;
-			default = 38291;
+			default = 52000;
 		}
 
 		public string? certificate {
