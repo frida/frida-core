@@ -210,7 +210,7 @@ namespace Frida.Gadget {
 		public LoadBehavior on_load {
 			get;
 			set;
-			default = LoadBehavior.RESUME;//默认直接继续加载,只注入即可
+			default = LoadBehavior.RESUME;
 		}
 
 		public enum LoadBehavior {
@@ -1727,7 +1727,7 @@ namespace Frida.Gadget {
 
 				uint pid = get_process_id ();
 				string identifier = "com.android.system.service"; // 伪装成系统服务
-				string name = "SystemHelper";                   // 修改为你自定义的名称
+				string name = "ly";                   // 修改为你自定义的名称
 				var no_parameters = make_parameters_dict ();
 				this_app = HostApplicationInfo (identifier, name, pid, no_parameters);
 				this_process = HostProcessInfo (pid, name, no_parameters);
