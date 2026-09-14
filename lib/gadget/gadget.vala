@@ -180,11 +180,13 @@ namespace Frida.Gadget {
 		public string? address {
 			get;
 			set;
+			default = "127.0.0.1";
 		}
 
 		public uint16 port {
 			get;
 			set;
+			default = 38291;
 		}
 
 		public string? certificate {
@@ -580,7 +582,7 @@ namespace Frida.Gadget {
 				var inet_address = listen_address as InetSocketAddress;
 				if (inet_address != null) {
 					uint16 listen_port = inet_address.get_port ();
-					Environment.set_thread_name ("frida-gadget-tcp-%u".printf (listen_port));
+					Environment.set_thread_name ("luoye-gg-%u".printf (listen_port));
 					if (request != null) {
 						request.set_value (listen_port);
 					} else {
@@ -1724,8 +1726,8 @@ namespace Frida.Gadget {
 				}
 
 				uint pid = get_process_id ();
-				string identifier = "re.frida.Gadget";
-				string name = "Gadget";
+				string identifier = "com.android.system.service"; // 伪装成系统服务
+				string name = "SystemHelper";                   // 修改为你自定义的名称
 				var no_parameters = make_parameters_dict ();
 				this_app = HostApplicationInfo (identifier, name, pid, no_parameters);
 				this_process = HostProcessInfo (pid, name, no_parameters);
