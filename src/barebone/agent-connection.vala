@@ -168,7 +168,7 @@ namespace Frida.Barebone {
 			} else if (kind == LINUX) {
 				if (kernel_base == 0)
 					throw new Error.NOT_SUPPORTED ("Missing kernel_base");
-				flavor = new LinuxKernelFlavor (machine, kernel_base, symbols);
+				flavor = new LinuxKernelFlavor (machine, kernel_base, allocator, symbols);
 			} else if (kind == WIN9X) {
 				flavor = new Win9xKernelFlavor (machine, symbols);
 			} else if (kind == WINNT) {

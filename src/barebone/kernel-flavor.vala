@@ -108,14 +108,17 @@ namespace Frida.Barebone {
 
 		private Machine machine;
 		private uint64 kernel_base;
+		private Allocator allocator;
 		private SymbolInfo schedule;
 		private SymbolInfo? panic;
 		private Gee.Map<string, SymbolInfo> symbols;
+		private Allocation? current_probe_stub;
 
-		public LinuxKernelFlavor (Machine machine, uint64 kernel_base, Gee.Map<string, SymbolInfo> symbols)
-				throws Error {
+		public LinuxKernelFlavor (Machine machine, uint64 kernel_base, Allocator allocator,
+				Gee.Map<string, SymbolInfo> symbols) throws Error {
 			this.machine = machine;
 			this.kernel_base = kernel_base;
+			this.allocator = allocator;
 			this.symbols = symbols;
 
 			schedule = symbols["schedule"];
@@ -152,10 +155,52 @@ namespace Frida.Barebone {
 
 			yield run_until_schedule (schedule_address, cancellable);
 
+			// Kernels predating execmem allocate with module_alloc, which reschedules. A task caught
+			// entering the scheduler is already marked for sleep and would be dequeued there and
+			// never resumed, so it is forced back to runnable first; the borrowed task then merely
+			// sees a spurious wakeup once released.
+			bool predates_execmem = arm64 != null && symbols["execmem_alloc"] == null;
+			if (predates_execmem)
+				yield keep_current_runnable (cancellable);
+
 			// learn_permission_templates walks the page tables, which needs the MMU registers; the
 			// kernel-API protection path does not use permission templates.
 			if (arm64 != null && arm64.mmu_registers_available)
 				yield arm64.learn_permission_templates (schedule_address, cancellable);
+		}
+
+		// The task caught at schedule() has set itself for sleep; a call made in its context that
+		// then sleeps (module_alloc, kmalloc reclaim) would be dequeued there and never resumed, so
+		// it is woken back to runnable first. current lives in SP_EL0, which the stub does not expose
+		// as a register, so it is read by invoking a two-instruction stub that moves it into x0.
+		private async void keep_current_runnable (Cancellable? cancellable) throws Error, IOError {
+			uint64 wake_up_process = symbol_address ("wake_up_process");
+			if (wake_up_process == 0)
+				return;
+
+			uint64 current = yield read_current_task (cancellable);
+			if (current < TASK_VA_MIN || current >= TASK_VA_MAX)
+				return;
+
+			yield machine.invoke (wake_up_process, { current }, cancellable);
+		}
+
+		private async uint64 read_current_task (Cancellable? cancellable) throws Error, IOError {
+			current_probe_stub = yield allocator.allocate (8, 8, cancellable);
+			uint64 stub = current_probe_stub.virtual_address;
+			var code = new uint8[8];
+			write_u32 (code, 0, 0xd5384100u);	// mrs x0, sp_el0
+			write_u32 (code, 4, 0xd65f03c0u);	// ret
+			yield machine.write_virtual (stub, code, cancellable);
+
+			return yield machine.invoke (stub, {}, cancellable);
+		}
+
+		private static void write_u32 (uint8[] buffer, uint offset, uint32 value) {
+			buffer[offset + 0] = (uint8) (value >> 0);
+			buffer[offset + 1] = (uint8) (value >> 8);
+			buffer[offset + 2] = (uint8) (value >> 16);
+			buffer[offset + 3] = (uint8) (value >> 24);
 		}
 
 		private uint64 symbol_address (string name) {
@@ -200,6 +245,8 @@ namespace Frida.Barebone {
 		private const uint64 IRQ_MASK_BIT = 1ULL << 7;
 		private const uint64 INTERRUPT_ENABLE_BIT = 1ULL << 9;
 		private const uint LINUX_REGISTER_ARGUMENTS = 3;
+		private const uint64 TASK_VA_MIN = 0xffffffc000000000;
+		private const uint64 TASK_VA_MAX = 0xffffffc100000000;
 	}
 
 	internal sealed class Win9xKernelFlavor : Object, KernelFlavor {
