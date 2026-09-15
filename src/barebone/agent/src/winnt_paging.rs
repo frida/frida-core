@@ -275,7 +275,8 @@ mod arch {
 
     pub fn protection_at(address: usize) -> u32 {
         match resolve(address) {
-            Some((descriptor, _)) => protection_of_descriptor(unsafe { descriptor.read_volatile() }),
+            Some((descriptor, _)) =>
+                protection_of_descriptor(unsafe { descriptor.read_volatile() }, address),
             None => 0,
         }
     }
@@ -296,7 +297,7 @@ mod arch {
 
         let span = 1usize << LEVEL_SHIFTS[level];
         if level == TABLE_LEVEL || describes_block(descriptor) {
-            ranges.add(address, span, protection_of_descriptor(descriptor));
+            ranges.add(address, span, protection_of_descriptor(descriptor, address));
             return;
         }
 
@@ -313,7 +314,8 @@ mod arch {
         };
 
         unsafe {
-            let value = apply_protection_to_descriptor(descriptor.read_volatile(), gum_prot);
+            let value =
+                apply_protection_to_descriptor(descriptor.read_volatile(), gum_prot, address);
             descriptor.write_volatile(value);
         }
 
@@ -321,7 +323,7 @@ mod arch {
     }
 
     fn resolve(address: usize) -> Option<(*mut u64, usize)> {
-        let mut table = table_base();
+        let mut table = table_base_for(address);
         for level in TOP_LEVEL..=TABLE_LEVEL {
             let at = descriptor_pointer_in(table, level, address);
             let descriptor = unsafe { at.read_volatile() };
@@ -365,18 +367,18 @@ mod arch {
         descriptor & OUTPUT_ADDRESS_MASK
     }
 
-    fn protection_of_descriptor(descriptor: u64) -> u32 {
+    fn protection_of_descriptor(descriptor: u64, address: usize) -> u32 {
         let mut prot = GUM_PAGE_READ;
         if (descriptor & DESCRIPTOR_READ_ONLY) == 0 {
             prot |= GUM_PAGE_WRITE;
         }
-        if (descriptor & DESCRIPTOR_NO_EXECUTE) == 0 {
+        if (descriptor & no_execute_for(address)) == 0 {
             prot |= GUM_PAGE_EXECUTE;
         }
         prot
     }
 
-    fn apply_protection_to_descriptor(descriptor: u64, gum_prot: u32) -> u64 {
+    fn apply_protection_to_descriptor(descriptor: u64, gum_prot: u32, address: usize) -> u64 {
         let mut value = descriptor;
 
         if (gum_prot & GUM_PAGE_WRITE) != 0 {
@@ -386,9 +388,9 @@ mod arch {
         }
 
         if (gum_prot & GUM_PAGE_EXECUTE) != 0 {
-            value &= !DESCRIPTOR_NO_EXECUTE;
+            value &= !no_execute_for(address);
         } else {
-            value |= DESCRIPTOR_NO_EXECUTE;
+            value |= no_execute_for(address);
         }
 
         value
@@ -397,6 +399,28 @@ mod arch {
     fn table_base() -> u64 {
         read_system_register!("ttbr1_el1") & TABLE_BASE_MASK
     }
+
+    fn no_execute_for(address: usize) -> u64 {
+        if is_in_lower_half(address) {
+            DESCRIPTOR_NEVER_EXECUTE_AT_EL0
+        } else {
+            DESCRIPTOR_NEVER_EXECUTE_AT_EL1
+        }
+    }
+
+    fn table_base_for(address: usize) -> u64 {
+        if is_in_lower_half(address) {
+            read_system_register!("ttbr0_el1") & TABLE_BASE_MASK
+        } else {
+            table_base()
+        }
+    }
+
+    fn is_in_lower_half(address: usize) -> bool {
+        (address as u64) < LOWER_HALF_LIMIT
+    }
+
+    const LOWER_HALF_LIMIT: u64 = 1 << 48;
 
     fn kernel_space() -> KernelSpace {
         let address_bits = 64 - ((read_system_register!("tcr_el1") >> TCR_T1SZ_SHIFT)
@@ -422,7 +446,8 @@ mod arch {
     const DESCRIPTOR_VALID: u64 = 1 << 0;
     const DESCRIPTOR_TABLE: u64 = 1 << 1;
     const DESCRIPTOR_READ_ONLY: u64 = 1 << 7;
-    const DESCRIPTOR_NO_EXECUTE: u64 = 1 << 53;
+    const DESCRIPTOR_NEVER_EXECUTE_AT_EL1: u64 = 1 << 53;
+    const DESCRIPTOR_NEVER_EXECUTE_AT_EL0: u64 = 1 << 54;
     const OUTPUT_ADDRESS_MASK: u64 = 0x0000_ffff_ffff_f000;
     const TABLE_BASE_MASK: u64 = 0x0000_ffff_ffff_fffe;
     const TCR_T1SZ_SHIFT: u64 = 16;
