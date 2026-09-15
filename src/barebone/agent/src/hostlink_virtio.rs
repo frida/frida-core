@@ -185,6 +185,8 @@ struct Vq {
 }
 impl Vq {
     fn new(regs: &Regs, sel: u16, size: u16) -> Self {
+        let size = size.min(regs.queue_max(sel));
+
         let d = dma_page_alloc();
         let a = dma_page_alloc();
         let u = dma_page_alloc();
@@ -944,12 +946,25 @@ impl Regs {
         }
     }
 
+    fn queue_max(&self, sel: u16) -> u16 {
+        match self {
+            Regs::Mmio(base) => {
+                let base = *base;
+                w32(base, QSEL, sel as u32);
+                r32(base, QNUM_MAX) as u16
+            }
+            Regs::Pci(p) => {
+                w16(p.common, COMMON_QSEL, sel);
+                r16(p.common, COMMON_QNUM)
+            }
+        }
+    }
+
     fn queue_prepare(&self, sel: u16, size: u16, desc: u64, avail: u64, used: u64) -> u16 {
         match self {
             Regs::Mmio(base) => {
                 let base = *base;
                 w32(base, QSEL, sel as u32);
-                debug_assert!(r32(base, QNUM_MAX) as u16 >= size);
                 w32(base, QNUM, size as u32);
                 w64(base, QDESC_LO, QDESC_HI, desc);
                 w64(base, QAVAIL_LO, QAVAIL_HI, avail);
@@ -959,7 +974,6 @@ impl Regs {
             }
             Regs::Pci(p) => {
                 w16(p.common, COMMON_QSEL, sel);
-                debug_assert!(r16(p.common, COMMON_QNUM) >= size);
                 w16(p.common, COMMON_QNUM, size);
                 w64(p.common, COMMON_QDESC, COMMON_QDESC + 4, desc);
                 w64(p.common, COMMON_QAVAIL, COMMON_QAVAIL + 4, avail);
