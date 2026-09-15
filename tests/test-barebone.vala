@@ -315,6 +315,16 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/arm64-hooks-kernel-function-in-live-guest", () => {
+			var h = new Harness ((h) => winnt_arm64_hooks_kernel_function_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/arm64-keeps-kernel-hook-in-live-guest", () => {
+			var h = new SlowHarness ((h) => winnt_arm64_keeps_kernel_hook_in_live_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		// One suite for each word size. Each suite uses its own set of variables and its own guest.
 		GLib.Test.add_func ("/Barebone/WinNt/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_agent_runs_in_live_guest.begin (h as Harness, "WINNT"));
@@ -4454,6 +4464,46 @@ FAIL: %s
 		""", "\"caught\":\"yes\"");
 	}
 
+	private async void winnt_arm64_hooks_kernel_function_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, parallels_config_from_environment (h, "WINNT_ARM64"), """
+			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
+			const upper = kernel.enumerateExports().find(e => e.name === 'RtlUpperChar').address;
+
+			let seen = null;
+			Interceptor.attach(upper, {
+				onEnter(args) {
+					seen = args[0].toInt32();
+				}
+			});
+			Interceptor.flush();
+
+			const call = new NativeFunction(upper, 'uint8', ['uint8']);
+			const result = call(0x61);
+			send({ seen: seen, result: result });
+		""", "\"seen\":97,\"result\":65");
+	}
+
+	private async void winnt_arm64_keeps_kernel_hook_in_live_guest (SlowHarness h) {
+		yield run_script_in_live_guest (h, parallels_config_from_environment (h, "WINNT_ARM64"), """
+			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
+			const upper = kernel.enumerateExports().find(e => e.name === 'RtlUpperChar').address;
+
+			let seen = null;
+			Interceptor.attach(upper, {
+				onEnter(args) {
+					seen = args[0].toInt32();
+				}
+			});
+			Interceptor.flush();
+
+			const call = new NativeFunction(upper, 'uint8', ['uint8']);
+			setTimeout(() => {
+				const result = call(0x61);
+				send({ seen: seen, result: result });
+			}, 180000);
+		""", "\"seen\":97,\"result\":65");
+	}
+
 	private async void linux_agent_runs_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, linux_config_from_environment (h, prefix), "send(1 + 1);",
 			"\"payload\":2");
@@ -7282,7 +7332,7 @@ FAIL: %s
 	}
 
 	// The first run downloads the kernel before it can boot the guest.
-	private class SlowHarness : Frida.Test.AsyncHarness {
+	private class SlowHarness : Harness {
 		public SlowHarness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
 			base ((owned) func);
 		}

@@ -300,6 +300,9 @@ mod entrypoint_blob {
             OWN_RANGE = own_range;
 
             kernel::install_fault_reporter();
+            #[cfg(feature = "winnt")]
+            #[cfg(target_arch = "aarch64")]
+            kernel::disarm_patchguard();
 
             #[cfg(feature = "linux-injected")]
             crate::gum_btf::publish();

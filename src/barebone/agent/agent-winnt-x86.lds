@@ -53,6 +53,7 @@ SECTIONS {
     _ZwCreateEvent = .; . += 4;
     _ExAllocatePool2 = .; . += 4;
     _KeIpiGenericCall = .; . += 4;
+    _MmIsAddressValid = .; . += 4;
     _ZwClearEvent = .; . += 4;
     _ZwWaitForSingleObject = .; . += 4;
     _ZwAllocateVirtualMemory = .; . += 4;

