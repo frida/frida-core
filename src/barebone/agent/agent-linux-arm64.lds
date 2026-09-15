@@ -49,6 +49,7 @@ SECTIONS {
     _schedule = .; . += 8;
     _ktime_get_mono_fast_ns = .; . += 8;
     _ktime_get_real_ts64 = .; . += 8;
+    _getnstimeofday64 = .; . += 8;
     _send_sig = .; . += 8;
     _free_irq = .; . += 8;
     _request_threaded_irq = .; . += 8;

@@ -463,7 +463,13 @@ pub fn monotonic_micros() -> i64 {
 
 pub fn wall_clock_micros() -> (u32, u32) {
     let mut now = Timespec64 { tv_sec: 0, tv_nsec: 0 };
-    unsafe { _ktime_get_real_ts64(&mut now) };
+    unsafe {
+        if let Some(f) = _ktime_get_real_ts64 {
+            f(&mut now);
+        } else if let Some(f) = _getnstimeofday64 {
+            f(&mut now);
+        }
+    }
     (now.tv_sec as u32, (now.tv_nsec / 1000) as u32)
 }
 
@@ -840,7 +846,8 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _ktime_get_mono_fast_ns: unsafe extern "C" fn() -> u64;
     #[cfg(not(target_arch = "x86"))]
-    static _ktime_get_real_ts64: unsafe extern "C" fn(*mut Timespec64);
+    static _ktime_get_real_ts64: Option<unsafe extern "C" fn(*mut Timespec64)>;
+    static _getnstimeofday64: Option<unsafe extern "C" fn(*mut Timespec64)>;
     #[cfg(not(target_arch = "x86"))]
     static _send_sig: unsafe extern "C" fn(c_int, *mut c_void, c_int) -> c_int;
     #[cfg(not(target_arch = "x86"))]
