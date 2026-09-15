@@ -722,7 +722,7 @@ internal_libs = [base, netif, pipe] + backend_libs
 internal_deps = [base_dep, netif_dep, pipe_dep]
 
 if host_os_family == 'windows'
-  gio_platform_vala_args = ['--pkg=gio-windows-2.0']
+  gio_platform_vala_args = ['--pkg=gio-windows-2.0', '--pkg=gio-unix-2.0']
   backend_deps += gio_windows_dep
 else
   gio_platform_vala_args = ['--pkg=gio-unix-2.0']
