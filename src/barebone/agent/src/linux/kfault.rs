@@ -523,11 +523,24 @@ unsafe fn recovered(regs: *mut c_void) -> bool {
         )
     };
     if handled == 0 {
-        return false;
+        let esr: u64;
+        unsafe { core::arch::asm!("mrs {}, esr_el1", out(reg) esr, options(nomem, nostack)) };
+        crate::note_unhandled_fault(esr, faulted_at as u64, accessed as u64);
+        context.pc = frida_arm64_park as usize as u64;
+        unsafe { restore_context(regs, &context) };
+        return true;
     }
 
     unsafe { restore_context(regs, &context) };
     true
+}
+
+#[cfg(target_arch = "aarch64")]
+extern "C" fn frida_arm64_park() -> ! {
+    static mut PARK_TOKEN: u8 = 0;
+    loop {
+        crate::kernel::wait(core::ptr::addr_of!(PARK_TOKEN), Some(1_000_000), &mut || false);
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
