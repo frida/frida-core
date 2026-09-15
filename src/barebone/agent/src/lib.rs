@@ -915,6 +915,12 @@ static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
 pub(crate) unsafe fn preserve_writable_half() {
     let size = writable_half_size();
     let pristine = kernel::alloc(size);
+    // A few-hundred-KiB kmalloc needs an order-9 contiguous block, which a fragmented guest can
+    // refuse; the pristine copy only feeds process-copies, so proceed without it rather than
+    // faulting into a NULL destination.
+    if pristine.is_null() {
+        return;
+    }
     unsafe {
         ptr::copy_nonoverlapping(writable_half_start() as *const u8, pristine, size);
         PRISTINE_WRITABLE_HALF = pristine;
@@ -1140,7 +1146,6 @@ fn destination_of(variant: *mut GVariant) -> u32 {
 pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
     unsafe {
         JS_THREAD_ID = kernel::current_thread_id();
-
         let context = gum_script_scheduler_get_js_context(gum_script_backend_get_scheduler());
 
         // Acquires the context as well, which is what lets this thread run the jobs the
@@ -2299,7 +2304,6 @@ fn handle_create_script(payload_variant: *mut GVariant, request_id: u16) -> Opti
             return Some(HandlerResponse::error("Invalid payload format: expected string"));
         }
         let source = g_variant_get_string(payload_variant, core::ptr::null_mut());
-
         gum_script_backend_create(
             gum_script_backend_obtain_qjs(),
             c"agent.js".as_ptr(),
@@ -2309,7 +2313,6 @@ fn handle_create_script(payload_variant: *mut GVariant, request_id: u16) -> Opti
             Some(signed_to_be_called_back(on_script_created, 0)),
             Box::into_raw(Box::new(request_id)) as *mut c_void,
         );
-
         None
     }
 }
@@ -2460,7 +2463,6 @@ fn handle_load_script(payload_variant: *mut GVariant, request_id: u16) -> Option
             Some(signed_to_be_called_back(on_script_loaded, 0)),
             Box::into_raw(Box::new(request_id)) as *mut c_void,
         );
-
         None
     }
 }
@@ -2497,7 +2499,6 @@ fn handle_destroy_script(payload_variant: *mut GVariant, request_id: u16) -> Opt
             Some(signed_to_be_called_back(on_script_destroyed, 0)),
             Box::into_raw(Box::new(request_id)) as *mut c_void,
         );
-
         None
     }
 }
