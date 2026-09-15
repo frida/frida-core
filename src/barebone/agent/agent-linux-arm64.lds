@@ -23,6 +23,7 @@ SECTIONS {
     _kernel_write = .; . += 8;
     ___kmalloc_noprof = .; . += 8;
     _kmalloc = .; . += 8;
+    ___kmalloc = .; . += 8;
     _kfree = .; . += 8;
     _execmem_alloc = .; . += 8;
     _set_memory_rw = .; . += 8;
@@ -43,6 +44,7 @@ SECTIONS {
     _schedule_hrtimeout_range = .; . += 8;
     _pci_get_domain_bus_and_slot = .; . += 8;
     _pci_irq_vector = .; . += 8;
+    _of_irq_parse_and_map_pci = .; . += 8;
     _pci_dev_put = .; . += 8;
     _schedule = .; . += 8;
     _ktime_get_mono_fast_ns = .; . += 8;
@@ -51,6 +53,7 @@ SECTIONS {
     _free_irq = .; . += 8;
     _request_threaded_irq = .; . += 8;
     _generic_ioremap_prot = .; . += 8;
+    ___ioremap = .; . += 8;
     _vmap = .; . += 8;
     _memstart_addr = .; . += 8;
     _init_task = .; . += 8;

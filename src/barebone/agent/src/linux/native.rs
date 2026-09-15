@@ -67,16 +67,14 @@ pub fn let_the_file_go(file: *mut c_void) {
 
 pub fn wait_for_a_word(file: *mut c_void) -> bool {
     let mut byte = 0u8;
-    let mut at = 0i64;
 
-    unsafe { _kernel_read(file, &mut byte, 1, &mut at) == 1 }
+    unsafe { _kernel_read(file, 0, &mut byte, 1) == 1 }
 }
 
 pub fn leave_a_word(file: *mut c_void) {
     let byte = 0u8;
-    let mut at = 0i64;
 
-    unsafe { _kernel_write(file, &byte, 1, &mut at) };
+    unsafe { _kernel_write(file, &byte, 1, 0) };
 }
 
 
@@ -164,8 +162,9 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     unsafe {
         trampoline.write(Trampoline { entry, parameter });
 
+        let te = thread_entry();
         let task = _kthread_create_on_node(
-            thread_entry(),
+            te,
             trampoline as *mut c_void,
             NUMA_NO_NODE,
             c"frida".as_ptr(),
@@ -187,8 +186,10 @@ pub fn alloc(size: usize) -> *mut u8 {
     unsafe {
         if let Some(f) = ___kmalloc_noprof {
             f(size, GFP_KERNEL)
+        } else if let Some(f) = _kmalloc {
+            f(size, GFP_KERNEL)
         } else {
-            _kmalloc.unwrap()(size, GFP_KERNEL)
+            ___kmalloc.unwrap()(size, GFP_KERNEL)
         }
     }
 }
@@ -411,10 +412,18 @@ pub fn pci_interrupt(bus: u8, devfn: u8) -> Option<u32> {
         return None;
     }
 
-    let line = unsafe { _pci_irq_vector(device, 0) };
+    // pci_irq_vector arrived in 4.10; older kernels resolve a legacy INTx line through the
+    // device-tree PCI mapping instead.
+    let line = if let Some(f) = unsafe { _pci_irq_vector } {
+        unsafe { f(device, 0) }
+    } else if let Some(f) = unsafe { _of_irq_parse_and_map_pci } {
+        unsafe { f(device, 0, 0) }
+    } else {
+        -1
+    };
     unsafe { _pci_dev_put(device) };
 
-    if line < 0 {
+    if line <= 0 {
         return None;
     }
 
@@ -561,8 +570,20 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
 }
 
 #[cfg(not(any(target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
+
+
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
-    unsafe { _generic_ioremap_prot(phys_addr, size as usize, page_of(DEVICE_MEMORY) as usize) }
+    let prot = page_of(DEVICE_MEMORY);
+    if let Some(f) = unsafe { _generic_ioremap_prot } {
+        return unsafe { f(phys_addr, size as usize, prot as usize) };
+    }
+    // Kernels predating generic_ioremap_prot (added in 5.x) map through __ioremap, which takes the
+    // same phys/size and a pgprot carrying the device-memory attributes.
+    #[cfg(target_arch = "aarch64")]
+    if let Some(f) = unsafe { ___ioremap } {
+        return unsafe { f(phys_addr, size as usize, prot) };
+    }
+    core::ptr::null_mut()
 }
 
 pub fn map_pages(pages: *mut c_void, count: usize) -> *mut c_void {
@@ -588,7 +609,7 @@ const PAGE_KERNEL: u64 = 0x163;
 
 #[cfg(target_arch = "aarch64")]
 fn page_of(memory: u64) -> u64 {
-    PTE_TYPE_PAGE | PTE_AF | PTE_SHARED | PTE_WRITE | PTE_PXN | PTE_UXN | (attribute_of(memory) << 2)
+    PTE_TYPE_PAGE | PTE_AF | PTE_SHARED | PTE_WRITE | PTE_DIRTY | PTE_PXN | PTE_UXN | (attribute_of(memory) << 2)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -612,17 +633,26 @@ fn attribute_of(memory: u64) -> u64 {
 #[cfg(target_arch = "aarch64")]
 pub fn virt_to_phys(vaddr: u64) -> u64 {
     let memstart = unsafe { read_volatile(_memstart_addr) };
-    vaddr - linear_map_base() + memstart
+    vaddr - linear_map_base(vaddr) + memstart
 }
 
+// The linear map sat at the top of the kernel half (PAGE_OFFSET = -1 << (VA_BITS - 1)) until the
+// 5.4 VA-space flip moved it to the bottom (-1 << VA_BITS). Both candidates are 256 GB apart, so a
+// linear-map address selects its layout by being at or above the higher (older) base.
 #[cfg(target_arch = "aarch64")]
-fn linear_map_base() -> u64 {
+fn linear_map_base(vaddr: u64) -> u64 {
     let tcr_el1: u64;
     unsafe {
         core::arch::asm!("mrs {}, tcr_el1", out(reg) tcr_el1, options(nomem, nostack));
     }
     let kernel_address_bits = 64 - ((tcr_el1 >> TCR_T1SZ_SHIFT) & TCR_T1SZ_MASK);
-    u64::MAX << kernel_address_bits
+    let flipped = u64::MAX << kernel_address_bits;
+    let classic = u64::MAX << (kernel_address_bits - 1);
+    if vaddr >= classic {
+        classic
+    } else {
+        flipped
+    }
 }
 
 #[cfg(target_arch = "arm")]
@@ -721,6 +751,7 @@ const PTE_TYPE_PAGE: u64 = 0x3;
 const PTE_SHARED: u64 = 3 << 8;
 const PTE_AF: u64 = 1 << 10;
 const PTE_WRITE: u64 = 1 << 51;
+const PTE_DIRTY: u64 = 1 << 55;
 const PTE_PXN: u64 = 1 << 53;
 const PTE_UXN: u64 = 1 << 54;
 const IRQF_SHARED: usize = 0x80;
@@ -752,13 +783,15 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _fget: unsafe extern "C" fn(c_uint) -> *mut c_void;
     #[cfg(not(target_arch = "x86"))]
-    static _kernel_read: unsafe extern "C" fn(*mut c_void, *mut u8, usize, *mut i64) -> isize;
+    static _kernel_read: unsafe extern "C" fn(*mut c_void, i64, *mut u8, usize) -> isize;
     #[cfg(not(target_arch = "x86"))]
-    static _kernel_write: unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut i64) -> isize;
+    static _kernel_write: unsafe extern "C" fn(*mut c_void, *const u8, usize, i64) -> isize;
     // Allocation profiling renamed the entry points in 6.10; before that the
     // size-plus-flags pair went to __kmalloc.
     static ___kmalloc_noprof: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
     static _kmalloc: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
+    // Kernels before ~5.x inline kmalloc, so kallsyms names only __kmalloc.
+    static ___kmalloc: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
     #[cfg(not(target_arch = "x86"))]
     static _kfree: unsafe extern "C" fn(*mut u8);
     // Executable memory moved out of the module loader in 6.12.
@@ -798,7 +831,8 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _pci_get_domain_bus_and_slot: unsafe extern "C" fn(c_int, c_uint, c_uint) -> *mut c_void;
     #[cfg(not(target_arch = "x86"))]
-    static _pci_irq_vector: unsafe extern "C" fn(*mut c_void, c_uint) -> c_int;
+    static _pci_irq_vector: Option<unsafe extern "C" fn(*mut c_void, c_uint) -> c_int>;
+    static _of_irq_parse_and_map_pci: Option<unsafe extern "C" fn(*mut c_void, u8, u8) -> c_int>;
     #[cfg(not(target_arch = "x86"))]
     static _pci_dev_put: unsafe extern "C" fn(*mut c_void);
     #[cfg(not(target_arch = "x86"))]
@@ -819,7 +853,10 @@ unsafe extern "C" {
         usize,
         *const c_char,
         *mut c_void,
-    ) -> c_int;    static _generic_ioremap_prot: unsafe extern "C" fn(u64, usize, usize) -> *mut c_void;
+    ) -> c_int;
+    static _generic_ioremap_prot: Option<unsafe extern "C" fn(u64, usize, usize) -> *mut c_void>;
+    #[cfg(target_arch = "aarch64")]
+    static ___ioremap: Option<unsafe extern "C" fn(u64, usize, u64) -> *mut c_void>;
     #[cfg(not(target_arch = "x86"))]
     static _vmap: unsafe extern "C" fn(*mut c_void, u32, usize, usize) -> *mut c_void;
     #[cfg(target_arch = "aarch64")]
