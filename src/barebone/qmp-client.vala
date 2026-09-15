@@ -238,7 +238,7 @@ namespace Frida.Barebone {
 		private async SocketConnection plug_hostlink (string chardev, string device, string bus,
 				Cancellable? cancellable) throws Error, IOError {
 			string socket_path = Path.build_filename (Environment.get_tmp_dir (),
-				"frida-hostlink-" + Uuid.string_random () + ".sock");
+				"frida-hl-" + Uuid.string_random ().substring (0, 8) + ".sock");
 
 			yield add_listening_chardev (chardev, socket_path, cancellable);
 			yield add_serial_port (chardev, bus, "re.frida.hostlink", device, 1, cancellable);
