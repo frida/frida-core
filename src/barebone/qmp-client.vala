@@ -141,9 +141,6 @@ namespace Frida.Barebone {
 
 		public async Hostlink open_hostlink (string? preferred_bus = null, Cancellable? cancellable = null)
 				throws Error, IOError {
-#if WINDOWS
-			throw new Error.NOT_SUPPORTED ("Missing open_hostlink() for Windows");
-#else
 			uint64 mmio = 0;
 			uint irq = 0;
 			string bus = preferred_bus;
@@ -156,21 +153,6 @@ namespace Frida.Barebone {
 			if (bus != null && mmio == 0)
 				mmio = yield resolve_mmio_base (bus, cancellable);
 
-			int fds[2];
-			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
-				throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
-
-			Socket local_sock, remote_sock;
-			try {
-				local_sock = new Socket.from_fd (fds[0]);
-				remote_sock = new Socket.from_fd (fds[1]);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("%s", e.message);
-			}
-
-			string fd_name = "appfd";
-			yield getfd (fd_name, fds[1], cancellable);
-
 			string chardev = "vserial0";
 			string device = "hostlink.port";
 			yield unplug_leftover_hostlink (chardev, device, cancellable);
@@ -178,18 +160,15 @@ namespace Frida.Barebone {
 			hostlink_port = device;
 			event.connect (on_event);
 
-			yield add_chardev_from_fd (chardev, fd_name, cancellable);
-			yield add_serial_port (chardev, bus, "re.frida.hostlink", device, 1, cancellable);
+			var connection = yield plug_hostlink (chardev, device, bus, cancellable);
 
 			return new Hostlink () {
-				connection = SocketConnection.factory_create_connection (local_sock),
+				connection = connection,
 				mmio = mmio,
 				irq = irq,
 			};
-#endif
 		}
 
-#if !WINDOWS
 		private async uint64 resolve_mmio_base (string bus, Cancellable? cancellable) throws IOError {
 			var controller = bus[:bus.last_index_of (".")];
 
@@ -210,7 +189,6 @@ namespace Frida.Barebone {
 
 		private const uint64 VIRT_MMIO_BASE = 0x0a000000;
 		private const uint64 VIRT_MMIO_STRIDE = 0x200;
-#endif
 
 		private async void unplug_leftover_hostlink (string chardev, string device,
 				Cancellable? cancellable) throws IOError {
@@ -257,13 +235,28 @@ namespace Frida.Barebone {
 			yield execute_command ("chardev-remove", args.get_root (), cancellable);
 		}
 
+		private async SocketConnection plug_hostlink (string chardev, string device, string bus,
+				Cancellable? cancellable) throws Error, IOError {
+			string socket_path = Path.build_filename (Environment.get_tmp_dir (),
+				"frida-hostlink-" + Uuid.string_random () + ".sock");
+
+			yield add_listening_chardev (chardev, socket_path, cancellable);
+			yield add_serial_port (chardev, bus, "re.frida.hostlink", device, 1, cancellable);
+
+			var client = new SocketClient ();
+			try {
+				return yield client.connect_async (new UnixSocketAddress (socket_path), cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to connect to %s: %s", socket_path, e.message);
+			}
+		}
+
 		public class Hostlink {
 			public SocketConnection connection;
 			public uint64 mmio;
 			public uint irq;
 		}
 
-#if !WINDOWS
 		private async int64 get_qom_property_int (string path, string property, Cancellable? cancellable) throws Error, IOError {
 			var val = yield get_qom_property (path, property, cancellable);
 			if (val.get_value_type () != typeof (int64))
@@ -291,17 +284,8 @@ namespace Frida.Barebone {
 			return yield execute_command ("qom-get", args.get_root (), cancellable);
 		}
 
-		private async void getfd (string name, int fd, Cancellable? cancellable) throws Error, IOError {
-			var args = new Json.Builder ();
-			args
-				.begin_object ()
-					.set_member_name ("fdname")
-					.add_string_value (name)
-				.end_object ();
-			yield execute_command_with_file_descriptor ("getfd", args.get_root (), fd, cancellable);
-		}
-
-		private async void add_chardev_from_fd (string id, string fd_name, Cancellable? cancellable) throws Error, IOError {
+		private async void add_listening_chardev (string id, string path, Cancellable? cancellable)
+				throws Error, IOError {
 			var args = new Json.Builder ();
 			args
 				.begin_object ()
@@ -314,15 +298,17 @@ namespace Frida.Barebone {
 						.set_member_name ("data")
 						.begin_object ()
 							.set_member_name ("server")
+							.add_boolean_value (true)
+							.set_member_name ("wait")
 							.add_boolean_value (false)
 							.set_member_name ("addr")
 							.begin_object ()
 								.set_member_name ("type")
-								.add_string_value ("fd")
+								.add_string_value ("unix")
 								.set_member_name ("data")
 								.begin_object ()
-									.set_member_name ("str")
-									.add_string_value (fd_name)
+									.set_member_name ("path")
+									.add_string_value (path)
 								.end_object ()
 							.end_object ()
 						.end_object ()
@@ -351,7 +337,6 @@ namespace Frida.Barebone {
 				.end_object ();
 			yield execute_command ("device_add", args.get_root (), cancellable);
 		}
-#endif
 
 		public async Json.Node execute_command (string command, Json.Node? arguments = null, Cancellable? cancellable = null)
 				throws Error, IOError {
@@ -367,55 +352,6 @@ namespace Frida.Barebone {
 			}
 
 			return yield join_request (request, cancellable);
-		}
-
-		public async Json.Node execute_command_with_file_descriptor (string command, Json.Node? arguments = null, int fd,
-				Cancellable? cancellable = null) throws Error, IOError {
-			check_connected ();
-
-#if WINDOWS
-			throw new Error.NOT_SUPPORTED ("Executing command with SocketControlMessage is not supported on Windows");
-#else
-			Request request = begin_request (command, arguments);
-
-			var scm = new UnixFDMessage ();
-			try {
-				scm.append_fd (fd);
-			} catch (GLib.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
-
-			Socket s = connection.get_socket ();
-
-			unowned uint8[] raw_command = request.json.data;
-
-			OutputVector vectors[1] = {
-				OutputVector () {
-					buffer = raw_command,
-					size = raw_command.length,
-				},
-			};
-			SocketControlMessage scms[1] = { scm };
-
-			ssize_t n;
-			try {
-				n = s.send_message (null, vectors, scms, 0, cancellable);
-			} catch (GLib.Error e) {
-				cancel_request (request);
-				throw new Error.TRANSPORT ("%s", e.message);
-			}
-
-			if (n != raw_command.length) {
-				try {
-					yield output.write_all_async (raw_command[n:], Priority.DEFAULT, cancellable, null);
-				} catch (GLib.Error e) {
-					cancel_request (request);
-					throw new Error.TRANSPORT ("%s", e.message);
-				}
-			}
-
-			return yield join_request (request, cancellable);
-#endif
 		}
 
 		private Request begin_request (string command, Json.Node? arguments) {

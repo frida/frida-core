@@ -323,9 +323,6 @@ namespace Frida.Barebone {
 			if (vsock_transport == null)
 				return;
 
-#if WINDOWS
-			throw new Error.NOT_SUPPORTED ("Hostlink transport is not available on this OS");
-#else
 			var address = new UnixSocketAddress (vsock_transport.socket_path);
 			var client = new SocketClient ();
 			while (true) {
@@ -341,7 +338,6 @@ namespace Frida.Barebone {
 					yield;
 				}
 			}
-#endif
 		}
 
 		private async Variant connect_virtio_transport (BareboneHostlinkTransportConfig config, Cancellable? cancellable)
