@@ -196,7 +196,7 @@ pub fn detect_gcc_include_paths(gcc: &Path, args: &[&str]) -> Vec<PathBuf> {
 
         let p = Path::new(raw);
         if p.exists() {
-            let canonical = fs::canonicalize(p).expect("Failed to canonicalize include path");
+            let canonical = without_extended_length_prefix(fs::canonicalize(p).expect("Failed to canonicalize include path"));
             if !paths.contains(&canonical) {
                 paths.push(canonical);
             }
@@ -204,6 +204,14 @@ pub fn detect_gcc_include_paths(gcc: &Path, args: &[&str]) -> Vec<PathBuf> {
     }
 
     paths
+}
+
+fn without_extended_length_prefix(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => path,
+    }
 }
 
 pub fn detect_gcc_library_paths(gcc: &Path, args: &[&str]) -> Vec<PathBuf> {
