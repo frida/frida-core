@@ -2489,20 +2489,107 @@ fn service_index_of(ntdll: usize, name: &[u8]) -> u32 {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn service_index_of(ntdll: usize, name: &[u8]) -> u32 {
-    let stub = export(ntdll, name);
+fn service_index_of(process: *mut c_void, ntdll: usize, name: &[u8]) -> u32 {
+    let stub = export_in(process, ntdll, name);
     if stub == 0 {
         return 0;
     }
 
-    unsafe {
-        let instruction = (stub as *const u32).read();
-        if (instruction & SUPERVISOR_CALL_MASK) != SUPERVISOR_CALL {
+    let mut word = [0u8; 4];
+    if !unsafe { read_from(process, stub, &mut word) } {
+        return 0;
+    }
+    let instruction = u32::from_le_bytes(word);
+    if (instruction & SUPERVISOR_CALL_MASK) != SUPERVISOR_CALL {
+        return 0;
+    }
+    (instruction >> INSTRUCTION_IMMEDIATE_SHIFT) & INSTRUCTION_IMMEDIATE_MASK
+}
+
+#[cfg(target_arch = "aarch64")]
+fn export_in(process: *mut c_void, base: usize, wanted: &[u8]) -> usize {
+    let Some(signature) = read_u32_in(process, base + PE_HEADERS_OFFSET) else {
+        return 0;
+    };
+    let headers = base + signature as usize;
+
+    let mut magic = [0u8; 2];
+    if !unsafe { read_from(process, headers + OPTIONAL_HEADER_OFFSET, &mut magic) } {
+        return 0;
+    }
+    let directories = headers
+        + OPTIONAL_HEADER_OFFSET
+        + if u16::from_le_bytes(magic) == PE32_PLUS_MAGIC {
+            DATA_DIRECTORIES_OFFSET_64
+        } else {
+            DATA_DIRECTORIES_OFFSET_32
+        };
+
+    let Some(directory) = read_u32_in(process, directories) else {
+        return 0;
+    };
+    let exports = base + directory as usize;
+
+    let Some(count) = read_u32_in(process, exports + EXPORT_NAME_COUNT_OFFSET) else {
+        return 0;
+    };
+    let Some(functions) = read_u32_in(process, exports + EXPORT_FUNCTIONS_OFFSET) else {
+        return 0;
+    };
+    let Some(names) = read_u32_in(process, exports + EXPORT_NAMES_OFFSET) else {
+        return 0;
+    };
+    let Some(ordinals) = read_u32_in(process, exports + EXPORT_ORDINALS_OFFSET) else {
+        return 0;
+    };
+    let functions = base + functions as usize;
+    let names = base + names as usize;
+    let ordinals = base + ordinals as usize;
+
+    for index in 0..count as usize {
+        let Some(name) = read_u32_in(process, names + index * 4) else {
+            return 0;
+        };
+        if !name_is_in(process, base + name as usize, wanted) {
+            continue;
+        }
+
+        let mut ordinal = [0u8; 2];
+        if !unsafe { read_from(process, ordinals + index * 2, &mut ordinal) } {
             return 0;
         }
-        (instruction >> INSTRUCTION_IMMEDIATE_SHIFT) & INSTRUCTION_IMMEDIATE_MASK
+        let Some(address) =
+            read_u32_in(process, functions + u16::from_le_bytes(ordinal) as usize * 4)
+        else {
+            return 0;
+        };
+        return base + address as usize;
     }
+
+    0
 }
+
+#[cfg(target_arch = "aarch64")]
+fn read_u32_in(process: *mut c_void, address: usize) -> Option<u32> {
+    let mut word = [0u8; 4];
+    if !unsafe { read_from(process, address, &mut word) } {
+        return None;
+    }
+    Some(u32::from_le_bytes(word))
+}
+
+#[cfg(target_arch = "aarch64")]
+fn name_is_in(process: *mut c_void, name: usize, wanted: &[u8]) -> bool {
+    let mut seen = [0u8; MAX_EXPORT_NAME];
+    let take = (wanted.len() + 1).min(seen.len());
+    if !unsafe { read_from(process, name, &mut seen[..take]) } {
+        return false;
+    }
+    &seen[..wanted.len()] == wanted && seen[wanted.len()] == 0
+}
+
+#[cfg(target_arch = "aarch64")]
+const MAX_EXPORT_NAME: usize = 64;
 
 fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _bootstrap: u64,
         entry: u64, stack: &mut u64) -> bool {
@@ -2540,7 +2627,7 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
     unsafe {
         let mut apc_state = [0usize; APC_STATE_WORDS];
         (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
-        index = service_index_of(ntdll, b"NtCreateThread");
+        index = service_index_of(process, ntdll, SERVICE_NAME);
         (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
     }
     if index == 0 {
@@ -2574,8 +2661,8 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
 
         let mut thread: *mut c_void = core::ptr::null_mut();
         let mut client_id = [0usize; 2];
-        let status = create(&mut thread, THREAD_ALL_ACCESS, core::ptr::null_mut(), process_handle,
-            client_id.as_mut_ptr() as *mut c_void, context as *mut u8, teb as *mut c_void, 0);
+        let status = start(&mut thread, process_handle, &mut client_id, context, teb, entry,
+            arena_seen, create);
         if status >= 0 {
             (_ZwClose)(thread);
         }
@@ -2607,6 +2694,36 @@ fn seed_processor_mode(context: u64) {
 
 #[cfg(target_arch = "aarch64")]
 fn seed_processor_mode(_context: u64) {}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const SERVICE_NAME: &[u8] = b"NtCreateThread";
+#[cfg(target_arch = "aarch64")]
+const SERVICE_NAME: &[u8] = b"NtCreateThreadEx";
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+unsafe fn start(thread: *mut *mut c_void, process_handle: *mut c_void, client_id: &mut [usize; 2],
+        context: u64, teb: u64, _entry: u64, _argument: u64,
+        create: windows_fn!(*mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void, *mut u8,
+            *mut c_void, u8, => i32)) -> i32 {
+    unsafe {
+        create(thread, THREAD_ALL_ACCESS, core::ptr::null_mut(), process_handle,
+            client_id.as_mut_ptr() as *mut c_void, context as *mut u8, teb as *mut c_void, 0)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn start(thread: *mut *mut c_void, process_handle: *mut c_void, _client_id: &mut [usize; 2],
+        _context: u64, _teb: u64, entry: u64, argument: u64,
+        create: windows_fn!(*mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void, *mut u8,
+            *mut c_void, u8, => i32)) -> i32 {
+    unsafe {
+        let create_ex: windows_fn!(*mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void,
+            *mut c_void, u32, usize, usize, usize, *mut c_void => i32) =
+            core::mem::transmute(create);
+        create_ex(thread, THREAD_ALL_ACCESS, core::ptr::null_mut(), process_handle,
+            entry as *mut c_void, argument as *mut c_void, 0, 0, 0, 0, core::ptr::null_mut())
+    }
+}
 
 // The argument travels in a register here, and the stack only has to be aligned the way a call
 // would have left it.
