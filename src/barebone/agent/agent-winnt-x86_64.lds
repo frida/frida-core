@@ -57,6 +57,7 @@ SECTIONS {
     _ZwClose = .; . += 8;
     _ZwCreateEvent = .; . += 8;
     _ExAllocatePool2 = .; . += 8;
+    _MmCopyVirtualMemory = .; . += 8;
     _KeIpiGenericCall = .; . += 8;
     _MmIsAddressValid = .; . += 8;
     _ZwClearEvent = .; . += 8;

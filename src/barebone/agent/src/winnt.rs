@@ -1758,23 +1758,75 @@ unsafe fn describe(process: *mut c_void) -> (*const u8, *const u8) {
         path[0] = 0;
         command_line[0] = 0;
 
-        let mut apc_state = [0usize; APC_STATE_WORDS];
-        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
-
-        // A process that has not run yet has pages that nothing has touched, thus read the way
-        // that recovers from a fault.
         let peb = (_PsGetProcessPeb)(process) as usize;
-        if let Some(parameters) = try_read_pointer(peb + PEB_PARAMETERS_OFFSET) {
-            read_user_string(parameters + PARAMETERS_IMAGE_PATH_OFFSET, path);
-            read_user_string(parameters + PARAMETERS_COMMAND_LINE_OFFSET, command_line);
+        if peb != 0 {
+            if let Some(parameters) = read_word_from(process, peb + PEB_PARAMETERS_OFFSET) {
+                read_string_from(process, parameters + PARAMETERS_IMAGE_PATH_OFFSET, path);
+                read_string_from(process, parameters + PARAMETERS_COMMAND_LINE_OFFSET,
+                    command_line);
+            }
         }
-
-        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
 
         let name = if path[0] != 0 { path.as_ptr() } else { image_name(process) };
         (name, command_line.as_ptr())
     }
 }
+
+unsafe fn read_from(process: *mut c_void, address: usize, out: &mut [u8]) -> bool {
+    unsafe {
+        let mut copied: usize = 0;
+        let status = (_MmCopyVirtualMemory)(
+            process,
+            address as *const c_void,
+            (_PsGetThreadProcess)((_PsGetCurrentThread)()),
+            out.as_mut_ptr() as *mut c_void,
+            out.len(),
+            KERNEL_MODE as u8,
+            &mut copied,
+        );
+        status >= 0 && copied == out.len()
+    }
+}
+
+unsafe fn read_word_from(process: *mut c_void, address: usize) -> Option<usize> {
+    let mut word = [0u8; POINTER_SIZE];
+    if !unsafe { read_from(process, address, &mut word) } {
+        return None;
+    }
+    Some(usize::from_le_bytes(word))
+}
+
+unsafe fn read_string_from(process: *mut c_void, address: usize, out: &mut [u8]) {
+    unsafe {
+        let mut header = [0u8; UNICODE_STRING_BUFFER_OFFSET + POINTER_SIZE];
+        if !read_from(process, address, &mut header) {
+            return;
+        }
+        let length = u16::from_le_bytes([header[0], header[1]]) as usize;
+        let mut pointer = [0u8; POINTER_SIZE];
+        pointer.copy_from_slice(&header[UNICODE_STRING_BUFFER_OFFSET..]);
+        let buffer = usize::from_le_bytes(pointer);
+        if buffer == 0 || length == 0 {
+            return;
+        }
+
+        let limit = out.len() - 1;
+        let wide = &mut *core::ptr::addr_of_mut!(WIDE);
+        let take = length.min(wide.len()) & !1;
+        if !read_from(process, buffer, &mut wide[..take]) {
+            return;
+        }
+
+        let mut written = 0;
+        for i in 0..take / 2 {
+            let c = u16::from_le_bytes([wide[i * 2], wide[i * 2 + 1]]);
+            written += encode_utf8(c, &mut out[written..limit]);
+        }
+        out[written] = 0;
+    }
+}
+
+static mut WIDE: [u8; MAX_COMMAND_LINE_SIZE] = [0; MAX_COMMAND_LINE_SIZE];
 
 // This read can cause a fault if the page is not in memory. At PASSIVE_LEVEL the pager gets
 // the page again.
@@ -4185,6 +4237,8 @@ kernel_abi! {
     static _ZwClose: windows_fn!(*mut c_void => i32);
     static _ZwCreateEvent: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
     static _ExAllocatePool2: windows_fn!(u64, usize, u32 => *mut c_void);
+    static _MmCopyVirtualMemory: windows_fn!(*mut c_void, *const c_void, *mut c_void, *mut c_void,
+        usize, u8, *mut usize => i32);
     static _KeIpiGenericCall: windows_fn!(unsafe extern "C" fn(usize) -> usize, usize => usize);
     static _MmIsAddressValid: windows_fn!(*const c_void => u8);
     static _ZwAllocateVirtualMemory: windows_fn!(
