@@ -453,11 +453,13 @@ namespace Frida.Barebone {
 			bool was_running = yield begin_physical_addressing (cancellable);
 			GLib.Error? failure = null;
 			try {
+				var table_pas = new uint64[blocks.size];
 				for (int i = 0; i != blocks.size; i++) {
 					uint64 table_va = tables.virtual_address + ((uint64) i * p.granule);
-					uint64 table_pa = yield resolve_physical_address (table_va, p, cancellable);
-					yield split_block (blocks[i], table_pa, p, cancellable);
+					table_pas[i] = yield resolve_physical_address (table_va, p, cancellable);
 				}
+				for (int i = 0; i != blocks.size; i++)
+					yield split_block (blocks[i], table_pas[i], p, cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
 			}
@@ -506,7 +508,7 @@ namespace Frida.Barebone {
 				uint64 raw = d_buf.read_uint64 (0);
 				Descriptor desc = Descriptor.parse (raw, level, p.granule);
 
-				if (desc.kind == BLOCK) {
+				if (desc.kind == BLOCK && level < 3) {
 					uint64 block_size = (uint64) 1 << num_block_bits_at_level (level, p.granule);
 					return new BlockMapping (slot_pa, raw, level, va & ~(block_size - 1), block_size);
 				}
@@ -629,6 +631,8 @@ namespace Frida.Barebone {
 
 		private async void grant_execution (uint64 virtual_address, size_t size, Cancellable? cancellable)
 				throws Error, IOError {
+			yield ensure_level3_coverage (virtual_address, size, cancellable);
+
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
 			bool was_running = yield begin_physical_addressing (cancellable);
