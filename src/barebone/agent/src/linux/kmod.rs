@@ -82,6 +82,8 @@ pub fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() 
     unsafe { frida_kmod_wait_commit(seq, timeout_us.map_or(-1, |us| us as i64)) };
 }
 
+pub fn poke_loop_wakeup() {}
+
 pub fn wake(_token: *const u8) {
     unsafe { frida_kmod_wake() };
 }

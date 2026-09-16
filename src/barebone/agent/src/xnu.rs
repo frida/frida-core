@@ -87,6 +87,8 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
     (primitives().wait)(token, timeout_us, check);
 }
 
+pub fn poke_loop_wakeup() {}
+
 pub fn wake(token: *const u8) {
     (primitives().wake)(token);
 }

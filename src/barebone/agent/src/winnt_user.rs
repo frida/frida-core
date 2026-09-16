@@ -102,6 +102,7 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
 
     crate::glib::own_the_loop();
     crate::watch_for_work(context, copy_has_work, serve_the_copy);
+    crate::watch_a_descriptor(context, target_wake_handle() as isize as i32, poll_handles);
 
     while unsafe { ((arena + STOP_REQUEST as usize) as *const u32).read_volatile() } == 0 {
         unsafe { crate::dispatch_pending_work(context) };
@@ -130,6 +131,7 @@ pub static USER: Primitives = Primitives {
     modify_thread,
     wait,
     wake,
+    poke_loop_wakeup,
     yield_now,
     current_process_id,
     current_thread_id,
@@ -163,6 +165,7 @@ fn resolve_user_api() {
             query_memory: core::mem::transmute(export(ntdll, b"NtQueryVirtualMemory")),
             yield_execution: core::mem::transmute(export(ntdll, b"NtYieldExecution")),
             wait_for_object: core::mem::transmute(export(ntdll, b"NtWaitForSingleObject")),
+            wait_for_objects: core::mem::transmute(export(ntdll, b"NtWaitForMultipleObjects")),
             set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
             reset_event: core::mem::transmute(export(ntdll, b"NtResetEvent")),
             create_event: core::mem::transmute(export(ntdll, b"NtCreateEvent")),
@@ -843,6 +846,7 @@ struct UserApi {
     query_memory: windows_fn!(*mut c_void, *mut u8, u32, *mut u8, usize, *mut usize => i32),
     yield_execution: windows_fn!( => i32),
     wait_for_object: windows_fn!(*mut c_void, u8, *const i64 => i32),
+    wait_for_objects: windows_fn!(u32, *const *mut c_void, u32, u8, *const i64 => i32),
     flush_code: windows_fn!(*mut c_void, *mut u8, usize => i32),
     set_event: windows_fn!(*mut c_void, *mut u32 => i32),
     reset_event: windows_fn!(*mut c_void, *mut u32 => i32),
@@ -1012,6 +1016,77 @@ fn serve_the_copy() {
         crate::on_frame_from_host(&frame);
     }
 }
+
+unsafe extern "C" fn poll_handles(ufds: *mut crate::GPollFd, nfds: u32, timeout: i32) -> i32 {
+    const MAX_HANDLES: usize = 16;
+    let fds = unsafe { core::slice::from_raw_parts_mut(ufds, nfds as usize) };
+
+    let mut handles: [*mut c_void; MAX_HANDLES] = [core::ptr::null_mut(); MAX_HANDLES];
+    let mut origin = [0usize; MAX_HANDLES];
+    let mut count = 0usize;
+    let mut ready = 0i32;
+
+    for (index, fd) in fds.iter_mut().enumerate() {
+        fd.revents = 0;
+
+        if fd.fd == G_WAIT_WAKEUP_HANDLE {
+            if !fd.user_data.is_null() {
+                if unsafe { (fd.user_data as *const i32).read_volatile() } != 0 {
+                    fd.revents = POLL_IN;
+                    ready += 1;
+                }
+                let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
+                unsafe { token.write(fd.user_data) };
+            }
+        } else if fd.fd != -1 && count < MAX_HANDLES {
+            handles[count] = fd.fd as isize as *mut c_void;
+            origin[count] = index;
+            count += 1;
+        }
+    }
+
+    if ready == 0 && count != 0 {
+        let due_time = if timeout < 0 {
+            None
+        } else {
+            Some(-((timeout as i64) * 10_000))
+        };
+        let status = unsafe {
+            (user_api().wait_for_objects)(count as u32, handles.as_ptr(), WAIT_ANY_OBJECT, 0,
+                due_time.as_ref().map_or(core::ptr::null(), |t| t))
+        };
+        if status >= 0 && (status as usize) < count {
+            let slot = status as usize;
+            fds[origin[slot]].revents = POLL_IN;
+            ready += 1;
+            if core::ptr::eq(handles[slot], target_wake_handle()) {
+                unsafe { (user_api().reset_event)(handles[slot], core::ptr::null_mut()) };
+            }
+        }
+    }
+
+    for fd in fds.iter() {
+        if fd.fd == G_WAIT_WAKEUP_HANDLE && !fd.user_data.is_null() {
+            let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
+            unsafe { token.write(core::ptr::null_mut()) };
+        }
+    }
+
+    ready
+}
+
+pub(crate) fn poke_loop_wakeup() {
+    let event = target_wake_handle();
+    if event.is_null() {
+        return;
+    }
+    unsafe { (user_api().set_event)(event, core::ptr::null_mut()) };
+}
+
+const G_WAIT_WAKEUP_HANDLE: i32 = -43;
+const GWAKEUP_TOKEN: usize = 8;
+const POLL_IN: u16 = 1;
+const WAIT_ANY_OBJECT: u32 = 1;
 
 fn target_wake_handle() -> *mut c_void {
     unsafe { ((ARENA + TARGET_WAKE_HANDLE) as *const u64).read() as *mut c_void }

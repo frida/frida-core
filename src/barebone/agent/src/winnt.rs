@@ -243,6 +243,10 @@ pub fn wake(token: *const u8) {
     (primitives().wake)(token)
 }
 
+pub fn poke_loop_wakeup() {
+    (primitives().poke_loop_wakeup)()
+}
+
 // A copy in a different process can use a handle, but it cannot use our memory. Thus the
 // loop waits on an event of the object manager. Install the event before the loop waits the
 // first time, because a token keeps the first event it receives.
@@ -3059,6 +3063,7 @@ pub struct Primitives {
     pub modify_thread: fn(u32, &mut dyn FnMut(&mut CpuState)) -> bool,
     pub wait: fn(*const u8, Option<u64>, &mut dyn FnMut() -> bool),
     pub wake: fn(*const u8),
+    pub poke_loop_wakeup: fn(),
     pub yield_now: fn(),
     pub current_process_id: fn() -> u32,
     pub current_thread_id: fn() -> u64,
@@ -3093,6 +3098,7 @@ static KERNEL: Primitives = Primitives {
     modify_thread: kernel::modify_thread,
     wait: kernel::wait,
     wake: kernel::wake,
+    poke_loop_wakeup: kernel::poke_loop_wakeup,
     yield_now: kernel::yield_now,
     current_process_id: kernel::current_process_id,
     current_thread_id: kernel::current_thread_id,
@@ -3200,6 +3206,8 @@ mod kernel {
             left -= 1;
         }
     }
+
+    pub fn poke_loop_wakeup() {}
 
     pub fn yield_now() {
         unsafe {
