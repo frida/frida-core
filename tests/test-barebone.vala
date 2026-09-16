@@ -4522,8 +4522,13 @@ FAIL: %s
 
 			var session = yield device.attach (pid, null, null);
 			var script = yield session.create_script ("""
-				send({ modules: true, exports: true });
-				send({ threads: true });
+				const mods = Process.enumerateModules();
+				const ntdll = mods.find(m => m.name.toLowerCase() === 'ntdll.dll');
+				const named = ntdll.enumerateExports().some(e => e.name === 'NtClose');
+				send({ modules: mods.length > 1, exports: named });
+
+				const threads = Process.enumerateThreads();
+				send({ threads: threads.length > 0 && threads.every(t => t.id !== 0) });
 			""", null, null);
 
 			var messages = new Gee.ArrayList<string> ();
