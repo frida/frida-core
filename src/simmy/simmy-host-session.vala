@@ -101,8 +101,8 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
-				throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, owned ConnectingFunc connecting,
+				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 

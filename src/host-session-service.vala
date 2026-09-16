@@ -164,8 +164,8 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async HostSession create (HostSessionHub hub, HostSessionOptions? options = null,
-			Cancellable? cancellable = null) throws Error, IOError;
+		public abstract async HostSession create (HostSessionHub hub, HostSessionOptions? options, owned ConnectingFunc connecting,
+			Cancellable? cancellable) throws Error, IOError;
 		public abstract async void destroy (HostSession session, Cancellable? cancellable = null) throws Error, IOError;
 		public signal void host_session_detached (HostSession session);
 
@@ -182,6 +182,8 @@ namespace Frida {
 			Cancellable? cancellable = null) throws Error, IOError;
 		public abstract void unlink_service_session (HostSession host_session, ServiceSessionId id);
 	}
+
+	public delegate void ConnectingFunc (string status, double progress);
 
 	private const uint16 PROVIDER_ICON_SIZE = 96;
 
@@ -328,8 +330,8 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
-				throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, owned ConnectingFunc connecting,
+				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 

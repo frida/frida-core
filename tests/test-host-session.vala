@@ -364,6 +364,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Local/connected-should-be-emitted-once", () => {
+			var h = new Harness ((h) => Local.connected_should_be_emitted_once.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Local/latency-should-be-nominal", () => {
 			var h = new Harness ((h) => Local.latency_should_be_nominal.begin (h as Harness));
 			h.run ();
@@ -493,8 +498,8 @@ namespace Frida.HostSessionTest {
 				get { return HostSessionProviderKind.LOCAL; }
 			}
 
-			public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
-					throws Error, IOError {
+			public async HostSession create (HostSessionHub hub, HostSessionOptions? options, owned ConnectingFunc connecting,
+					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
@@ -1093,6 +1098,27 @@ namespace Frida.HostSessionTest {
 		}
 #endif
 
+		private static async void connected_should_be_emitted_once (Harness h) {
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				uint connected_count = 0;
+				device.connected.connect (() => connected_count++);
+
+				yield device.enumerate_processes ();
+				yield device.enumerate_processes ();
+				assert_true (connected_count == 1);
+
+				yield device_manager.close ();
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
 		private static async void latency_should_be_nominal (Harness h) {
 			h.disable_timeout ();
 
@@ -1600,7 +1626,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				var applications = yield session.enumerate_applications (make_parameters_dict (), cancellable);
 				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
@@ -1641,7 +1667,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -1840,7 +1866,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				var applications = yield session.enumerate_applications (make_parameters_dict (), cancellable);
 				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
@@ -1904,7 +1930,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -2009,7 +2035,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -2515,7 +2541,7 @@ namespace Frida.HostSessionTest {
 				try {
 					Cancellable? cancellable = null;
 
-					var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+					var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 					var id = yield host_session.attach (pid, make_parameters_dict (), cancellable);
 					var session = yield prov.link_agent_session (host_session, id, h, cancellable);
@@ -2666,7 +2692,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
@@ -2693,7 +2719,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -3424,7 +3450,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
@@ -3450,7 +3476,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -3701,7 +3727,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
 
@@ -3734,7 +3760,7 @@ namespace Frida.HostSessionTest {
 				Cancellable? cancellable = null;
 
 				stdout.printf ("connecting to frida-server\n");
-				var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 				stdout.printf ("enumerating processes\n");
 				var processes = yield host_session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
@@ -4359,7 +4385,7 @@ namespace Frida.HostSessionTest {
 			try {
 				Cancellable? cancellable = null;
 
-				var session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+				var session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 				var processes = yield session.enumerate_processes (make_parameters_dict (), cancellable);
 				assert_true (processes.length > 0);
 
@@ -4539,7 +4565,7 @@ namespace Frida.HostSessionTest {
 					Cancellable? cancellable = null;
 
 					var timer = new Timer ();
-					var host_session = yield prov.create (new NullHostSessionHub (), null, cancellable);
+					var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
 					printerr ("[*] Injected in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
 					unowned string? program = Environment.get_variable ("FRIDA_BAREBONE_SPAWN");

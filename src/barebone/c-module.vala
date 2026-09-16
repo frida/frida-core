@@ -34,7 +34,7 @@ namespace Frida.Barebone {
 
 			size_t page_size = yield machine.query_page_size (cancellable);
 
-			allocation = yield inject_elf (elf, raw_elf, page_size, machine, allocator, cancellable);
+			allocation = yield inject_elf (elf, raw_elf, page_size, machine, allocator, uploaded => {}, cancellable);
 
 			uint64 base_va = allocation.virtual_address;
 			uint64 console_log_trap = 0;

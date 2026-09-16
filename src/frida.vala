@@ -769,6 +769,20 @@ namespace Frida {
 		 */
 		public signal void uninjected (uint id);
 		/**
+		 * Emitted while a connection to the device is being established, each
+		 * time it reaches a new stage. The connection is made by the first call
+		 * that needs one, so this may be emitted from any method that reaches
+		 * the device.
+		 *
+		 * @param status what the connection is busy with, phrased for the user
+		 * @param progress how far along the connection is, from 0.0 to 1.0
+		 */
+		public signal void connecting (string status, double progress);
+		/**
+		 * Emitted when a connection to the device has been established.
+		 */
+		public signal void connected ();
+		/**
 		 * Emitted when the connection to the device is lost.
 		 */
 		public signal void lost ();
@@ -1847,11 +1861,13 @@ namespace Frida {
 				lock (host_session_options)
 					opts = (host_session_options != null) ? host_session_options.copy () : null;
 
-				var session = yield provider.create (manager, opts, cancellable);
+				var session = yield provider.create (manager, opts, (status, progress) => connecting (status, progress), cancellable);
 				attach_host_session (session);
 
 				current_host_session = session;
 				host_session_request.resolve (session);
+
+				connected ();
 
 				return session;
 			} catch (GLib.Error e) {

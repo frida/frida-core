@@ -1120,8 +1120,8 @@ namespace Frida {
 				_icon = make_provider_icon (Frida.Data.Icons.get_portal_png_blob ().data);
 			}
 
-			public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
-					throws Error, IOError {
+			public async HostSession create (HostSessionHub hub, HostSessionOptions? options, owned ConnectingFunc connecting,
+					Cancellable? cancellable) throws Error, IOError {
 				if (channel != null)
 					throw new Error.INVALID_OPERATION ("Already created");
 

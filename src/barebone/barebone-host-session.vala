@@ -56,8 +56,8 @@ namespace Frida {
 			}
 		}
 
-		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
-				throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, owned ConnectingFunc connecting,
+				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Already created");
 
@@ -101,6 +101,7 @@ namespace Frida {
 				throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
 			}
 
+			connecting ("Connecting to the GDB remote stub", 0.0);
 			IOStream stream;
 			try {
 				var client = new SocketClient ();
@@ -113,8 +114,10 @@ namespace Frida {
 				throw new Error.TRANSPORT ("The specified GDB remote stub cannot be reached: %s", e.message);
 			}
 
-			if (config.connection.flavor == BareboneStubFlavor.ANDROID_EMULATOR)
+			if (config.connection.flavor == BareboneStubFlavor.ANDROID_EMULATOR) {
+				connecting ("Instrumenting the emulator", 0.05);
 				emulator_instrumentation = yield EmulatorInstrumentation.apply (config, cancellable);
+			}
 
 			GDB.Client gdb;
 			switch (config.connection.flavor) {
@@ -130,7 +133,7 @@ namespace Frida {
 			}
 
 			try {
-				host_session = yield establish (config, gdb, cancellable);
+				host_session = yield establish (config, gdb, (owned) connecting, cancellable);
 			} catch (GLib.Error e) {
 				if (gdb.state == STOPPED) {
 					try {
@@ -149,8 +152,8 @@ namespace Frida {
 			return host_session;
 		}
 
-		private async BareboneHostSession establish (BareboneConfig config, GDB.Client gdb, Cancellable? cancellable)
-				throws Error, IOError {
+		private async BareboneHostSession establish (BareboneConfig config, GDB.Client gdb, owned ConnectingFunc connecting,
+				Cancellable? cancellable) throws Error, IOError {
 			// The arm64 MMU system registers (TTBR1_EL1/TCR_EL1) are exposed by some stubs and not
 			// others (the Android emulator's does not); detect it from the advertised register set,
 			// which selects host page-table walking versus the kernel's set_memory_* helpers.
@@ -196,6 +199,8 @@ namespace Frida {
 			} catch (Error e) {
 				page_size = 0;
 			}
+
+			connecting ("Resolving the kernel layout", 0.1);
 
 			// Resolve the kernel's runtime layout before building the allocator: on a scattered
 			// SPTM kernel collection the config-supplied addresses are static and must be translated.
@@ -274,9 +279,10 @@ namespace Frida {
 			Barebone.AgentConnection? agent_connection = null;
 			var agent_config = config.agent as BareboneInjectedAgentConfig;
 			if (agent_config != null) {
-				agent_connection = yield Barebone.AgentConnection.open (agent_config, config.image, config.kernel,
-					relocation, kernel_base, machine, allocator, kernel_modules, kernel_symbols,
-					cancellable);
+				agent_connection = new Barebone.AgentConnection (agent_config, config.image, config.kernel, relocation,
+					kernel_base, machine, allocator, kernel_modules, kernel_symbols);
+				agent_connection.progress.connect ((status, fraction) => connecting (status, 0.2 + 0.8 * fraction));
+				yield agent_connection.open (cancellable);
 			}
 
 			var interceptor = new Barebone.Interceptor (machine, allocator);

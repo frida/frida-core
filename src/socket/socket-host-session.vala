@@ -55,8 +55,8 @@ namespace Frida {
 			io_cancellable.cancel ();
 		}
 
-		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, Cancellable? cancellable)
-				throws Error, IOError {
+		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, owned ConnectingFunc connecting,
+				Cancellable? cancellable) throws Error, IOError {
 			string? raw_address = null;
 			TlsCertificate? certificate = null;
 			string? origin = null;
@@ -87,6 +87,7 @@ namespace Frida {
 			}
 			SocketConnectable connectable = parse_control_address (raw_address);
 
+			connecting ("Connecting to frida-server", 0.0);
 			SocketConnection socket_connection;
 			try {
 				var client = new SocketClient ();
@@ -110,6 +111,7 @@ namespace Frida {
 			IOStream stream = socket_connection;
 
 			if (certificate != null) {
+				connecting ("Performing the TLS handshake", 0.25);
 				try {
 					var tc = TlsClientConnection.new (stream, connectable);
 					tc.set_database (null);
@@ -130,6 +132,7 @@ namespace Frida {
 			var transport = (certificate != null) ? WebServiceTransport.TLS : WebServiceTransport.PLAIN;
 			string host = (raw_address != null) ? raw_address : "lolcathost";
 
+			connecting ("Negotiating the connection", 0.5);
 			stream = yield negotiate_connection (stream, transport, host, origin, cancellable);
 
 			DBusConnection connection;
@@ -140,6 +143,7 @@ namespace Frida {
 			}
 
 			if (token != null) {
+				connecting ("Authenticating", 0.75);
 				AuthenticationService auth_service;
 				try {
 					auth_service = yield connection.get_proxy (null, ObjectPath.AUTHENTICATION_SERVICE,

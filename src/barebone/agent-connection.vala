@@ -1,6 +1,7 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class AgentConnection : Object, AsyncInitable {
+		public signal void progress (string status, double fraction);
 		public signal void script_message (uint pid, AgentScriptId id, string json, Bytes? data);
 
 		private Cancellable io_cancellable = new Cancellable ();
@@ -49,29 +50,26 @@ namespace Frida.Barebone {
 		private const size_t FAULT_RECORD_SIZE = 32;
 		private const uint GREETING_TIMEOUT_MS = 20000;
 
-		public static async AgentConnection open (BareboneInjectedAgentConfig agent_config, BareboneImageConfig? image_config,
+		public AgentConnection (BareboneInjectedAgentConfig agent_config, BareboneImageConfig? image_config,
 				BareboneKernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
-				Allocator allocator, Gee.List<ModuleInfo> kernel_modules, Gee.List<SymbolInfo> kernel_symbols,
-				Cancellable? cancellable) throws Error, IOError {
-			var connection = new AgentConnection () {
-				agent_config = agent_config,
-				image_config = image_config,
-				kernel_kind = kernel_kind,
-				relocation = relocation,
-				kernel_base = kernel_base,
-				machine = machine,
-				allocator = allocator,
-				kernel_modules = kernel_modules,
-				kernel_symbols = kernel_symbols,
-			};
+				Allocator allocator, Gee.List<ModuleInfo> kernel_modules, Gee.List<SymbolInfo> kernel_symbols) {
+			this.agent_config = agent_config;
+			this.image_config = image_config;
+			this.kernel_kind = kernel_kind;
+			this.relocation = relocation;
+			this.kernel_base = kernel_base;
+			this.machine = machine;
+			this.allocator = allocator;
+			this.kernel_modules = kernel_modules;
+			this.kernel_symbols = kernel_symbols;
+		}
 
+		public async void open (Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield connection.init_async (Priority.DEFAULT, cancellable);
+				yield init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
 				throw_api_error (e);
 			}
-
-			return connection;
 		}
 
 		/**
@@ -80,15 +78,17 @@ namespace Frida.Barebone {
 		 */
 		public static async AgentConnection open_resident (IOStream stream, Cancellable? cancellable)
 				throws Error, IOError {
-			var connection = new AgentConnection () {
-				byte_order = ByteOrder.HOST,
-				pointer_size = (uint) sizeof (void *),
-			};
+			var connection = new AgentConnection.resident ();
 
 			connection.adopt_hostlink_streams (stream);
 			connection.process_incoming_messages.begin ();
 
 			return connection;
+		}
+
+		private AgentConnection.resident () {
+			byte_order = ByteOrder.HOST;
+			pointer_size = (uint) sizeof (void *);
 		}
 
 		private const uint8 TRANSPORT_KIND_VIRTIO = 0;
@@ -98,6 +98,8 @@ namespace Frida.Barebone {
 		private const uint8 TRANSPORT_KIND_PIPE_VSOCK = 4;
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			progress ("Preparing the agent", 0.0);
+
 			var transport_tag = yield resolve_transport (cancellable);
 
 			var gdb = machine.gdb;
@@ -206,11 +208,14 @@ namespace Frida.Barebone {
 
 			this.flavor = flavor;
 
+			progress ("Waiting for the target to be ready", 0.1);
 			yield flavor.prepare (cancellable);
 
 			size_t page_size = yield machine.query_page_size (cancellable);
 
-			elf_allocation = yield inject_elf (elf, raw_elf.bytes, page_size, machine, allocator, cancellable);
+			progress ("Injecting the agent", 0.2);
+			elf_allocation = yield inject_elf (elf, raw_elf.bytes, page_size, machine, allocator,
+				uploaded => progress ("Injecting the agent", 0.2 + 0.5 * uploaded), cancellable);
 
 			uint64 start_address = 0;
 			uint64 base_va = elf_allocation.virtual_address;
@@ -295,6 +300,7 @@ namespace Frida.Barebone {
 			if (ia32 != null)
 				ia32.arguments_in_registers = 0;
 
+			progress ("Starting the agent", 0.75);
 			yield machine.invoke (start_address, {
 					config_allocation.virtual_address,
 					config_allocation.size
@@ -304,6 +310,7 @@ namespace Frida.Barebone {
 			if (ia32 != null)
 				ia32.arguments_in_registers = kernel_arguments;
 
+			progress ("Connecting to the agent", 0.9);
 			yield flavor.settle (cancellable);
 			if (qmp != null)
 				yield qmp.wait_until_hostlink_is_open (cancellable);

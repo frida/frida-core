@@ -2883,7 +2883,7 @@ FAIL: %s
 				var elf = new Gum.ElfModule.from_file (marker_path ());
 				size_t page_size = yield machine.query_page_size (null);
 				Barebone.Allocation image = yield Barebone.inject_elf (elf, new Bytes (elf.get_file_data ()),
-					page_size, machine, allocator, null);
+					page_size, machine, allocator, uploaded => {}, null);
 				uint64 base_va = image.virtual_address;
 
 				uint64 start = 0;
@@ -2951,7 +2951,7 @@ FAIL: %s
 
 				var timer = new Timer ();
 				Barebone.Allocation image = yield Barebone.inject_elf (elf, new Bytes (elf.get_file_data ()),
-					page_size, machine, allocator, null);
+					page_size, machine, allocator, uploaded => {}, null);
 				stdout.printf ("<%u KiB in %.1fs> ", (uint) (image.size / 1024), timer.elapsed ());
 
 				uint64 base_va = image.virtual_address;
@@ -3015,7 +3015,7 @@ FAIL: %s
 
 				var timer = new Timer ();
 				Barebone.Allocation image = yield Barebone.inject_elf (elf, new Bytes (elf.get_file_data ()),
-					page_size, machine, allocator, null);
+					page_size, machine, allocator, uploaded => {}, null);
 				stdout.printf ("<%u KiB in %.1fs> ", (uint) (image.size / 1024), timer.elapsed ());
 
 				uint64 base_va = image.virtual_address;
