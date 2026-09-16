@@ -332,6 +332,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/arm64-sees-target-modules-and-threads-in-live-guest", () => {
+			var h = new SlowHarness ((h) =>
+				winnt_arm64_sees_target_modules_and_threads_in_live_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/arm64-injects-into-process-in-live-guest", () => {
 			var h = new SlowHarness ((h) =>
 				winnt_arm64_injects_into_process_in_live_guest.begin (h as SlowHarness));
@@ -4495,6 +4501,49 @@ FAIL: %s
 			}
 			send({ caught: caught });
 		""", "\"caught\":\"yes\"");
+	}
+
+	private async void winnt_arm64_sees_target_modules_and_threads_in_live_guest (SlowHarness h) {
+		var config = parallels_config_from_environment (h, "WINNT_ARM64");
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "explorer.exe");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				send({ modules: true, exports: true });
+				send({ threads: true });
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 2)
+				yield h.process_events ();
+			yield session.detach (null);
+
+			assert_true (messages[0].contains ("\"modules\":true"));
+			assert_true (messages[0].contains ("\"exports\":true"));
+			assert_true (messages[1].contains ("\"threads\":true"));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
 	}
 
 	private async void winnt_arm64_injects_into_process_in_live_guest (SlowHarness h) {
