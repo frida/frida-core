@@ -690,8 +690,13 @@ pub fn install_fault_reporter() {
             .write((live + SYNCHRONOUS_ENTRY_OFFSET) as u64);
 
         publish(shadow, VECTOR_TABLE_SIZE);
-        slot.write(shadow as u64);
-        adopt_everywhere(shadow);
+        let (own_base, own_size) = crate::own_code();
+        FAULT_CONTROL.base = own_base as u64;
+        FAULT_CONTROL.size = own_size as u64;
+        if !hook_the_synchronous_handler(live) {
+            slot.write(shadow as u64);
+            adopt_everywhere(shadow);
+        }
 
         SHADOW_VECTORS = shadow;
         LIVE_VECTORS = live;
@@ -702,6 +707,14 @@ pub fn install_fault_reporter() {
 #[cfg(target_arch = "aarch64")]
 pub fn release_fault_reporter() {
     unsafe {
+        if HOOKED_HANDLER != 0 {
+            let interceptor = crate::bindings::gum_interceptor_obtain();
+            crate::bindings::gum_interceptor_revert(interceptor, HOOKED_HANDLER as *mut c_void);
+            HOOKED_HANDLER = 0;
+            SHADOW_VECTORS = 0;
+            return;
+        }
+
         if SHADOW_VECTORS == 0 {
             return;
         }
@@ -851,6 +864,138 @@ fn current_vectors() -> usize {
 // Take the first slot of the array rather than whichever one VBAR_EL1 names. They are not the
 // same: a processor boots on the slot its mitigations pick, while KiPreflightReturnToUserMode
 // reloads VBAR_EL1 from the first. Writing the slot in use is quietly undone.
+#[cfg(target_arch = "aarch64")]
+fn hook_the_synchronous_handler(live: usize) -> bool {
+    let Some(handler) = the_handler_the_entry_calls(live) else {
+        return false;
+    };
+
+    unsafe {
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        let outcome = crate::bindings::gum_interceptor_replace_fast(
+            interceptor,
+            handler as *mut c_void,
+            on_synchronous_exception as *mut c_void,
+            &raw mut ORIGINAL_HANDLER as *mut *mut c_void,
+            core::ptr::null(),
+        );
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        if outcome != 0 {
+            return false;
+        }
+        HOOKED_HANDLER = handler;
+    }
+
+    true
+}
+
+#[cfg(target_arch = "aarch64")]
+fn the_handler_the_entry_calls(live: usize) -> Option<usize> {
+    let entry = (live + SYNCHRONOUS_ENTRY_OFFSET) as *const u32;
+    for index in 0..(VECTOR_ENTRY_SIZE / 4) - 1 {
+        let word = unsafe { entry.add(index).read() };
+        if word == FRAME_INTO_X0 {
+            let call = unsafe { entry.add(index + 1).read() };
+            if call & BRANCH_LINK_MASK == BRANCH_LINK {
+                let reach = ((call & 0x03ff_ffff) << 6) as i32 >> 6;
+                let at = live + SYNCHRONOUS_ENTRY_OFFSET + (index + 1) * 4;
+                return Some((at as isize + (reach as isize) * 4) as usize);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_arch = "aarch64")]
+extern "C" fn on_synchronous_exception(frame: *mut u8) {
+    let pc = unsafe { frame.byte_add(FRAME_PC).cast::<u64>().read() };
+    let ours = unsafe { FAULT_CONTROL.base } as u64;
+    if pc.wrapping_sub(ours) >= unsafe { FAULT_CONTROL.size } as u64 {
+        let onward: extern "C" fn(*mut u8) = unsafe { core::mem::transmute(ORIGINAL_HANDLER) };
+        onward(frame);
+        return;
+    }
+
+    let esr = unsafe { frame.byte_add(FRAME_ESR).cast::<u32>().read() };
+    let far = unsafe { frame.byte_add(FRAME_FAULT_ADDRESS).cast::<u64>().read() };
+
+    let mut cpu_context = crate::bindings::_GumArm64CpuContext {
+        pc,
+        sp: unsafe { frame.byte_add(FRAME_SP).cast::<u64>().read() },
+        nzcv: unsafe { frame.byte_add(FRAME_SPSR).cast::<u32>().read() } as u64,
+        x: [0; 29],
+        fp: unsafe { frame.byte_add(FRAME_FP).cast::<u64>().read() },
+        lr: unsafe { frame.byte_add(FRAME_LR).cast::<u64>().read() },
+    };
+    for index in 0..FRAME_REGISTERS {
+        cpu_context.x[index] = unsafe {
+            frame.byte_add(FRAME_X0 + index * 8).cast::<u64>().read()
+        };
+    }
+
+    if !handle_with(esr, pc, far as usize, &mut cpu_context) {
+        let onward: extern "C" fn(*mut u8) = unsafe { core::mem::transmute(ORIGINAL_HANDLER) };
+        onward(frame);
+        return;
+    }
+
+    unsafe {
+        for index in 0..FRAME_REGISTERS {
+            frame.byte_add(FRAME_X0 + index * 8).cast::<u64>().write(cpu_context.x[index]);
+        }
+        frame.byte_add(FRAME_FP).cast::<u64>().write(cpu_context.fp);
+        frame.byte_add(FRAME_LR).cast::<u64>().write(cpu_context.lr);
+        frame.byte_add(FRAME_SP).cast::<u64>().write(cpu_context.sp);
+        frame.byte_add(FRAME_PC).cast::<u64>().write(cpu_context.pc);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+static mut ORIGINAL_HANDLER: *mut c_void = core::ptr::null_mut();
+#[cfg(target_arch = "aarch64")]
+static mut HOOKED_HANDLER: usize = 0;
+
+#[cfg(target_arch = "aarch64")]
+const FRAME_FAULT_ADDRESS: usize = 0x08;
+#[cfg(target_arch = "aarch64")]
+const FRAME_SPSR: usize = 0x90;
+#[cfg(target_arch = "aarch64")]
+const FRAME_ESR: usize = 0x94;
+#[cfg(target_arch = "aarch64")]
+const FRAME_SP: usize = 0x98;
+#[cfg(target_arch = "aarch64")]
+const FRAME_X0: usize = 0xa0;
+#[cfg(target_arch = "aarch64")]
+const FRAME_LR: usize = 0x138;
+#[cfg(target_arch = "aarch64")]
+const FRAME_FP: usize = 0x140;
+#[cfg(target_arch = "aarch64")]
+const FRAME_PC: usize = 0x148;
+#[cfg(target_arch = "aarch64")]
+const FRAME_REGISTERS: usize = 19;
+#[cfg(target_arch = "aarch64")]
+const FRAME_INTO_X0: u32 = 0x9100_03e0;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_LINK_MASK: u32 = 0xfc00_0000;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_LINK: u32 = 0x9400_0000;
+
+#[cfg(target_arch = "aarch64")]
+const SET_VBAR: u32 = 0xd518_c000;
+#[cfg(target_arch = "aarch64")]
+const SET_VBAR_MASK: u32 = 0xffff_ffe0;
+#[cfg(target_arch = "aarch64")]
+const ADRP_MASK: u32 = 0x9f00_001f;
+#[cfg(target_arch = "aarch64")]
+const ADRP: u32 = 0x9000_0000;
+#[cfg(target_arch = "aarch64")]
+const ADD_MASK: u32 = 0xffc0_03ff;
+#[cfg(target_arch = "aarch64")]
+const ADD: u32 = 0x9100_0000;
+#[cfg(target_arch = "aarch64")]
+const LOAD: u32 = 0xf940_0000;
+
 #[cfg(target_arch = "aarch64")]
 fn vectors_in_use() -> *mut u64 {
     let Some(image) = image_containing(current_vectors()) else {
@@ -1064,6 +1209,7 @@ const BRANCH_X18: u32 = 0xd61f_0240;
 #[cfg(target_arch = "aarch64")]
 #[unsafe(no_mangle)]
 extern "C" fn frida_winnt_on_fault(frame: *mut u64) -> usize {
+
     let pc = read_exception_register!("elr_el1");
     let state = read_exception_register!("spsr_el1");
 
@@ -1346,11 +1492,16 @@ extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u64) -> usize {
 const STACK_POINTER_IN_FRAME: usize = 3;
 
 fn handle(fault: u32, pc: u64, cpu_context: &mut crate::bindings::GumCpuContext) -> bool {
+    handle_with(fault, pc, faulting_address(), cpu_context)
+}
+
+fn handle_with(fault: u32, pc: u64, accessed: usize,
+        cpu_context: &mut crate::bindings::GumCpuContext) -> bool {
     let handled = unsafe {
         crate::bindings::gum_barebone_handle_exception(
             exception_type_for(fault),
             pc as *mut c_void,
-            faulting_address() as *mut c_void,
+            accessed as *mut c_void,
             cpu_context,
         )
     };
