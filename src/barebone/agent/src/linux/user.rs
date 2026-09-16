@@ -199,6 +199,11 @@ fn free_code(ptr: *mut u8, size: usize) {
 }
 
 fn protect(address: u64, size: usize, protection: u32) -> bool {
+    #[cfg(target_arch = "aarch64")]
+    if (protection & GUM_PAGE_EXECUTE) != 0 {
+        return ask_the_kernel_half_to_make_executable(address, size);
+    }
+
     let wanted = ((protection & GUM_PAGE_READ) != 0) as usize * READABLE
         | ((protection & GUM_PAGE_WRITE) != 0) as usize * WRITABLE
         | ((protection & GUM_PAGE_EXECUTE) != 0) as usize * EXECUTABLE;
@@ -208,6 +213,20 @@ fn protect(address: u64, size: usize, protection: u32) -> bool {
     let span = ((address as usize) + size + page - 1 & !(page - 1)) - first;
 
     syscall(MPROTECT, first, span, wanted, 0, 0, 0) == 0
+}
+
+#[cfg(target_arch = "aarch64")]
+fn ask_the_kernel_half_to_make_executable(address: u64, size: usize) -> bool {
+    let arena = Arena::at(unsafe { ARENA });
+    let page = page_size();
+    let first = (address as usize) & !(page - 1);
+    let span = (((address as usize) + size + page - 1) & !(page - 1)) - first;
+    let seq = arena.request_executable(first as u64, span as u64);
+    arena.tell_the_kernel_half();
+    while !arena.executable_settled(seq) {
+        yield_now();
+    }
+    arena.executable_was_granted()
 }
 
 pub fn map_writable(size: usize) -> *mut u8 {

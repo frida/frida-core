@@ -520,6 +520,38 @@ pub fn a_copy_has_something_to_say() -> bool {
     unsafe { placements() }.values().any(|placed| what_it_says(placed).is_some())
 }
 
+#[cfg(target_arch = "aarch64")]
+pub fn a_copy_wants_executable() -> bool {
+    unsafe { placements() }
+        .values()
+        .any(|placed| Arena::at(placed.arena).wants_executable().is_some())
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn serve_executable_requests() {
+    for placed in unsafe { placements() }.values() {
+        let arena = Arena::at(placed.arena);
+        let Some((address, size)) = arena.wants_executable() else {
+            continue;
+        };
+        let granted = make_a_range_executable(placed.task, address as usize, size as usize);
+        arena.grant_executable(granted);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn make_a_range_executable(task: usize, base: usize, size: usize) -> bool {
+    let memory = unsafe { _get_task_mm(task as *mut c_void) };
+    if memory.is_null() {
+        return false;
+    }
+    unsafe { _kthread_use_mm(memory) };
+    let granted = make_the_code_executable(base, size).is_some();
+    unsafe { _kthread_unuse_mm(memory) };
+    unsafe { _mmput(memory) };
+    granted
+}
+
 pub fn report_what_the_copies_hit() {
     for placed in unsafe { placements() }.values() {
         let Some(hit) = what_it_says(placed) else {

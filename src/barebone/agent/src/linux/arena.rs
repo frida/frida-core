@@ -125,6 +125,40 @@ impl Arena {
         super::user::say_something();
     }
 
+    pub fn request_executable(&self, address: u64, size: u64) -> u32 {
+        self.leave(EXEC_ADDR, address);
+        self.leave(EXEC_SIZE, size);
+        let seq = self.word(EXEC_SEQ).load(Ordering::Relaxed).wrapping_add(1).max(1);
+        self.word(EXEC_SEQ).store(seq, Ordering::Release);
+        seq
+    }
+
+    pub fn executable_settled(&self, seq: u32) -> bool {
+        self.word(EXEC_ACK).load(Ordering::Acquire) == seq
+    }
+
+    pub fn executable_was_granted(&self) -> bool {
+        self.word(EXEC_OK).load(Ordering::Acquire) != 0
+    }
+
+    pub fn wants_executable(&self) -> Option<(u64, u64)> {
+        let seq = self.word(EXEC_SEQ).load(Ordering::Acquire);
+        if seq == 0 || seq == self.word(EXEC_ACK).load(Ordering::Acquire) {
+            return None;
+        }
+        Some((self.read_wide(EXEC_ADDR), self.read_wide(EXEC_SIZE)))
+    }
+
+    pub fn grant_executable(&self, ok: bool) {
+        self.word(EXEC_OK).store(ok as u32, Ordering::Release);
+        let seq = self.word(EXEC_SEQ).load(Ordering::Acquire);
+        self.word(EXEC_ACK).store(seq, Ordering::Release);
+    }
+
+    fn read_wide(&self, offset: usize) -> u64 {
+        unsafe { ((self.begins + offset) as *const u64).read_volatile() }
+    }
+
     fn word(&self, offset: usize) -> &AtomicU32 {
         unsafe { &*((self.begins + offset) as *const AtomicU32) }
     }
@@ -152,3 +186,9 @@ pub const SAYS: usize = 8;
 pub const HEARS: usize = 52;
 pub const TO_KERNEL: usize = 12;
 pub const WOKEN: usize = 16;
+
+const EXEC_SEQ: usize = 432;
+const EXEC_ACK: usize = 436;
+const EXEC_ADDR: usize = 440;
+const EXEC_SIZE: usize = 448;
+const EXEC_OK: usize = 456;

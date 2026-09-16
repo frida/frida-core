@@ -1271,6 +1271,11 @@ fn kernel_half_has_work() -> bool {
         return true;
     }
 
+    #[cfg(all(feature = "linux-injected", target_arch = "aarch64"))]
+    if kernel::a_copy_wants_executable() {
+        return true;
+    }
+
     kernel::injected_arenas()
         .iter()
         .any(|arena| kernel::holds_a_frame_from_target(*arena))
@@ -1292,6 +1297,9 @@ fn serve_the_kernel_half() {
 
     #[cfg(feature = "win9x")]
     serve_deferred_work();
+
+    #[cfg(all(feature = "linux-injected", target_arch = "aarch64"))]
+    kernel::serve_executable_requests();
 
     #[cfg(feature = "linux-injected")]
     kernel::report_what_the_copies_hit();
