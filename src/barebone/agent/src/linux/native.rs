@@ -61,6 +61,10 @@ pub fn take_the_file(descriptor: u32) -> *mut c_void {
     unsafe { _fget(descriptor) }
 }
 
+pub fn take_the_file_of(task: *mut c_void, descriptor: u32) -> *mut c_void {
+    unsafe { _fget_task(task, descriptor) }
+}
+
 pub fn let_the_file_go(file: *mut c_void) {
     unsafe { super::processes::let_go_of(file) };
 }
@@ -72,9 +76,8 @@ pub fn wait_for_a_word(file: *mut c_void) -> bool {
 }
 
 pub fn leave_a_word(file: *mut c_void) {
-    let byte = 0u8;
-
-    unsafe { _kernel_write(file, &byte, 1, 0) };
+    let one: u64 = 1;
+    unsafe { _kernel_write(file, &one as *const u64 as *const u8, 8, 0) };
 }
 
 
@@ -368,6 +371,8 @@ pub fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() 
 pub fn wake(_token: *const u8) {
     unsafe { ___wake_up(waiters(), TASK_NORMAL, WAKE_EVERY_WAITER, ptr::null_mut()) };
 }
+
+pub fn poke_loop_wakeup() {}
 
 fn queue_this_thread(entry: &mut [usize; WAIT_ENTRY_WORDS]) -> *mut c_void {
     let entry = entry.as_mut_ptr();
@@ -789,6 +794,10 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _fget: unsafe extern "C" fn(c_uint) -> *mut c_void;
     #[cfg(not(target_arch = "x86"))]
+    static _fget_task: unsafe extern "C" fn(*mut c_void, c_uint) -> *mut c_void;
+    #[cfg(not(target_arch = "x86"))]
+    static _find_task_by_vpid: unsafe extern "C" fn(c_uint) -> *mut c_void;
+    #[cfg(not(target_arch = "x86"))]
     static _kernel_read: unsafe extern "C" fn(*mut c_void, i64, *mut u8, usize) -> isize;
     #[cfg(not(target_arch = "x86"))]
     static _kernel_write: unsafe extern "C" fn(*mut c_void, *const u8, usize, i64) -> isize;
@@ -912,6 +921,10 @@ unsafe extern "C" {
     fn _wake_up_process(a0: *mut c_void) -> c_int;
     #[link_name = "frida_k_fget"]
     fn _fget(a0: c_uint) -> *mut c_void;
+    #[link_name = "frida_k_fget_task"]
+    fn _fget_task(a0: *mut c_void, a1: c_uint) -> *mut c_void;
+    #[link_name = "frida_k_find_task_by_vpid"]
+    fn _find_task_by_vpid(a0: c_uint) -> *mut c_void;
     #[link_name = "frida_k_kernel_read"]
     fn _kernel_read(a0: *mut c_void, a1: *mut u8, a2: usize, a3: *mut i64) -> isize;
     #[link_name = "frida_k_kernel_write"]

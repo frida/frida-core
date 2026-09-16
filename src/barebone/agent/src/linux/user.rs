@@ -26,16 +26,16 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
 
     unsafe { crate::init_gum_without_exceptor() };
     let context = unsafe { crate::adopt_js_context() };
+    unsafe { CONTEXT = context };
     unsafe { crate::route_frames_through(begins as u64) };
 
-    open_the_pipes(arena);
-    hear_what_the_kernel_half_says();
+    open_the_channels(arena);
 
     arena.report_home();
     arena.tell_the_kernel_half();
 
-    unsafe { CONTEXT = context };
     crate::watch_for_work(context, a_frame_is_waiting, serve_the_copy);
+    crate::watch_a_descriptor(context, unsafe { LOOP_WAKEUP_POLL_FD }, frida_poll);
 
     loop {
         unsafe { crate::dispatch_pending_work(context) };
@@ -44,7 +44,6 @@ pub extern "C" fn frida_linux_user_entry(begins: usize) -> ! {
 
 fn a_frame_is_waiting() -> bool {
     let arena = Arena::at(unsafe { ARENA });
-
     arena.was_told_to_go()
         || arena.holds_a_thread()
         || super::relay::holds_a_frame_from_host(unsafe { ARENA } as u64)
@@ -103,6 +102,7 @@ pub fn fd_is_ours(fd: u32) -> bool {
 }
 
 fn serve_the_copy() {
+    drain_loop_wakeup();
     let arena = Arena::at(unsafe { ARENA });
 
     while let Some((thread, is_gone)) = arena.take_a_thread() {
@@ -125,7 +125,7 @@ fn serve_the_copy() {
 fn leave() -> ! {
     unsafe { crate::destroy_all_scripts(CONTEXT) };
 
-    for descriptor in unsafe { [SAYING, SAYS_THROUGH, HEARING, HEARD_FROM] } {
+    for descriptor in unsafe { [SAYING, SAYS_THROUGH, LOOP_WAKEUP_POLL_FD as u32, LOOP_WAKEUP_WRITE_FD as u32] } {
         syscall(CLOSE, descriptor as usize, 0, 0, 0, 0, 0);
     }
 
@@ -155,6 +155,7 @@ pub static USER: Primitives = Primitives {
     current_process_id,
     current_thread_id,
     install_fault_reporter,
+    poke_loop_wakeup,
 };
 
 // The copy has no file to write to -- what it was given came from a thread of the kernel -- so
@@ -509,23 +510,23 @@ unsafe fn start_thread(stack: usize, carried: usize) -> isize {
     spawned
 }
 
-fn open_the_pipes(arena: Arena) {
+fn open_the_channels(arena: Arena) {
     let mut says = [0u32; 2];
-    let mut hears = [0u32; 2];
     syscall(PIPE, says.as_mut_ptr() as usize, 0, 0, 0, 0, 0);
-    syscall(PIPE, hears.as_mut_ptr() as usize, 0, 0, 0, 0, 0);
+
+    let (poll_fd, write_fd) = make_loop_wakeup();
 
     unsafe {
         SAYING = says[1];
         SAYS_THROUGH = says[0];
-        HEARING = hears[0];
-        HEARD_FROM = hears[1];
+        LOOP_WAKEUP_POLL_FD = poll_fd;
+        LOOP_WAKEUP_WRITE_FD = write_fd;
     }
-    for fd in [says[0], says[1], hears[0], hears[1]] {
+    for fd in [says[0], says[1], poll_fd as u32, write_fd as u32] {
         conceal_fd(fd);
     }
 
-    arena.reachable_at(says[0], hears[1]);
+    arena.reachable_at(says[0], write_fd as u32);
 }
 
 pub fn say_something() {
@@ -533,27 +534,118 @@ pub fn say_something() {
     syscall(WRITE, unsafe { SAYING } as usize, &byte as *const u8 as usize, 1, 0, 0, 0);
 }
 
-fn hear_what_the_kernel_half_says() {
-    spawn_thread(listen_to_the_kernel_half, core::ptr::null_mut());
+static mut SAYING: u32 = 0;
+static mut SAYS_THROUGH: u32 = 0;
+static mut LOOP_WAKEUP_POLL_FD: i32 = -1;
+static mut LOOP_WAKEUP_WRITE_FD: i32 = -1;
+
+fn make_loop_wakeup() -> (i32, i32) {
+    let mut ends = [0u32; 2];
+    syscall(PIPE, ends.as_mut_ptr() as usize, 0, 0, 0, 0, 0);
+    syscall(FCNTL, ends[0] as usize, F_SETFL, O_NONBLOCK, 0, 0, 0);
+    (ends[0] as i32, ends[1] as i32)
 }
 
-unsafe extern "C" fn listen_to_the_kernel_half(_parameter: *mut c_void, _reason: i32) {
-    let mut heard = [0u8; 64];
-    loop {
-        let read = syscall(READ, unsafe { HEARING } as usize, heard.as_mut_ptr() as usize,
-            heard.len(), 0, 0, 0);
-        if read <= 0 {
-            return;
-        }
+fn poke_loop_wakeup() {
+    let fd = unsafe { LOOP_WAKEUP_WRITE_FD };
+    if fd < 0 {
+        return;
+    }
+    let one: u64 = 1;
+    syscall(WRITE, fd as usize, &one as *const u64 as usize, 8, 0, 0, 0);
+}
 
-        wake(crate::glib::wakeup_token());
+fn drain_loop_wakeup() {
+    let fd = unsafe { LOOP_WAKEUP_POLL_FD };
+    if fd < 0 {
+        return;
+    }
+    let mut sink = [0u8; 64];
+    loop {
+        let read = syscall(READ, fd as usize, sink.as_mut_ptr() as usize, sink.len(), 0, 0, 0);
+        if read < sink.len() as isize {
+            break;
+        }
     }
 }
 
-static mut SAYING: u32 = 0;
-static mut SAYS_THROUGH: u32 = 0;
-static mut HEARING: u32 = 0;
-static mut HEARD_FROM: u32 = 0;
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PollFd {
+    fd: i32,
+    events: i16,
+    revents: i16,
+}
+
+#[repr(C)]
+struct TimeSpec {
+    seconds: i64,
+    nanoseconds: i64,
+}
+
+unsafe extern "C" fn frida_poll(ufds: *mut crate::GPollFd, nfds: u32, timeout: i32) -> i32 {
+    const MAX_FDS: usize = 16;
+    let fds = unsafe { core::slice::from_raw_parts_mut(ufds, nfds as usize) };
+
+    let mut real = [PollFd { fd: 0, events: 0, revents: 0 }; MAX_FDS];
+    let mut origin = [0usize; MAX_FDS];
+    let mut count = 0usize;
+    let mut ready = 0i32;
+
+    for (index, fd) in fds.iter_mut().enumerate() {
+        fd.revents = 0;
+
+        if fd.fd == G_WAIT_WAKEUP_HANDLE {
+            if !fd.user_data.is_null() {
+                let signalled = unsafe { (fd.user_data as *const i32).read_volatile() };
+                if signalled != 0 {
+                    fd.revents = POLL_IN as u16;
+                    ready += 1;
+                }
+                let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
+                unsafe { token.write(fd.user_data) };
+            }
+        } else if fd.fd >= 0 && count < MAX_FDS {
+            real[count] = PollFd { fd: fd.fd, events: fd.events as i16, revents: 0 };
+            origin[count] = index;
+            count += 1;
+        }
+    }
+
+    let waiting = if ready > 0 { 0 } else { timeout };
+    let span = TimeSpec {
+        seconds: (waiting as i64) / 1000,
+        nanoseconds: ((waiting as i64) % 1000) * 1_000_000,
+    };
+    let deadline = if waiting < 0 {
+        core::ptr::null::<TimeSpec>()
+    } else {
+        &span as *const TimeSpec
+    };
+
+    syscall(PPOLL, real.as_mut_ptr() as usize, count, deadline as usize, 0, 0, 0);
+
+    for slot in 0..count {
+        if real[slot].revents != 0 {
+            fds[origin[slot]].revents = real[slot].revents as u16;
+            ready += 1;
+        }
+    }
+
+    for fd in fds.iter() {
+        if fd.fd == G_WAIT_WAKEUP_HANDLE && !fd.user_data.is_null() {
+            let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
+            unsafe { token.write(core::ptr::null_mut()) };
+        }
+    }
+
+    ready
+}
+
+const G_WAIT_WAKEUP_HANDLE: i32 = -43;
+const GWAKEUP_TOKEN: usize = 8;
+const F_SETFL: usize = 4;
+const O_NONBLOCK: usize = 0x800;
 
 fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let unchanged = unchanged();
@@ -1340,6 +1432,23 @@ const PIPE: usize = 42;
 const PIPE: usize = 22;
 #[cfg(target_arch = "aarch64")]
 const PIPE: usize = 59;
+
+#[cfg(target_arch = "arm")]
+const PPOLL: usize = 336;
+#[cfg(target_arch = "x86")]
+const PPOLL: usize = 309;
+#[cfg(target_arch = "x86_64")]
+const PPOLL: usize = 271;
+#[cfg(target_arch = "aarch64")]
+const PPOLL: usize = 73;
+#[cfg(target_arch = "arm")]
+const FCNTL: usize = 55;
+#[cfg(target_arch = "x86")]
+const FCNTL: usize = 55;
+#[cfg(target_arch = "x86_64")]
+const FCNTL: usize = 72;
+#[cfg(target_arch = "aarch64")]
+const FCNTL: usize = 25;
 #[cfg(target_arch = "arm")]
 const GETDENTS: usize = 217;
 #[cfg(target_arch = "x86")]

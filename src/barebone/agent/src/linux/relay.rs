@@ -67,6 +67,7 @@ fn send_what_waits(arena: u64) {
         let Some(written) = piece else {
             return;
         };
+        publish_fence();
         wake_the_copy(arena);
 
         if written == frame.len() {
@@ -85,6 +86,7 @@ fn write_frame(ring: &Ring, arena: u64, frame: &[u8], tell: fn(u64)) -> bool {
         match ring.write(arena, arena + ring.buffer, frame, written) {
             Some(now) => {
                 written = now;
+                publish_fence();
                 tell(arena);
             }
             None => {
@@ -124,6 +126,16 @@ fn read_frame(ring: &Ring, arena: u64, tell: fn(u64)) -> Option<Vec<u8>> {
 pub fn forget(arena: u64) {
     unsafe { holds() }.retain(|(of, _), _| *of != arena);
     unsafe { waiting() }.remove(&arena);
+}
+
+#[cfg(target_arch = "aarch64")]
+fn publish_fence() {
+    unsafe { core::arch::asm!("dsb ish", options(nostack, preserves_flags)) };
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn publish_fence() {
+    core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
 }
 
 fn wake_the_copy(arena: u64) {

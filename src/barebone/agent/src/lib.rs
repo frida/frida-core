@@ -1316,8 +1316,37 @@ pub(crate) fn watch_for_work(main_context: *mut GMainContext, ready: fn() -> boo
         sign_what_the_loop_calls_back();
 
         let source = g_source_new(&raw mut WORK_FUNCS, core::mem::size_of::<GSource>() as u32);
+        WORK_SOURCE = source;
         g_source_attach(source, main_context);
         g_source_unref(source);
+    }
+}
+
+static mut WORK_SOURCE: *mut GSource = ptr::null_mut();
+
+#[repr(C)]
+pub struct GPollFd {
+    pub fd: i32,
+    pub events: u16,
+    pub revents: u16,
+    pub user_data: *mut c_void,
+}
+
+pub type GPollFunc = unsafe extern "C" fn(*mut GPollFd, u32, i32) -> i32;
+
+unsafe extern "C" {
+    fn g_source_add_poll(source: *mut GSource, fd: *mut GPollFd);
+    fn g_main_context_set_poll_func(context: *mut GMainContext, func: GPollFunc);
+}
+
+static mut WAKEUP_POLLFD: GPollFd = GPollFd { fd: -1, events: 0, revents: 0, user_data: ptr::null_mut() };
+
+pub(crate) fn watch_a_descriptor(context: *mut GMainContext, fd: i32, poll: GPollFunc) {
+    const G_IO_IN: u16 = 1;
+    unsafe {
+        WAKEUP_POLLFD = GPollFd { fd, events: G_IO_IN, revents: 0, user_data: ptr::null_mut() };
+        g_source_add_poll(WORK_SOURCE, ptr::addr_of_mut!(WAKEUP_POLLFD));
+        g_main_context_set_poll_func(context, poll);
     }
 }
 

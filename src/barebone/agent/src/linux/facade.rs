@@ -78,6 +78,10 @@ pub fn install_fault_reporter() {
     (primitives().install_fault_reporter)()
 }
 
+pub fn poke_loop_wakeup() {
+    (primitives().poke_loop_wakeup)()
+}
+
 pub fn select_user() {
     unsafe { ACTIVE = &super::user::USER };
 }
@@ -112,6 +116,7 @@ static KERNEL: Primitives = Primitives {
     current_process_id: super::native::current_process_id,
     current_thread_id: super::native::current_thread_id,
     install_fault_reporter: super::native::install_fault_reporter,
+    poke_loop_wakeup: super::native::poke_loop_wakeup,
 };
 
 pub struct Primitives {
@@ -134,4 +139,5 @@ pub struct Primitives {
     pub current_process_id: fn() -> u32,
     pub current_thread_id: fn() -> u64,
     pub install_fault_reporter: fn(),
+    pub poke_loop_wakeup: fn(),
 }

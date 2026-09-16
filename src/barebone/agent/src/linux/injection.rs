@@ -37,6 +37,7 @@ pub fn inject_into_process(id: u32) -> u32 {
 
     let placed = Placement {
         task,
+        copy_pid: home.copy_pid,
         base: home.base,
         arena: home.arena,
         seen_by_the_copy: home.seen_by_the_copy,
@@ -52,8 +53,11 @@ pub fn inject_into_process(id: u32) -> u32 {
 
 fn take_what_the_copy_opened(placed: &mut Placement) {
     let arena = Arena::at(placed.arena);
-    placed.says = native::take_the_file(arena.says_through());
-    placed.hears = native::take_the_file(arena.hears_through());
+    let says_fd = arena.says_through();
+    let hears_fd = arena.hears_through();
+    let copy = COPY_TASK.load(core::sync::atomic::Ordering::Acquire) as *mut c_void;
+    placed.says = native::take_the_file_of(copy, says_fd);
+    placed.hears = native::take_the_file_of(copy, hears_fd);
     listen_to_the_copy(placed.says);
 }
 
@@ -69,6 +73,7 @@ unsafe extern "C" fn carry_what_the_copy_says(argument: *mut c_void, _reason: i3
 
 struct Placement {
     task: usize,
+    copy_pid: u32,
     base: usize,
     arena: usize,
     seen_by_the_copy: usize,
@@ -84,6 +89,7 @@ fn pid_reported_by(placed: &Placement) -> u32 {
 // The copy is given a task of its own that shares the address space it was mapped into, so
 // nothing of the target is borrowed and a target that never runs is no obstacle.
 struct Home {
+    copy_pid: u32,
     base: usize,
     arena: usize,
     seen_by_the_copy: usize,
@@ -124,9 +130,10 @@ fn map_and_start(id: u32) -> Option<Home> {
 
     let arena = view_of(where_the_copy_sees_it)?;
 
-    start(base, where_the_copy_sees_it, stack);
+    let copy_pid = start(base, where_the_copy_sees_it, stack);
 
     Some(Home {
+        copy_pid,
         base,
         arena,
         seen_by_the_copy: where_the_copy_sees_it,
@@ -323,7 +330,7 @@ unsafe fn open_user_access() -> usize {
 #[cfg(not(target_arch = "arm"))]
 unsafe fn close_user_access(_domains: usize) {}
 
-fn start(base: usize, arena: usize, stack: usize) {
+fn start(base: usize, arena: usize, stack: usize) -> u32 {
     let entry = native::alloc(size_of::<Entry>()) as *mut Entry;
     unsafe {
         entry.write(Entry {
@@ -332,7 +339,7 @@ fn start(base: usize, arena: usize, stack: usize) {
             stack,
         });
 
-        _user_mode_thread(USER_ENTRY, entry as *mut c_void, CLONE_VM | CLONE_FS | CLONE_FILES);
+        _user_mode_thread(USER_ENTRY, entry as *mut c_void, CLONE_VM | CLONE_FS | CLONE_FILES) as u32
     }
 }
 
@@ -350,6 +357,8 @@ pub unsafe extern "C" fn frida_cb_user(argument: *mut c_void) -> c_int {
     let entry = argument as *mut Entry;
     let (arena, bootstrap, stack) = unsafe { ((*entry).arena, (*entry).bootstrap, (*entry).stack) };
     native::free(entry as *mut u8, size_of::<Entry>());
+
+    COPY_TASK.store(native::current_task() as usize, core::sync::atomic::Ordering::Release);
 
     let Some(places) = describe_registers() else {
         return 0;
@@ -686,9 +695,7 @@ fn note_a_thread(task: usize, is_gone: bool) {
     };
 
     Arena::at(placed.arena).note_a_thread(thread, is_gone);
-    if !placed.hears.is_null() {
-        native::leave_a_word(placed.hears);
-    }
+    wake_the_copy(placed);
 }
 
 fn group_of(task: usize) -> Option<u32> {
@@ -702,6 +709,8 @@ pub fn id_of(task: usize) -> Option<u32> {
 
     Some(unsafe { ((task + at) as *const u32).read() })
 }
+
+static COPY_TASK: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
 static WATCHING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
@@ -740,9 +749,7 @@ pub fn stop_copies() {
 fn ask_it_to_leave(placed: &Placement) {
     let arena = Arena::at(placed.arena);
     arena.tell_it_to_go();
-    if !placed.hears.is_null() {
-        native::leave_a_word(placed.hears);
-    }
+    wake_the_copy(placed);
 
     let waited_on = &placed.arena as *const usize as *const u8;
     while !arena.has_gone() {
@@ -776,16 +783,18 @@ fn take_back_what_it_was_given(placed: &Placement, memory: *mut c_void) {
 const LEAVING_GRACE_US: u64 = 100_000;
 
 pub fn tell_the_copy(id: u32) {
-    let Some(placed) = (unsafe { placements() }).get_mut(&id) else {
+    let Some(placed) = (unsafe { placements() }).get(&id) else {
         return;
     };
 
     bump(placed.arena + WOKEN);
-    if placed.hears.is_null() {
-        return;
-    }
+    wake_the_copy(placed);
+}
 
-    native::leave_a_word(placed.hears);
+fn wake_the_copy(placed: &Placement) {
+    if !placed.hears.is_null() {
+        native::leave_a_word(placed.hears);
+    }
 }
 
 fn read_address(address: usize) -> u64 {
