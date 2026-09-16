@@ -781,6 +781,7 @@ namespace Frida.GDB {
 			switch (name) {
 				case "aarch64-core.xml":	return AARCH64_CORE_FEATURE;
 				case "aarch64-fpu.xml":		return AARCH64_FPU_FEATURE;
+				case "i386-64bit.xml":		return I386_64BIT_FEATURE;
 				default:			return null;
 			}
 		}
@@ -861,6 +862,68 @@ namespace Frida.GDB {
   <reg name="v31" bitsize="128" type="uint128"/>
   <reg name="fpsr" bitsize="32"/>
   <reg name="fpcr" bitsize="32"/>
+</feature>""";
+
+		private const string I386_64BIT_FEATURE = """<?xml version="1.0"?>
+<!DOCTYPE feature SYSTEM "gdb-target.dtd">
+<feature name="org.gnu.gdb.i386.64bit">
+  <reg name="rax" bitsize="64"/>
+  <reg name="rbx" bitsize="64"/>
+  <reg name="rcx" bitsize="64"/>
+  <reg name="rdx" bitsize="64"/>
+  <reg name="rsi" bitsize="64"/>
+  <reg name="rdi" bitsize="64"/>
+  <reg name="rbp" bitsize="64"/>
+  <reg name="rsp" bitsize="64"/>
+  <reg name="r8" bitsize="64"/>
+  <reg name="r9" bitsize="64"/>
+  <reg name="r10" bitsize="64"/>
+  <reg name="r11" bitsize="64"/>
+  <reg name="r12" bitsize="64"/>
+  <reg name="r13" bitsize="64"/>
+  <reg name="r14" bitsize="64"/>
+  <reg name="r15" bitsize="64"/>
+  <reg name="rip" bitsize="64"/>
+  <reg name="eflags" bitsize="32"/>
+  <reg name="cs" bitsize="32"/>
+  <reg name="ss" bitsize="32"/>
+  <reg name="ds" bitsize="32"/>
+  <reg name="es" bitsize="32"/>
+  <reg name="fs" bitsize="32"/>
+  <reg name="gs" bitsize="32"/>
+  <reg name="st0" bitsize="80"/>
+  <reg name="st1" bitsize="80"/>
+  <reg name="st2" bitsize="80"/>
+  <reg name="st3" bitsize="80"/>
+  <reg name="st4" bitsize="80"/>
+  <reg name="st5" bitsize="80"/>
+  <reg name="st6" bitsize="80"/>
+  <reg name="st7" bitsize="80"/>
+  <reg name="fctrl" bitsize="32"/>
+  <reg name="fstat" bitsize="32"/>
+  <reg name="ftag" bitsize="32"/>
+  <reg name="fiseg" bitsize="32"/>
+  <reg name="fioff" bitsize="32"/>
+  <reg name="foseg" bitsize="32"/>
+  <reg name="fooff" bitsize="32"/>
+  <reg name="fop" bitsize="32"/>
+  <reg name="xmm0" bitsize="128" regnum="40"/>
+  <reg name="xmm1" bitsize="128"/>
+  <reg name="xmm2" bitsize="128"/>
+  <reg name="xmm3" bitsize="128"/>
+  <reg name="xmm4" bitsize="128"/>
+  <reg name="xmm5" bitsize="128"/>
+  <reg name="xmm6" bitsize="128"/>
+  <reg name="xmm7" bitsize="128"/>
+  <reg name="xmm8" bitsize="128"/>
+  <reg name="xmm9" bitsize="128"/>
+  <reg name="xmm10" bitsize="128"/>
+  <reg name="xmm11" bitsize="128"/>
+  <reg name="xmm12" bitsize="128"/>
+  <reg name="xmm13" bitsize="128"/>
+  <reg name="xmm14" bitsize="128"/>
+  <reg name="xmm15" bitsize="128"/>
+  <reg name="mxcsr" bitsize="32"/>
 </feature>""";
 
 		private static uint infer_pointer_size_from_arch (TargetArch arch) {
