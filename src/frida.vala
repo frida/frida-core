@@ -2898,8 +2898,15 @@ namespace Frida {
 		public override void check () throws Error {
 			if (qmp == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' is missing");
+#if WINDOWS
+			if (!qmp.has_prefix ("handle:")) {
+				throw new Error.NOT_SUPPORTED (
+					"Config for 'agent.transport.qmp' must be an already-connected handle on this OS");
+			}
+#else
 			if (!qmp.has_prefix ("unix:"))
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.qmp' must be a UNIX socket for now");
+#endif
 		}
 
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {

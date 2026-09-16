@@ -17,7 +17,7 @@ namespace Frida.Barebone {
 			construct;
 		}
 
-		private SocketConnection connection;
+		private IOStream connection;
 		private DataInputStream input;
 		private OutputStream output;
 
@@ -54,24 +54,34 @@ namespace Frida.Barebone {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-			SocketConnectable connectable;
-			if (address.has_prefix ("unix:")) {
-				connectable = new UnixSocketAddress.with_type (address.substring (5), -1,
-					UnixSocketAddressType.PATH);
-			} else {
-				connectable = parse_socket_address (address, port, "localhost", 4444);
-			}
+#if WINDOWS
+			if (address.has_prefix ("handle:")) {
+				connection = adopt_handle (address.substring (7));
+			} else
+#endif
+			{
+				SocketConnectable connectable;
+				if (address.has_prefix ("unix:")) {
+					connectable = new UnixSocketAddress.with_type (address.substring (5), -1,
+						UnixSocketAddressType.PATH);
+				} else {
+					connectable = parse_socket_address (address, port, "localhost", 4444);
+				}
 
-			try {
-				var client = new SocketClient ();
-				connection = yield client.connect_async (connectable, cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to connect to QMP server: %s", e.message);
-			}
+				SocketConnection socket_connection;
+				try {
+					var client = new SocketClient ();
+					socket_connection = yield client.connect_async (connectable, cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Unable to connect to QMP server: %s", e.message);
+				}
 
-			var socket = connection.socket;
-			if (socket.get_family () != UNIX)
-				Tcp.enable_nodelay (socket);
+				var socket = socket_connection.socket;
+				if (socket.get_family () != UNIX)
+					Tcp.enable_nodelay (socket);
+
+				connection = socket_connection;
+			}
 
 			input = new DataInputStream (connection.get_input_stream ());
 			input.set_newline_type (DataStreamNewlineType.LF);
@@ -102,6 +112,18 @@ namespace Frida.Barebone {
 					throw new Error.TRANSPORT ("%s", e.message);
 			}
 		}
+
+#if WINDOWS
+		private static IOStream adopt_handle (string raw) throws Error {
+			int64 value = int64.parse (raw);
+			if (value == 0)
+				throw new Error.INVALID_ARGUMENT ("Invalid QMP handle");
+
+			void * handle = (void *) (uintptr) value;
+			return new SimpleIOStream (new Win32InputStream (handle, false),
+				new Win32OutputStream (handle, false));
+		}
+#endif
 
 		public async void close (Cancellable? cancellable = null) throws IOError {
 			io_cancellable.cancel ();
@@ -235,8 +257,16 @@ namespace Frida.Barebone {
 			yield execute_command ("chardev-remove", args.get_root (), cancellable);
 		}
 
-		private async SocketConnection plug_hostlink (string chardev, string device, string bus,
+		private async IOStream plug_hostlink (string chardev, string device, string bus,
 				Cancellable? cancellable) throws Error, IOError {
+#if WINDOWS
+			string name = "frida-hl-" + Uuid.string_random ().substring (0, 8);
+
+			yield add_listening_chardev (chardev, name, cancellable);
+			yield add_serial_port (chardev, bus, "re.frida.hostlink", device, 1, cancellable);
+
+			return yield Pipe.open ("pipe:role=client,name=" + name, cancellable).wait_async (cancellable);
+#else
 			string socket_path = Path.build_filename (Environment.get_tmp_dir (),
 				"frida-hl-" + Uuid.string_random ().substring (0, 8) + ".sock");
 
@@ -249,10 +279,11 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("Unable to connect to %s: %s", socket_path, e.message);
 			}
+#endif
 		}
 
 		public class Hostlink {
-			public SocketConnection connection;
+			public IOStream connection;
 			public uint64 mmio;
 			public uint irq;
 		}
@@ -284,7 +315,7 @@ namespace Frida.Barebone {
 			return yield execute_command ("qom-get", args.get_root (), cancellable);
 		}
 
-		private async void add_listening_chardev (string id, string path, Cancellable? cancellable)
+		private async void add_listening_chardev (string id, string endpoint, Cancellable? cancellable)
 				throws Error, IOError {
 			var args = new Json.Builder ();
 			args
@@ -293,6 +324,15 @@ namespace Frida.Barebone {
 					.add_string_value (id)
 					.set_member_name ("backend")
 					.begin_object ()
+#if WINDOWS
+						.set_member_name ("type")
+						.add_string_value ("pipe")
+						.set_member_name ("data")
+						.begin_object ()
+							.set_member_name ("device")
+							.add_string_value (endpoint)
+						.end_object ()
+#else
 						.set_member_name ("type")
 						.add_string_value ("socket")
 						.set_member_name ("data")
@@ -308,10 +348,11 @@ namespace Frida.Barebone {
 								.set_member_name ("data")
 								.begin_object ()
 									.set_member_name ("path")
-									.add_string_value (path)
+									.add_string_value (endpoint)
 								.end_object ()
 							.end_object ()
 						.end_object ()
+#endif
 					.end_object ()
 				.end_object ();
 			yield execute_command ("chardev-add", args.get_root (), cancellable);
