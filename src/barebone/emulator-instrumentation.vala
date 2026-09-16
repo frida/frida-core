@@ -9,6 +9,18 @@ namespace Frida {
 		}
 
 		/**
+		 * A blob runs up against whatever the resource compiler laid down after it, and the
+		 * last one in a section is followed by nothing that ends it, so its length is what
+		 * says where the script stops rather than a terminator that may not be there.
+		 */
+		private static string shim_source () {
+			unowned uint8[] data = shim_blob ().data;
+			var source = new StringBuilder.sized (data.length + 1);
+			source.append_len ((string) data, data.length);
+			return source.str;
+		}
+
+		/**
 		 * The emulator's gdbstub needs different help on each host: on Darwin its HVF backend
 		 * mishandles debugging outright, while on Windows the WHPX one syncs the vcpu but
 		 * leaves QEMU believing it is not in long mode.
@@ -29,7 +41,7 @@ namespace Frida {
 				var device = yield manager.get_device_by_type (DeviceType.LOCAL, 0, cancellable);
 				var session = yield device.attach (config.connection.pid, null, cancellable);
 
-				unowned string source = (string) shim_blob ().data;
+				string source = shim_source ();
 				var script = yield session.create_script (source, null, cancellable);
 
 				var armed = new Promise<bool> ();
