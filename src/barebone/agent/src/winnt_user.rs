@@ -164,6 +164,7 @@ fn resolve_user_api() {
             yield_execution: core::mem::transmute(export(ntdll, b"NtYieldExecution")),
             wait_for_object: core::mem::transmute(export(ntdll, b"NtWaitForSingleObject")),
             set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
+            reset_event: core::mem::transmute(export(ntdll, b"NtResetEvent")),
             create_event: core::mem::transmute(export(ntdll, b"NtCreateEvent")),
             close: core::mem::transmute(export(ntdll, b"NtClose")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
@@ -844,6 +845,7 @@ struct UserApi {
     wait_for_object: windows_fn!(*mut c_void, u8, *const i64 => i32),
     flush_code: windows_fn!(*mut c_void, *mut u8, usize => i32),
     set_event: windows_fn!(*mut c_void, *mut u32 => i32),
+    reset_event: windows_fn!(*mut c_void, *mut u32 => i32),
     create_event: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32),
     close: windows_fn!(*mut c_void => i32),
     exit_thread: windows_fn!(u32 => !),
@@ -1380,6 +1382,9 @@ fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bo
         (user_api().wait_for_object)(event, 0,
             due_time.as_ref().map_or(core::ptr::null(), |t| t))
     };
+    if core::ptr::eq(event, target_wake_handle()) {
+        unsafe { (user_api().reset_event)(event, core::ptr::null_mut()) };
+    }
     release_slot(slot, token);
 }
 

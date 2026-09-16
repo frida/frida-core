@@ -249,7 +249,7 @@ pub fn wake(token: *const u8) {
 pub fn install_shareable_wake_event(token: *const u8) {
     let mut created: *mut c_void = core::ptr::null_mut();
 
-    let mut make = || created = create_event_object();
+    let mut make = || created = create_event_object(SYNCHRONIZATION_EVENT);
     on_kernel_stack(&mut make);
 
     unsafe {
@@ -260,13 +260,13 @@ pub fn install_shareable_wake_event(token: *const u8) {
     EVENTS[slot_for_token(token)].store(created as usize, Ordering::Release);
 }
 
-fn create_event_object() -> *mut c_void {
+fn create_event_object(kind: u32) -> *mut c_void {
     let mut handle: *mut c_void = core::ptr::null_mut();
     let mut object: *mut c_void = core::ptr::null_mut();
 
     unsafe {
         if (_ZwCreateEvent)(&mut handle, EVENT_ALL_ACCESS, core::ptr::null_mut(),
-                SYNCHRONIZATION_EVENT, 0) < 0 {
+                kind, 0) < 0 {
             return core::ptr::null_mut();
         }
 
@@ -349,6 +349,7 @@ static OWNERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_E
 static SLEEPERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
 
 const EVENT_SIZE: usize = (2 * core::mem::size_of::<usize>()) + (2 * core::mem::size_of::<u32>());
+const NOTIFICATION_EVENT: u32 = 0;
 const SYNCHRONIZATION_EVENT: u32 = 1;
 const EVENT_ALL_ACCESS: u32 = 0x1f_0003;
 const EXECUTIVE: u32 = 0;
@@ -2061,7 +2062,7 @@ pub fn place_agent_in_process(pid: u32) -> bool {
                     placed.arena_seen_by_process = seen as u64;
                     placed.arena_here = arena as u64;
 
-                    wake = create_event_object();
+                    wake = create_event_object(NOTIFICATION_EVENT);
                     (arena.add(AGENT_WAKE_HANDLE as usize) as *mut u64)
                         .write(open_event_in_current_process(SHAREABLE_WAKE_EVENT) as u64);
                     (arena.add(TARGET_WAKE_HANDLE as usize) as *mut u64)
