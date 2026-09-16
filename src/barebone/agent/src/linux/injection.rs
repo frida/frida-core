@@ -185,12 +185,13 @@ fn map_a_copy() -> Option<usize> {
     let shared = crate::writable_half_start() - own;
     let private = crate::writable_half_size();
 
+    let executable_up_front = if cfg!(target_arch = "aarch64") { 0 } else { PROT_EXEC };
     let base = unsafe {
         _vm_mmap(
             ptr::null_mut(),
             0,
             size + ARENA_SIZE,
-            PROT_READ | PROT_WRITE | PROT_EXEC,
+            PROT_READ | PROT_WRITE | executable_up_front,
             MAP_PRIVATE | MAP_ANONYMOUS,
             0,
         )
@@ -207,8 +208,71 @@ fn map_a_copy() -> Option<usize> {
     native::free(rebased, private);
     handed_over?;
 
+    #[cfg(target_arch = "aarch64")]
+    make_the_code_executable(base, shared)?;
+
     Some(base)
 }
+
+#[cfg(target_arch = "aarch64")]
+fn make_the_code_executable(base: usize, size: usize) -> Option<()> {
+    let memory = borrowed_memory()? as *mut c_void;
+    unsafe {
+        let apply = _apply_to_existing_page_range?;
+        let clean_to_unification = _caches_clean_inval_pou?;
+        if apply(memory, base, size, frida_pte_exec_trampoline, ptr::null_mut()) != 0 {
+            return None;
+        }
+        clean_to_unification(base, base + size);
+        flush_user_translations();
+    }
+    Some(())
+}
+
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(
+    ".pushsection .text,\"ax\",%progbits",
+    ".balign 4",
+    ".word 0xa8320d42",
+    ".globl frida_pte_exec_trampoline",
+    ".type frida_pte_exec_trampoline,%function",
+    "frida_pte_exec_trampoline:",
+    "bti c",
+    "b {inner}",
+    ".popsection",
+    inner = sym grant_user_execute,
+);
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" {
+    fn frida_pte_exec_trampoline(pte: *mut c_void, address: usize, data: *mut c_void) -> c_int;
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn grant_user_execute(entry: *mut c_void, _address: usize, _data: *mut c_void) -> c_int {
+    let entry = entry as *mut u64;
+    let revised = (unsafe { entry.read_volatile() } | PTE_READ_ONLY) & !PTE_USER_EXECUTE_NEVER;
+    unsafe { entry.write_volatile(revised) };
+    0
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn flush_user_translations() {
+    unsafe {
+        core::arch::asm!(
+            "dsb ishst",
+            "tlbi vmalle1is",
+            "dsb ish",
+            "isb",
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+const PTE_READ_ONLY: u64 = 1 << 7;
+#[cfg(target_arch = "aarch64")]
+const PTE_USER_EXECUTE_NEVER: u64 = 1 << 54;
 
 fn give(destination: usize, source: usize, size: usize) -> Option<()> {
     let opened = unsafe { open_user_access() };
@@ -513,6 +577,8 @@ fn relative_to_image(address: u64, placed: &Placement) -> String {
 const NOTHING_MORE: u32 = 0;
 
 fn watch_the_threads() {
+    return;
+    #[allow(unreachable_code)]
     if WATCHING.swap(true, core::sync::atomic::Ordering::AcqRel) {
         return;
     }
@@ -526,6 +592,8 @@ fn watch_the_threads() {
 }
 
 pub fn hold_what_is_spawned() {
+    return;
+    #[allow(unreachable_code)]
     if HOLDING.swap(true, core::sync::atomic::Ordering::AcqRel) {
         return;
     }
@@ -800,6 +868,18 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _user_mode_thread:
         unsafe extern "C" fn(unsafe extern "C" fn(*mut c_void) -> c_int, *mut c_void, usize) -> c_int;
+    #[cfg(target_arch = "aarch64")]
+    static _apply_to_existing_page_range: Option<
+        unsafe extern "C" fn(
+            *mut c_void,
+            usize,
+            usize,
+            unsafe extern "C" fn(*mut c_void, usize, *mut c_void) -> c_int,
+            *mut c_void,
+        ) -> c_int,
+    >;
+    #[cfg(target_arch = "aarch64")]
+    static _caches_clean_inval_pou: Option<unsafe extern "C" fn(usize, usize)>;
 }
 
 #[cfg(target_arch = "x86")]

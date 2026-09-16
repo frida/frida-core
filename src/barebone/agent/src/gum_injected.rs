@@ -84,7 +84,7 @@ pub extern "C" fn gum_barebone_query_stack_size() -> crate::bindings::gsize {
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_query_rwx_support() -> GumRwxSupport {
     #[cfg(feature = "linux-injected")]
-    return _GumRwxSupport_GUM_RWX_FULL;
+    return _GumRwxSupport_GUM_RWX_NONE;
 
     #[cfg(not(feature = "linux-injected"))]
     _GumRwxSupport_GUM_RWX_NONE
@@ -545,8 +545,10 @@ pub extern "C" fn gum_memory_allocate(
     } else {
         kernel::alloc_code(size as usize)
     };
-    #[cfg(not(feature = "xnu-core"))]
+    #[cfg(all(not(feature = "xnu-core"), not(feature = "linux-injected")))]
     let ptr = kernel::alloc_code(size as usize);
+    #[cfg(feature = "linux-injected")]
+    let ptr = kernel::alloc_heap(size as usize);
     #[cfg(not(feature = "xnu-core"))]
     let _ = address;
     unsafe {
