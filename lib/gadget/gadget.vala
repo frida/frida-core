@@ -690,17 +690,8 @@ namespace Frida.Gadget {
 		try {
 			load_asset_text (config_path, out config_data);
 		} catch (FileError e) {
-			//if (e is FileError.NOENT)
-				//return new Config ();
-if (e is FileError.NOENT) {
-    var default_config = new Config ();
-    var listen = new ListenInteraction ();
-    listen.on_load = ListenInteraction.LoadBehavior.RESUME; // 强制指定 RESUME
-    listen.address = "0.0.0.0"; // 如果需要远程连接，顺便写死 address
-    listen.port = 52000;       // 顺便写死端口
-    default_config.interaction = listen;
-    return default_config;
-}
+			if (e is FileError.NOENT || e is FileError.ACCES)
+				return new Config ();
 			throw new Error.PERMISSION_DENIED ("%s", e.message);
 		}
 
