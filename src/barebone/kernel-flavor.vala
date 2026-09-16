@@ -220,14 +220,33 @@ namespace Frida.Barebone {
 			GDB.Client gdb = machine.gdb;
 			var bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
 
+			SymbolInfo? system_state = symbols["system_state"];
+			uint64 system_state_address = (system_state != null) ? kernel_base + system_state.offset : 0;
+
 			GDB.Exception? exception = null;
+			bool ready = false;
 			do {
 				exception = yield gdb.continue_until_exception (cancellable);
+				ready = false;
 				if (exception.breakpoint != bp)
 					continue;
-			} while (yield interrupts_masked (exception.thread, cancellable));
+				if (yield interrupts_masked (exception.thread, cancellable))
+					continue;
+				ready = yield system_is_running (system_state_address, cancellable);
+			} while (!ready);
 
 			yield bp.remove (cancellable);
+		}
+
+		private async bool system_is_running (uint64 system_state_address, Cancellable? cancellable)
+				throws Error, IOError {
+			if (system_state_address == 0)
+				return true;
+			var data = (yield machine.read_virtual (system_state_address, 4, cancellable)).get_data ();
+			uint32 state = 0;
+			for (uint i = 0; i != 4; i++)
+				state |= ((uint32) data[i]) << (8 * i);
+			return state >= SYSTEM_RUNNING;
 		}
 
 		// Linux on arm64 runs with FIQ permanently masked, so only the IRQ mask distinguishes a
@@ -242,6 +261,7 @@ namespace Frida.Barebone {
 			return (cpsr & IRQ_MASK_BIT) != 0;
 		}
 
+		private const uint32 SYSTEM_RUNNING = 3;
 		private const uint64 IRQ_MASK_BIT = 1ULL << 7;
 		private const uint64 INTERRUPT_ENABLE_BIT = 1ULL << 9;
 		private const uint LINUX_REGISTER_ARGUMENTS = 3;
