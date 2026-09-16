@@ -59,6 +59,8 @@ namespace Frida.Barebone {
 		private const uint64 INT2_MASK = 0x3ULL;
 		private const uint64 INT6_MASK = 0x3fULL;
 		private const uint64 INT48_MASK = 0xffffffffffffULL;
+		private const uint64 OUTPUT_ADDRESS_MASK = 0xfffffffff000ULL;
+		private const uint64 ATTRIBUTE_MASK = 0x6c000000000ffcULL;
 
 		private const uint64 TABLE_PXN_BIT = 1ULL << 59;
 
@@ -424,10 +426,147 @@ namespace Frida.Barebone {
 				return;
 			}
 
+			yield ensure_level3_coverage (virtual_address, size, cancellable);
+
 			yield write_page_protection (virtual_address, size, prot, cancellable);
 
 			if (code_allocator != null)
 				yield flush_translations (cancellable);
+		}
+
+		private async void ensure_level3_coverage (uint64 virtual_address, size_t size, Cancellable? cancellable)
+				throws Error, IOError {
+			if (code_allocator == null)
+				return;
+
+			MMUParameters p = yield load_mmu_parameters (cancellable);
+			uint64 page_mask = p.granule - 1;
+			uint64 start_va = virtual_address & ~page_mask;
+			uint64 end_va = (virtual_address + size + page_mask) & ~page_mask;
+
+			var blocks = yield locate_blocks (start_va, end_va, p, cancellable);
+			if (blocks.is_empty)
+				return;
+
+			Allocation tables = yield code_allocator.allocate (p.granule * blocks.size, p.granule, cancellable);
+
+			bool was_running = yield begin_physical_addressing (cancellable);
+			GLib.Error? failure = null;
+			try {
+				for (int i = 0; i != blocks.size; i++) {
+					uint64 table_va = tables.virtual_address + ((uint64) i * p.granule);
+					uint64 table_pa = yield resolve_physical_address (table_va, p, cancellable);
+					yield split_block (blocks[i], table_pa, p, cancellable);
+				}
+			} catch (GLib.Error e) {
+				failure = e;
+			}
+			yield end_physical_addressing (was_running, cancellable);
+			throw_if_failed (failure);
+		}
+
+		private async Gee.List<BlockMapping> locate_blocks (uint64 start_va, uint64 end_va, MMUParameters p,
+				Cancellable? cancellable) throws Error, IOError {
+			var blocks = new Gee.ArrayList<BlockMapping> ();
+
+			bool was_running = yield begin_physical_addressing (cancellable);
+			GLib.Error? failure = null;
+			try {
+				uint64 l2_block_size = (uint64) 1 << num_block_bits_at_level (2, p.granule);
+				uint64 va = start_va;
+				while (va < end_va) {
+					BlockMapping? block = yield locate_block (va, p, cancellable);
+					if (block != null) {
+						blocks.add (block);
+						va = block.base_va + block.size;
+					} else {
+						va = (va & ~(l2_block_size - 1)) + l2_block_size;
+					}
+				}
+			} catch (GLib.Error e) {
+				failure = e;
+			}
+			yield end_physical_addressing (was_running, cancellable);
+			throw_if_failed (failure);
+
+			return blocks;
+		}
+
+		private async BlockMapping? locate_block (uint64 va, MMUParameters p, Cancellable? cancellable)
+				throws Error, IOError {
+			uint64 table_pa = p.tt1;
+			uint level = p.first_level;
+			while (true) {
+				uint shift = address_shift_at_level (level, p.granule);
+				uint entries = compute_max_entries (level, p);
+				uint index = (uint) ((va >> shift) & (entries - 1));
+				uint64 slot_pa = table_pa + ((uint64) index * Descriptor.SIZE);
+
+				Buffer d_buf = yield read_physical_buffer (slot_pa, Descriptor.SIZE, cancellable);
+				uint64 raw = d_buf.read_uint64 (0);
+				Descriptor desc = Descriptor.parse (raw, level, p.granule);
+
+				if (desc.kind == BLOCK) {
+					uint64 block_size = (uint64) 1 << num_block_bits_at_level (level, p.granule);
+					return new BlockMapping (slot_pa, raw, level, va & ~(block_size - 1), block_size);
+				}
+				if (desc.kind != TABLE)
+					return null;
+
+				table_pa = desc.target_address;
+				level++;
+			}
+		}
+
+		private async void split_block (BlockMapping block, uint64 table_pa, MMUParameters p, Cancellable? cancellable)
+				throws Error, IOError {
+			uint sub_level = block.level + 1;
+			uint64 sub_size = (sub_level == 3)
+				? (uint64) 1 << inpage_bits_for_granule (p.granule)
+				: (uint64) 1 << num_block_bits_at_level (sub_level, p.granule);
+			uint sub_count = (uint) (block.size / sub_size);
+			uint64 block_pa = block.raw & INT48_MASK & ~(block.size - 1);
+			uint64 leaf_kind = (sub_level == 3) ? 0x3 : 0x1;
+
+			var builder = gdb.make_buffer_builder ();
+			for (uint i = 0; i != sub_count; i++) {
+				uint64 sub_pa = block_pa + ((uint64) i * sub_size);
+				uint64 descriptor = (sub_pa & OUTPUT_ADDRESS_MASK) | (block.raw & ATTRIBUTE_MASK) | leaf_kind;
+				builder.append_uint64 (descriptor);
+			}
+			yield write_physical_buffer (table_pa, builder.build (), cancellable);
+
+			var slot = gdb.make_buffer_builder ();
+			slot.append_uint64 ((table_pa & OUTPUT_ADDRESS_MASK) | 0x3);
+			yield write_physical_buffer (block.slot_pa, slot.build (), cancellable);
+		}
+
+		private async uint64 resolve_physical_address (uint64 va, MMUParameters p, Cancellable? cancellable)
+				throws Error, IOError {
+			uint64 table_pa = p.tt1;
+			uint level = p.first_level;
+			while (true) {
+				uint shift = address_shift_at_level (level, p.granule);
+				uint entries = compute_max_entries (level, p);
+				uint index = (uint) ((va >> shift) & (entries - 1));
+				uint64 slot_pa = table_pa + ((uint64) index * Descriptor.SIZE);
+
+				Buffer d_buf = yield read_physical_buffer (slot_pa, Descriptor.SIZE, cancellable);
+				uint64 raw = d_buf.read_uint64 (0);
+				Descriptor desc = Descriptor.parse (raw, level, p.granule);
+
+				if (desc.kind == BLOCK || level == 3) {
+					uint64 span = (level == 3)
+						? (uint64) 1 << inpage_bits_for_granule (p.granule)
+						: (uint64) 1 << num_block_bits_at_level (level, p.granule);
+					return (raw & INT48_MASK & ~(span - 1)) | (va & (span - 1));
+				}
+				if (desc.kind != TABLE)
+					throw new Error.NOT_SUPPORTED ("Unable to resolve physical address for 0x%" + uint64.FORMAT_MODIFIER + "x", va);
+
+				table_pa = desc.target_address;
+				level++;
+			}
 		}
 
 		// Change protection through the kernel's own set_memory_* helpers. W^X is honoured by
@@ -648,6 +787,22 @@ namespace Frida.Barebone {
 				}
 
 				table_pa = desc.target_address;
+			}
+		}
+
+		private class BlockMapping {
+			public uint64 slot_pa;
+			public uint64 raw;
+			public uint level;
+			public uint64 base_va;
+			public uint64 size;
+
+			public BlockMapping (uint64 slot_pa, uint64 raw, uint level, uint64 base_va, uint64 size) {
+				this.slot_pa = slot_pa;
+				this.raw = raw;
+				this.level = level;
+				this.base_va = base_va;
+				this.size = size;
 			}
 		}
 
