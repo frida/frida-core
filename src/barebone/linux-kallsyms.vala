@@ -2,13 +2,14 @@
 namespace Frida.Barebone {
 	/**
 	 * Reconstructs a kernel's symbols from the kallsyms tables embedded in its on-disk image,
-	 * so a System.map is not needed. The image is a raw arm64 Image (optionally gzip-compressed);
+	 * so a System.map is not needed. The image is a raw kernel, a gzip-compressed one, or an x86
+ * bzImage whose payload is packed with LZ4, which Android builds its x86 kernels with;
 	 * the tables are located by their structure and the names are decoded with the token table,
 	 * pairing each name with relative_base + offsets[i] -- the address it was linked for.
 	 */
 	internal class KallsymsImage {
 		public static Gee.List<SymbolInfo> parse (uint8[] image) throws Error {
-			uint8[] raw = maybe_gunzip (image);
+			uint8[] raw = unpack (image);
 
 			var tokens = find_tokens (raw);
 
@@ -39,9 +40,18 @@ namespace Frida.Barebone {
 			return symbols;
 		}
 
-		private static uint8[] maybe_gunzip (uint8[] image) throws Error {
-			if (image.length < 4 || image[0] != 0x1f || image[1] != 0x8b)
-				return image;
+		private static uint8[] unpack (uint8[] image) throws Error {
+			if (image.length >= 4 && image[0] == 0x1f && image[1] == 0x8b)
+				return gunzip (image);
+
+			uint8[]? payload = find_lz4_payload (image);
+			if (payload != null)
+				return payload;
+
+			return image;
+		}
+
+		private static uint8[] gunzip (uint8[] image) throws Error {
 			try {
 				var decompressor = new ZlibDecompressor (ZlibCompressorFormat.GZIP);
 				var source = new MemoryInputStream.from_data (image, null);
@@ -55,6 +65,115 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 				throw new Error.NOT_SUPPORTED ("Unable to decompress kernel image: %s", e.message);
 			}
+		}
+
+		/**
+		 * A self-extracting kernel keeps the real image behind its unpacking stub, so the payload
+		 * is found by its magic and inflated. The legacy LZ4 frame the kernel packs it into is the
+		 * magic followed by blocks of a little-endian length and that many LZ4 bytes.
+		 */
+		private static uint8[]? find_lz4_payload (uint8[] image) {
+			uint n = image.length;
+			for (uint i = 0; i + 8 <= n; i++) {
+				if (image[i] != 0x02 || image[i + 1] != 0x21 || image[i + 2] != 0x4c || image[i + 3] != 0x18)
+					continue;
+				uint8[]? payload = inflate_lz4_legacy (image, i + 4);
+				if (payload != null)
+					return payload;
+			}
+			return null;
+		}
+
+		private const uint MIN_PAYLOAD_SIZE = 1024 * 1024;
+		private const uint MAX_PAYLOAD_SIZE = 256 * 1024 * 1024;
+		private const uint MAX_BLOCK_SIZE = 16 * 1024 * 1024;
+
+		private static uint8[]? inflate_lz4_legacy (uint8[] image, uint start) {
+			uint n = image.length;
+			var output = new uint8[1 << 20];
+			uint filled = 0;
+
+			uint pos = start;
+			while (pos + 4 <= n) {
+				uint size = image[pos] | (image[pos + 1] << 8) | (image[pos + 2] << 16) |
+					((uint) image[pos + 3] << 24);
+				pos += 4;
+				if (size == 0 || size > MAX_BLOCK_SIZE || pos + size > n)
+					break;
+				if (!inflate_lz4_block (image, pos, size, ref output, ref filled))
+					break;
+				pos += size;
+				if (filled >= MAX_PAYLOAD_SIZE)
+					break;
+			}
+
+			if (filled < MIN_PAYLOAD_SIZE)
+				return null;
+			output.resize ((int) filled);
+			return output;
+		}
+
+		private static bool inflate_lz4_block (uint8[] image, uint start, uint size, ref uint8[] output,
+				ref uint filled) {
+			uint end = start + size;
+			uint p = start;
+
+			while (p < end) {
+				uint token = image[p++];
+
+				uint literals = token >> 4;
+				if (literals == 15 && !read_length_extension (image, ref p, end, ref literals))
+					return false;
+				if (p + literals > end)
+					return false;
+				if (literals != 0) {
+					reserve (ref output, filled + literals);
+					Memory.copy (&output[filled], &image[p], literals);
+					filled += literals;
+					p += literals;
+				}
+
+				if (p == end)
+					break;
+				if (p + 2 > end)
+					return false;
+				uint offset = image[p] | (image[p + 1] << 8);
+				p += 2;
+				if (offset == 0 || offset > filled)
+					return false;
+
+				uint length = token & 15;
+				if (length == 15 && !read_length_extension (image, ref p, end, ref length))
+					return false;
+				length += 4;
+
+				reserve (ref output, filled + length);
+				uint from = filled - offset;
+				for (uint i = 0; i != length; i++)
+					output[filled + i] = output[from + i];
+				filled += length;
+			}
+
+			return true;
+		}
+
+		private static bool read_length_extension (uint8[] image, ref uint p, uint end, ref uint length) {
+			while (p < end) {
+				uint b = image[p++];
+				length += b;
+				if (b != 255)
+					return true;
+			}
+			return false;
+		}
+
+		private static void reserve (ref uint8[] output, uint needed) {
+			uint size = output.length;
+			if (needed <= size)
+				return;
+			while (size < needed)
+				size *= 2;
+			output.resize ((int) size);
 		}
 
 		/**
