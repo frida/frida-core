@@ -1,6 +1,5 @@
 backend_sources += files(
   'barebone-host-session.vala',
-  'emulator-instrumentation.vala',
   'agent-connection.vala',
   'script.vala',
   'machine.vala',
@@ -38,6 +37,9 @@ backend_sources += files(
 if host_os_family == 'darwin'
   backend_sources += files('vz-physical-memory.vala')
   backend_vala_args += '--pkg=frida-gum-darwin-1.0'
+endif
+if host_os == 'macos'
+  backend_sources += files('emulator-instrumentation.vala')
 endif
 barebone_script_runtime = custom_target('frida-barebone-script-runtime',
   input: [
