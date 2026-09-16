@@ -32,6 +32,8 @@ SECTIONS {
     _ZwYieldExecution = .; . += 8;
     _KeExpandKernelStackAndCalloutEx = .; . += 8;
     _KeBugCheckEx = .; . += 8;
+    _DbgPrint = .; . += 8;
+    _MmGetVirtualForPhysical = .; . += 8;
     _MmMapIoSpace = .; . += 8;
     _MmGetPhysicalAddress = .; . += 8;
     _HalGetInterruptVector = .; . += 8;
@@ -55,6 +57,9 @@ SECTIONS {
     _ZwEnumerateKey = .; . += 8;
     _ZwQueryValueKey = .; . += 8;
     _ZwReadFile = .; . += 8;
+    _ZwWriteFile = .; . += 8;
+    _ZwEnumerateValueKey = .; . += 8;
+    _ZwDeviceIoControlFile = .; . += 8;
     _ZwClose = .; . += 8;
     _ZwCreateEvent = .; . += 8;
     _ExAllocatePool2 = .; . += 8;
