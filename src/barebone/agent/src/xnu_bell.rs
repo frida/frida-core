@@ -37,7 +37,6 @@ unsafe extern "C" fn answer_the_bell(process: *mut c_void, asked: *mut c_void,
             crate::xnu_hiding::a_thread_of_ours(unsafe { this_thread() });
         }
 
-
         crate::kernel::wake(crate::glib::wakeup_token());
         return 0;
     }

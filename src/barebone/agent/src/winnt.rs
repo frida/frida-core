@@ -1604,7 +1604,6 @@ fn modify_ring_zero_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bo
     }
 }
 
-
 fn ring_zero_thread(id: u32) -> Option<*mut c_void> {
     let mut wanted = core::ptr::null_mut();
     enumerate_thread_objects(&mut |thread| unsafe {
@@ -1645,7 +1644,6 @@ fn walk_threads_of(process: *mut c_void, found: &mut dyn FnMut(*mut c_void)) {
         }
     }
 }
-
 
 // The kernel gives the registers of a thread only if the thread has a user-mode part. If the
 // thread runs only in the kernel, the kernel reads after the end of its stack and stops the

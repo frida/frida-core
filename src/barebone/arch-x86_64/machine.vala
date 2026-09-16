@@ -228,7 +228,6 @@ namespace Frida.Barebone {
 			private size_t stack_args_offset;
 			private State stack_state = PRISTINE;
 
-
 			private enum State {
 				PRISTINE,
 				MODIFIED

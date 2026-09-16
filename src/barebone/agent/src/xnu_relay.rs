@@ -174,7 +174,6 @@ pub const HAS_RUN: u64 = 36;
 pub const PAGE_SIZE: u64 = 40;
 pub const CACHE_SHAPE: u64 = 48;
 
-
 pub const PROTECT_WANTED: u64 = 544;
 pub const PROTECT_SIZE: u64 = 552;
 pub const PROTECT_TO: u64 = 560;

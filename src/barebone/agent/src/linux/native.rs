@@ -80,7 +80,6 @@ pub fn leave_a_word(file: *mut c_void) {
     unsafe { _kernel_write(file, &one as *const u64 as *const u8, 8, 0) };
 }
 
-
 // A CONFIG_CFI_CLANG kernel checks the 4-byte type id in front of any function it
 // calls indirectly. Our callbacks carry no such id, so hand the kernel a small
 // executable thunk instead: the matching id (copied from a kernel function of the
@@ -392,7 +391,6 @@ fn queue_this_thread(entry: &mut [usize; WAIT_ENTRY_WORDS]) -> *mut c_void {
 fn waiters() -> *mut c_void {
     let queue = (&raw mut WAITERS) as *mut c_void;
 
-
     if !WAITERS_CLAIMED.swap(true, Ordering::AcqRel) {
         unsafe {
             ___init_waitqueue_head(queue, c"frida".as_ptr(), (&raw mut WAITERS_KEY) as *mut c_void)
@@ -581,7 +579,6 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
 }
 
 #[cfg(not(any(target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
-
 
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     let prot = page_of(DEVICE_MEMORY);
@@ -902,7 +899,6 @@ unsafe extern "C" {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     static ___default_kernel_pte_mask: *const usize;
 }
-
 
 #[cfg(target_arch = "x86")]
 unsafe extern "C" {

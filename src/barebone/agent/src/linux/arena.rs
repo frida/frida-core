@@ -179,7 +179,6 @@ const THREADS: usize = 304;
 const THREAD_SLOTS: u32 = 32;
 pub const SAID_SIZE: usize = 192;
 
-
 pub const REPORTED: usize = 0;
 pub const HOME: usize = 4;
 pub const SAYS: usize = 8;

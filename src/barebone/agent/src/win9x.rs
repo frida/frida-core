@@ -918,7 +918,6 @@ fn wake_asker(arena: u32) {
     unsafe { __VWIN32_QueueUserApc(arena + WAKE_STUB_OFFSET, 0, thread) };
 }
 
-
 fn wake_copy(arena: u32) {
     let thread = unsafe { ((arena + LOOP_THREAD) as *const u32).read_volatile() };
     if thread == 0 {
@@ -2234,7 +2233,6 @@ pub fn stop_hearing_from_vmm() {
 }
 
 static mut HEARING: bool = false;
-
 
 // What a new thread is to run, and the value to hand it, wait on its own stack: the stub returns
 // to the starter of KERNEL32, which reads them from there. The thunk gives this the frame it made,

@@ -985,7 +985,6 @@ pub(crate) fn writable_half_start() -> usize {
     unsafe { frida_agent_private_start }
 }
 
-
 #[cfg(all(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
     feature = "xnu-core"), not(feature = "xnu-kext")))]
 pub(crate) fn writable_half_start() -> usize {
@@ -1293,7 +1292,6 @@ fn serve_the_kernel_half() {
     });
 
     unsafe { transport_get_unchecked().process() };
-
 
     #[cfg(feature = "win9x")]
     serve_deferred_work();
@@ -1737,7 +1735,6 @@ fn serve_pending_detach() {
     send_command_reply(request_id, response);
 }
 
-
 #[cfg(feature = "xnu-core")]
 pub static mut ASKED_THE_HOST: u32 = 0;
 
@@ -1962,8 +1959,6 @@ fn as_text<'a>(bytes: &[u8], into: &'a mut [u8]) -> *const gchar {
 #[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu-core"))]
 fn handle_gate_spawns(payload: *mut GVariant) -> HandlerResponse {
     kernel::gate_spawns(unsafe { g_variant_get_boolean(payload) } != 0);
-
-
 
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }

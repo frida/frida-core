@@ -125,8 +125,6 @@ pub fn map_writable(size: usize) -> *mut u8 {
     take_memory(size).unwrap_or(0) as *mut u8
 }
 
-
-
 fn alloc_code(size: usize) -> *mut u8 {
     take_memory(size).unwrap_or(0) as *mut u8
 }
@@ -406,8 +404,6 @@ unsafe extern "C" fn say_which_one_first(errand: *mut c_void) -> *mut c_void {
 const STACK: usize = 1024 * 1024;
 const STACK_HEADROOM: u64 = 0x100;
 const PLAIN_ADDRESSES: u32 = 1;
-
-
 
 pub fn process_id() -> u32 {
     unsafe { ask(GET_PID, [0; 4]) as u32 }

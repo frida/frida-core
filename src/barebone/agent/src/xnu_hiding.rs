@@ -8,7 +8,6 @@ pub fn hide_our_threads() {
     say_less_of_what_a_task_holds();
     hide_what_we_have_in_a_process();
 
-
     if unsafe { HIDDEN } {
         return;
     }
@@ -305,7 +304,6 @@ unsafe extern "C" fn say_which_threads(task: *mut c_void, threads: *mut *mut u64
     }
     unsafe { *how_many = kept as u32 };
 
-
     went
 }
 
@@ -594,7 +592,6 @@ unsafe extern "C" fn say_what_it_has(process: *mut c_void, asked: *mut c_void, a
     if asked.is_null() || answer.is_null() {
         return went;
     }
-
 
     let asked = unsafe { &mut *(asked as *mut Asked) };
     if went != 0 || asked_by_one_of_ours() {

@@ -517,7 +517,6 @@ const MAX_IDENTIFIER: u32 = 4 * 1024 * 1024;
 
 const ERROR_POINTER_START: usize = usize::MAX - 4095;
 
-
 unsafe extern "C" {
     static _init_task: *const c_void;
     static _tasklist_lock: *mut c_void;
@@ -547,7 +546,6 @@ unsafe extern "C" {
     static _copy_from_kernel_nofault:
         unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> c_long;
 }
-
 
 #[cfg(target_arch = "x86")]
 unsafe extern "C" {

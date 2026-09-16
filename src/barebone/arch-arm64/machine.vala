@@ -668,7 +668,6 @@ namespace Frida.Barebone {
 			yield leave_physical_addressing (gdb, was_running, cancellable);
 		}
 
-
 		private async MMUParameters load_mmu_parameters (Cancellable? cancellable) throws Error, IOError {
 			if (cached_mmu_parameters == null)
 				cached_mmu_parameters = yield MMUParameters.load (gdb, cancellable);
@@ -1086,7 +1085,6 @@ namespace Frida.Barebone {
 
 			yield landed.write_registers (restored, cancellable);
 		}
-
 
 		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
 			var regs = yield thread.read_registers (cancellable);

@@ -26,12 +26,9 @@ pub fn inject_into_process(id: u32) -> u32 {
     learn_where_the_threads_are_counted(&before, &look_at_the_task(process.task));
     crate::xnu_hiding::a_thread_of_ours(bare_thread);
 
-
     if !woke_up(id, arena_here) {
         return 0;
     }
-
-
 
     unsafe { arenas() }.insert(id, Placed {
         map: process.map,
@@ -101,7 +98,6 @@ fn a_copy_in(id: u32) -> Option<u64> {
 static mut ASKED: u32 = 0;
 
 const THE_ONE_THAT_STARTS_THINGS: u32 = 1;
-
 
 pub fn stop_copies() {
     let everywhere: alloc::vec::Vec<u32> = unsafe { arenas() }.keys().copied().collect();
@@ -541,7 +537,6 @@ fn give_the_copy_a_home(id: u32, map: *mut c_void) -> Option<Home> {
     }
 
     let stack = take_memory(map, STACK)?;
-
 
     if seen_size == size as u64 {
         let protect = unsafe { _mach_vm_protect }?;
