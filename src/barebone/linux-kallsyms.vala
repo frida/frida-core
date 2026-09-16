@@ -2,10 +2,10 @@
 namespace Frida.Barebone {
 	/**
 	 * Reconstructs a kernel's symbols from the kallsyms tables embedded in its on-disk image,
-	 * so a System.map is not needed. The image is a raw kernel, a gzip-compressed one, or an x86
- * bzImage whose payload is packed with LZ4, which Android builds its x86 kernels with;
-	 * the tables are located by their structure and the names are decoded with the token table,
-	 * pairing each name with relative_base + offsets[i] -- the address it was linked for.
+	 * so a System.map is not needed. The image is a raw kernel, a gzip-compressed one, or an
+	 * x86 bzImage whose payload is packed with LZ4, which Android builds its x86 kernels with.
+	 * The tables are located by their structure and the names are decoded with the token table,
+	 * pairing each name with the address it was linked for.
 	 */
 	internal class KallsymsImage {
 		public static Gee.List<SymbolInfo> parse (uint8[] image) throws Error {
@@ -15,10 +15,22 @@ namespace Frida.Barebone {
 
 			uint num_syms;
 			uint table_pos;
+			uint names_pos;
 			uint64 relative_base;
-			bool absolute = find_addresses (raw, out table_pos, out num_syms, out relative_base);
+			bool absolute;
+			bool percpu = false;
 
-			uint names_pos = find_names (raw, tokens, num_syms);
+			try {
+				absolute = find_addresses (raw, out table_pos, out num_syms, out relative_base);
+				names_pos = find_names (raw, tokens, num_syms);
+			} catch (Error e) {
+				if (!find_percpu_layout (raw, tokens, out table_pos, out num_syms, out relative_base,
+						out names_pos)) {
+					throw e;
+				}
+				absolute = false;
+				percpu = true;
+			}
 
 			var symbols = new Gee.ArrayList<SymbolInfo> ();
 			uint p = names_pos;
@@ -27,9 +39,19 @@ namespace Frida.Barebone {
 				p = decode_symbol (raw, p, tokens, out name);
 				if (name.length < 2)
 					continue;
-				uint64 address = absolute
-					? read_u64 (raw, table_pos + i * 8)
-					: relative_base + (int64) read_i32 (raw, table_pos + i * 4);
+				uint64 address;
+				if (absolute) {
+					address = read_u64 (raw, table_pos + i * 8);
+				} else {
+					int32 offset = read_i32 (raw, table_pos + i * 4);
+					if (percpu) {
+						address = (offset >= 0)
+							? (uint64) offset
+							: relative_base - 1 + (uint64) (-(int64) offset);
+					} else {
+						address = relative_base + (int64) offset;
+					}
+				}
 				symbols.add (new SymbolInfo () {
 					name = name.substring (1),
 					offset = address,
@@ -38,6 +60,57 @@ namespace Frida.Barebone {
 				});
 			}
 			return symbols;
+		}
+
+		private const uint MIN_SYMS = 1024;
+		private const uint MAX_SYMS = 4000000;
+
+		/**
+		 * x86 kernels are built with CONFIG_KALLSYMS_ABSOLUTE_PERCPU, whose offsets are signed:
+		 * a non-negative one is already an address and a negative one counts back from the base.
+		 * The table therefore does not ascend, and cannot be found by looking for a run that does.
+		 *
+		 * It is anchored on instead. kallsyms_relative_base is followed by kallsyms_num_syms and
+		 * then, once aligned, by the names themselves, so a base-looking address ahead of a
+		 * plausible count is the layout when the names behind it decode to exactly that count.
+		 * The offsets end where the padding before the base begins.
+		 */
+		private static bool find_percpu_layout (uint8[] raw, string[] tokens, out uint table_pos,
+				out uint num_syms, out uint64 relative_base, out uint names_pos) {
+			table_pos = 0;
+			num_syms = 0;
+			relative_base = 0;
+			names_pos = 0;
+
+			uint n = raw.length;
+			for (uint pos = 0; pos + 16 <= n; pos += 8) {
+				uint64 candidate = read_u64 (raw, pos);
+				if (!looks_like_kernel_base (candidate))
+					continue;
+
+				uint count = (uint) (uint32) read_i32 (raw, pos + 8);
+				if (count < MIN_SYMS || count > MAX_SYMS)
+					continue;
+
+				uint span = count * 4;
+				uint pad = ((span % 8) == 0) ? 0 : 8 - (span % 8);
+				if (pos < span + pad)
+					continue;
+
+				uint start = (pos + 12 + 7) & ~((uint) 7);
+				if (start >= n)
+					continue;
+				if (!decodes_full_table (raw, start, tokens, count))
+					continue;
+
+				table_pos = pos - span - pad;
+				num_syms = count;
+				relative_base = candidate;
+				names_pos = start;
+				return true;
+			}
+
+			return false;
 		}
 
 		private static uint8[] unpack (uint8[] image) throws Error {
