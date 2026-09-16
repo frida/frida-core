@@ -652,6 +652,7 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
+return new Config ();
 		unowned string? gadget_path = location.path;
 		if (gadget_path == null)
 			return new Config ();
