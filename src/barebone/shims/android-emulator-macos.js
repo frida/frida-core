@@ -63,7 +63,6 @@ emulateHardwareBreakpoints();
 rewriteUnknownVcpuExits();
 handleDebugExceptions();
 recv('allow-pipe-path', onAllowPipePath);
-send({ type: 'armed' });
 
 function verifyBuild() {
   const sites = [
@@ -74,8 +73,7 @@ function verifyBuild() {
   for (const [address, expected, name] of sites) {
     const found = address.readU32();
     if (found !== expected) {
-      send({ type: 'shim-error', message: `unexpected instruction at ${name}: got 0x${found.toString(16)}, want 0x${expected.toString(16)}` });
-      throw new Error('offset mismatch, refusing to patch');
+      throw new Error(`unexpected instruction at ${name}: got 0x${found.toString(16)}, want 0x${expected.toString(16)}`);
     }
   }
 }

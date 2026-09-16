@@ -16,18 +16,12 @@ namespace Frida {
 				var device = yield manager.get_device_by_type (DeviceType.LOCAL, 0, cancellable);
 				var session = yield device.attach (config.connection.pid, null, cancellable);
 
-				unowned string source = (string) Frida.Data.Barebone.get_emulator_gdbstub_shim_js_blob ().data;
+				unowned string source = (string) shim_blob ().data;
 				var script = yield session.create_script (source, null, cancellable);
 
-				var armed = new Promise<bool> ();
-				script.message.connect ((json, data) => {
-					if (!armed.future.ready)
-						handle_arming_message (json, armed);
-				});
-
 				yield script.load (cancellable);
-				yield armed.future.wait_async (cancellable);
 
+#if MACOS
 				string? pipe_path = pipe_socket_path (config);
 				if (pipe_path != null) {
 					var builder = new Json.Builder ();
@@ -40,6 +34,7 @@ namespace Frida {
 					script.post (Json.to_string (builder.get_root (), false));
 				}
 
+#endif
 				var instrumentation = new EmulatorInstrumentation (manager, script);
 				adopted = true;
 				return instrumentation;
@@ -61,35 +56,15 @@ namespace Frida {
 			yield manager.close (cancellable);
 		}
 
-		private static void handle_arming_message (string json, Promise<bool> armed) {
-			try {
-				var parser = new Json.Parser ();
-				parser.load_from_data (json, -1);
-				var root = parser.get_root ().get_object ();
-
-				string kind = root.get_string_member_with_default ("type", "");
-				if (kind == "error") {
-					armed.reject (new Error.NOT_SUPPORTED ("Emulator instrumentation failed: %s",
-						root.get_string_member_with_default ("description", "script error")));
-					return;
-				}
-				if (kind != "send")
-					return;
-
-				Json.Object? payload = root.get_object_member ("payload");
-				if (payload == null)
-					return;
-
-				string payload_type = payload.get_string_member_with_default ("type", "");
-				if (payload_type == "armed")
-					armed.resolve (true);
-				else if (payload_type == "shim-error")
-					armed.reject (new Error.NOT_SUPPORTED ("Emulator instrumentation refused to patch: %s",
-						payload.get_string_member_with_default ("message", "offset mismatch")));
-			} catch (GLib.Error e) {
-			}
+		private static Frida.Data.Barebone.Blob shim_blob () {
+#if WINDOWS
+			return Frida.Data.Barebone.get_android_emulator_windows_js_blob ();
+#else
+			return Frida.Data.Barebone.get_android_emulator_macos_js_blob ();
+#endif
 		}
 
+#if MACOS
 		private static string? pipe_socket_path (BareboneConfig config) {
 			var injected = config.agent as BareboneInjectedAgentConfig;
 			if (injected == null)
@@ -105,5 +80,6 @@ namespace Frida {
 
 			return null;
 		}
+#endif
 	}
 }
