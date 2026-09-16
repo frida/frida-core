@@ -867,6 +867,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/ARM64/rpc-replies-in-process-in-live-guest", () => {
+			var h = new Harness ((h) => linux_rpc_replies_in_process_in_live_guest.begin (h as Harness, "LINUX_ARM64"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/IA32/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_X86"));
 			h.run ();
@@ -4639,6 +4644,72 @@ FAIL: %s
 
 	private async void linux_rpc_replies_in_live_guest (Harness h, string prefix) {
 		yield call_rpc_in_live_guest (h, linux_config_from_environment (h, prefix));
+	}
+
+	private async void linux_rpc_replies_in_process_in_live_guest (Harness h, string prefix) {
+		var config = linux_config_from_environment (h, prefix);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			string target = Environment.get_variable (@"FRIDA_TEST_$(prefix)_REPL_TARGET") ?? "app_process64";
+			uint pid = yield find_program (device, target);
+			if (pid == 0)
+				printerr ("\nNo %s among the guest's processes\n", target);
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script (repl_agent_source (prefix), null, null);
+
+			string? received = null;
+			bool waiting = false;
+			var handler = script.message.connect ((json, data) => {
+				if (!json.contains ("frida:rpc"))
+					return;
+				received = json;
+				if (waiting) {
+					waiting = false;
+					linux_rpc_replies_in_process_in_live_guest.callback ();
+				}
+			});
+			yield script.load (null);
+
+			script.post ("""["frida:rpc",1,"call","evaluate",["1 + 1",{"raw":false}]]""");
+
+			if (received == null) {
+				waiting = true;
+				yield;
+			}
+			script.disconnect (handler);
+
+			if (received == null || !received.contains ("\"ok\""))
+				printerr ("\nexpected an ok reply in: %s\n", (received != null) ? received : "(froze -- no reply)");
+			assert_true (received != null && received.contains ("\"ok\""));
+
+			yield session.detach (null);
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private string repl_agent_source (string prefix) throws GLib.Error {
+		string? agent = Environment.get_variable (@"FRIDA_TEST_$(prefix)_REPL_AGENT");
+		if (agent == null)
+			return "rpc.exports.evaluate = code => eval(code);";
+		string contents;
+		FileUtils.get_contents (agent, out contents);
+		return contents;
 	}
 
 	private async void linux_agent_recovers_from_exception_in_live_guest (Harness h, string prefix) {
