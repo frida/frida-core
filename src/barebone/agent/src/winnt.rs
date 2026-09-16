@@ -18,7 +18,6 @@ pub use crate::winnt_user::{
     resume_process, spawn_process, thread_entry_points, thread_exit_slot, thread_start_slot,
     ThreadEntryPoints,
 };
-use crate::winnt_paging::{GUM_PAGE_EXECUTE, GUM_PAGE_READ};
 
 #[cfg(target_arch = "x86")]
 #[cfg(target_arch = "x86")]
@@ -116,8 +115,19 @@ pub fn free_code(ptr: *mut u8, size: usize) {
 }
 
 pub fn page_size() -> usize {
+    let told = unsafe { PAGE_SIZE_IN_PROCESS };
+    if told != 0 {
+        return told;
+    }
+
     crate::gum::page_size_the_kernel_runs_with()
 }
+
+pub(crate) fn be_told_page_size(size: usize) {
+    unsafe { PAGE_SIZE_IN_PROCESS = size };
+}
+
+static mut PAGE_SIZE_IN_PROCESS: usize = 0;
 
 pub fn alloc_heap(size: usize) -> *mut u8 {
     alloc(size)
@@ -1386,29 +1396,30 @@ const INVALID_OPCODE: u32 = 6;
 const GENERAL_PROTECTION: u32 = 13;
 const PAGE_FAULT: u32 = 14;
 
-pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
-    (primitives().enumerate_threads)(found)
+pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
+    (primitives().enumerate_threads)(found, with_registers)
 }
 
-pub fn find_thread(id: u32) -> Option<ThreadInfo> {
-    (primitives().find_thread)(id)
+pub fn find_thread(id: u32, with_registers: bool) -> Option<ThreadInfo> {
+    (primitives().find_thread)(id, with_registers)
 }
 
 pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
     (primitives().modify_thread)(id, change)
 }
 
-fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo)) {
+fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
     let Some(layout) = thread_layout() else {
         found(ThreadInfo { id: current_thread_id() as u32, cpu_state: None });
         return;
     };
 
     let _ = layout;
-    enumerate_thread_objects(&mut |thread| unsafe {
+    let ours = unsafe { (_PsGetThreadProcess)((_PsGetCurrentThread)()) };
+    walk_threads_of(ours, &mut |thread| unsafe {
         found(ThreadInfo {
             id: (_PsGetThreadId)(thread),
-            cpu_state: capture(thread),
+            cpu_state: with_registers.then(|| capture(thread)).flatten(),
         });
     });
 }
@@ -1437,6 +1448,7 @@ fn modify_ring_zero_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bo
     }
 }
 
+
 fn ring_zero_thread(id: u32) -> Option<*mut c_void> {
     let mut wanted = core::ptr::null_mut();
     enumerate_thread_objects(&mut |thread| unsafe {
@@ -1449,26 +1461,42 @@ fn ring_zero_thread(id: u32) -> Option<*mut c_void> {
 }
 
 fn enumerate_thread_objects(found: &mut dyn FnMut(*mut c_void)) {
+    enumerate_processes(&mut |process| walk_threads_of(process.handle, found));
+}
+
+fn walk_threads_of(process: *mut c_void, found: &mut dyn FnMut(*mut c_void)) {
     let Some(layout) = thread_layout() else {
         return;
     };
 
-    enumerate_processes(&mut |process| unsafe {
-        let head = process.handle as usize + layout.head;
-        let mut entry = (head as *const usize).read_volatile();
-        while entry != head && entry != 0 {
-            found((entry - layout.entry) as *mut c_void);
-            entry = (entry as *const usize).read_volatile();
+    unsafe {
+        let head = process as usize + layout.head;
+        let mut node = head;
+        for _ in 0..MAX_THREADS_PER_PROCESS {
+            let Some(next) = try_read_pointer(node) else {
+                return;
+            };
+            node = next;
+            if node == head || node < layout.entry {
+                return;
+            }
+
+            let thread = (node - layout.entry) as *mut c_void;
+            if !names_a_thread_of(process, thread) {
+                return;
+            }
+            found(thread);
         }
-    });
+    }
 }
+
 
 // The kernel gives the registers of a thread only if the thread has a user-mode part. If the
 // thread runs only in the kernel, the kernel reads after the end of its stack and stops the
 // machine. A thread also cannot ask about itself.
 unsafe fn capture(thread: *mut c_void) -> Option<CpuState> {
     unsafe {
-        if (_PsGetProcessPeb)((_PsGetThreadProcess)(thread)).is_null() {
+        if (_PsGetThreadTeb)(thread).is_null() {
             return None;
         }
         if thread == (_PsGetCurrentThread)() {
@@ -1492,6 +1520,46 @@ static mut CONTEXT: [u8; CONTEXT_SIZE + CONTEXT_ALIGNMENT] = [0; CONTEXT_SIZE + 
 
 // No export gives the position of the thread list in a process. Thus calculate both offsets:
 // the caller is on the list, and its own links go back into its process.
+unsafe fn list_holds_threads_of(process: usize, layout: ThreadLayout) -> bool {
+    unsafe {
+        let head = process + layout.head;
+        let Some(mut node) = try_read_pointer(head) else {
+            return false;
+        };
+        if try_read_pointer(node + POINTER_SIZE) != Some(head) {
+            return false;
+        }
+
+        let mut vouched = 0;
+        while node != head && vouched != THREADS_TO_VOUCH_FOR {
+            if node < layout.entry {
+                return false;
+            }
+            if !names_a_thread_of(process as *mut c_void, (node - layout.entry) as *mut c_void) {
+                return false;
+            }
+
+            let Some(next) = try_read_pointer(node) else {
+                return false;
+            };
+            node = next;
+            vouched += 1;
+        }
+
+        vouched != 0
+    }
+}
+
+fn names_a_thread_of(process: *mut c_void, thread: *mut c_void) -> bool {
+    unsafe {
+        (_MmIsAddressValid)(thread as *const c_void) != 0
+            && (_PsGetThreadProcess)(thread) == process
+            && (_PsGetThreadId)(thread) != 0
+    }
+}
+
+const THREADS_TO_VOUCH_FOR: usize = 2;
+
 fn thread_layout() -> Option<ThreadLayout> {
     unsafe {
         if let Some(known) = THREAD_LAYOUT {
@@ -1502,12 +1570,17 @@ fn thread_layout() -> Option<ThreadLayout> {
         let process = (_PsGetThreadProcess)(me as *mut c_void) as usize;
 
         for entry in (MIN_THREAD_ENTRY_OFFSET..MAX_OBJECT_SIZE).step_by(POINTER_SIZE) {
-            let mut node = try_read_pointer(me + entry)?;
+            let Some(mut node) = try_read_pointer(me + entry) else {
+                continue;
+            };
             for _ in 0..MAX_THREADS_PER_PROCESS {
                 if node >= process && node < process + MAX_OBJECT_SIZE {
                     let layout = ThreadLayout { head: node - process, entry };
-                    THREAD_LAYOUT = Some(layout);
-                    return Some(layout);
+                    if list_holds_threads_of(process, layout) {
+                        THREAD_LAYOUT = Some(layout);
+                        return Some(layout);
+                    }
+                    break;
                 }
                 let Some(next) = try_read_pointer(node) else {
                     break;
@@ -1531,6 +1604,10 @@ static mut THREAD_LAYOUT: Option<ThreadLayout> = None;
 // This walk uses calculated addresses, thus read through Gum, which recovers from a fault.
 unsafe fn try_read_pointer(address: usize) -> Option<usize> {
     unsafe {
+        if (_MmIsAddressValid)(address as *const c_void) == 0 {
+            return None;
+        }
+
         let mut read: crate::bindings::gsize = 0;
         let data = crate::bindings::gum_memory_read(address as *const c_void, POINTER_SIZE as crate::bindings::gsize,
             &mut read);
@@ -1788,6 +1865,22 @@ unsafe fn read_from(process: *mut c_void, address: usize, out: &mut [u8]) -> boo
     }
 }
 
+unsafe fn write_to(process: *mut c_void, address: usize, bytes: &[u8]) -> bool {
+    unsafe {
+        let mut copied: usize = 0;
+        let status = (_MmCopyVirtualMemory)(
+            (_PsGetThreadProcess)((_PsGetCurrentThread)()),
+            bytes.as_ptr() as *const c_void,
+            process,
+            address as *mut c_void,
+            bytes.len(),
+            KERNEL_MODE as u8,
+            &mut copied,
+        );
+        status >= 0 && copied == bytes.len()
+    }
+}
+
 unsafe fn read_word_from(process: *mut c_void, address: usize) -> Option<usize> {
     let mut word = [0u8; POINTER_SIZE];
     if !unsafe { read_from(process, address, &mut word) } {
@@ -1919,8 +2012,6 @@ pub fn place_agent_in_process(pid: u32) -> bool {
         return true;
     }
 
-    put_a_copy_in_the_session_server(pid);
-
     let library = loader_library();
 
     let mut placed = Placement::default();
@@ -1942,51 +2033,20 @@ pub fn place_agent_in_process(pid: u32) -> bool {
 
     let mut wake: *mut c_void = core::ptr::null_mut();
     let mut work = || unsafe {
-        let private = alloc(private_size);
-        if private.is_null() {
+        let whole = put_image_in_process(process, private_offset, shared_size, private_size);
+        if whole == 0 {
             return;
         }
-        core::ptr::write_bytes(private, 0, private_size);
 
-        let shared_mdl = (_IoAllocateMdl)(own.base_address as *mut c_void, shared_size as u32, 0, 0,
-            core::ptr::null_mut());
-        let private_mdl = (_IoAllocateMdl)(private as *mut c_void, private_size as u32, 0, 0,
-            core::ptr::null_mut());
-        if shared_mdl.is_null() || private_mdl.is_null() {
-            return;
-        }
-        (_MmBuildMdlForNonPagedPool)(shared_mdl);
-        (_MmBuildMdlForNonPagedPool)(private_mdl);
-        placed.shared_mdl = shared_mdl;
-        placed.private_mdl = private_mdl;
+        vouch_for_range(process, whole, shared_size);
+        placed.seen_by_process = whole;
 
         let mut apc_state = [0usize; APC_STATE_WORDS];
         (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
 
-        // The memory manager selects the address of the code. The distance to the writable half is a
-        // property of the image, thus the code asks for that address.
-        for _ in 0..MAX_PLACEMENT_TRIES {
-            let text = (_MmMapLockedPagesSpecifyCache)(shared_mdl, USER_MODE, MM_CACHED,
-                core::ptr::null_mut(), 0, NORMAL_PAGE_PRIORITY);
-            if text.is_null() {
-                break;
-            }
+        crate::libc::__clear_cache(whole as *const u8, (whole + shared_size as u64) as *const u8);
 
-            let wanted = (text as usize + private_offset) as *mut c_void;
-            if (_MmMapLockedPagesSpecifyCache)(private_mdl, USER_MODE, MM_CACHED, wanted, 0,
-                    NORMAL_PAGE_PRIORITY) == wanted {
-                // The mapping gives no permission to execute.
-                protect(text as u64, shared_size, GUM_PAGE_READ | GUM_PAGE_EXECUTE);
-                crate::install_writable_half(text as usize, private as usize);
-                placed.seen_by_process = text as u64;
-                placed.writable_from_here = private as u64;
-                break;
-            }
-
-            (_MmUnmapLockedPages)(text, shared_mdl);
-        }
-
-        if placed.seen_by_process != 0 {
+        {
             let arena = alloc(ARENA_SIZE);
             core::ptr::write_bytes(arena, 0, ARENA_SIZE);
 
@@ -2007,6 +2067,7 @@ pub fn place_agent_in_process(pid: u32) -> bool {
                     (arena.add(TARGET_WAKE_HANDLE as usize) as *mut u64)
                         .write(open_event_in_current_process(wake) as u64);
                     (arena.add(LOADER_LIBRARY as usize) as *mut u64).write(library);
+                    (arena.add(PAGE_SIZE_IN_USE as usize) as *mut u64).write(page_size() as u64);
                     (arena.add(IMAGE_BASE as usize) as *mut u64)
                         .write(placed.seen_by_process);
                     (arena.add(IMAGE_SIZE as usize) as *mut u64)
@@ -2030,11 +2091,9 @@ pub fn place_agent_in_process(pid: u32) -> bool {
                 started: false,
                 text: placed.seen_by_process,
                 size: own.size as u64,
-                private: placed.writable_from_here,
-                private_size,
                 stack: 0,
-                shared_mdl: placed.shared_mdl,
-                private_mdl: placed.private_mdl,
+                step: 0,
+                carrier: core::ptr::null_mut(),
                 arena_mdl: placed.arena_mdl,
             })
         };
@@ -2046,11 +2105,8 @@ pub fn place_agent_in_process(pid: u32) -> bool {
 #[derive(Default)]
 pub struct Placement {
     pub seen_by_process: u64,
-    pub writable_from_here: u64,
     pub arena_seen_by_process: u64,
     pub arena_here: u64,
-    pub shared_mdl: *mut c_void,
-    pub private_mdl: *mut c_void,
     pub arena_mdl: *mut c_void,
 }
 
@@ -2094,24 +2150,38 @@ pub fn detach_from_process(pid: u32) -> bool {
     });
 
     let mut work = || unsafe {
-        if !process.is_null() {
-            let mut apc_state = [0usize; APC_STATE_WORDS];
-            (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
-
-            (_MmUnmapLockedPages)(target.text as *mut c_void, target.shared_mdl);
-            (_MmUnmapLockedPages)((target.text + target.private_offset()) as *mut c_void,
-                target.private_mdl);
-            (_MmUnmapLockedPages)(target.seen as *mut c_void, target.arena_mdl);
-
-            (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+        let mut carried_out = target.carrier.is_null();
+        if !target.carrier.is_null() {
+            let patience: i64 = -(LEAVE_PATIENCE_US * 10);
+            carried_out = (_ZwWaitForSingleObject)(target.carrier, 0, &patience) == 0;
+            (_ZwClose)(target.carrier);
         }
 
-        (_IoFreeMdl)(target.shared_mdl);
-        (_IoFreeMdl)(target.private_mdl);
-        (_IoFreeMdl)(target.arena_mdl);
+        if carried_out {
+            if !process.is_null() {
+                let mut apc_state = [0usize; APC_STATE_WORDS];
+                (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
 
-        free(target.private as *mut u8, target.private_size);
-        free(target.arena as *mut u8, ARENA_SIZE);
+                (_MmUnmapLockedPages)(target.seen as *mut c_void, target.arena_mdl);
+
+                (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+
+                let mut process_handle: *mut c_void = core::ptr::null_mut();
+                let process_type = (_PsProcessType as *const *mut c_void).read();
+                if (_ObOpenObjectByPointer)(process, 0, core::ptr::null_mut(), PROCESS_ALL_ACCESS,
+                        process_type, KERNEL_MODE as u32, &mut process_handle) >= 0 {
+                    for taken in [target.text, target.stack, target.step] {
+                        if taken != 0 {
+                            free_in_process(process_handle, taken);
+                        }
+                    }
+                    (_ZwClose)(process_handle);
+                }
+            }
+
+            (_IoFreeMdl)(target.arena_mdl);
+            free(target.arena as *mut u8, ARENA_SIZE);
+        }
 
         if !target.wake.is_null() {
             (_ZwClose)(target.wake);
@@ -2144,6 +2214,7 @@ fn copy_has_left(target: &Target) -> bool {
 }
 
 const LEAVE_ATTEMPTS: u32 = 40;
+const LEAVE_PATIENCE_US: i64 = 2_000_000;
 const LEAVE_SLICE_US: u64 = 50_000;
 
 pub fn stop_copies() {
@@ -2179,8 +2250,11 @@ pub fn start_agent_in_process(pid: u32) -> u32 {
         }
 
         let mut stack = 0u64;
+        let mut step = 0u64;
+        let mut carrier: *mut c_void = core::ptr::null_mut();
         let mut work = || {
-            create_user_thread(process, arena, seen, bootstrap, entry, &mut stack);
+            create_user_thread(process, arena, seen, bootstrap, entry, &mut stack, &mut step,
+                &mut carrier);
         };
         on_kernel_stack(&mut work);
 
@@ -2188,6 +2262,8 @@ pub fn start_agent_in_process(pid: u32) -> u32 {
             let target = targets().get_mut(&pid).unwrap();
             target.started = true;
             target.stack = stack;
+            target.step = step;
+            target.carrier = carrier;
         };
     }
 
@@ -2197,6 +2273,54 @@ pub fn start_agent_in_process(pid: u32) -> u32 {
     }
 
     observed
+}
+
+fn put_image_in_process(process: *mut c_void, private_offset: usize, shared_size: usize,
+        private_size: usize) -> u64 {
+    let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
+
+    let mut process_handle: *mut c_void = core::ptr::null_mut();
+    unsafe {
+        let process_type = (_PsProcessType as *const *mut c_void).read();
+        if (_ObOpenObjectByPointer)(process, 0, core::ptr::null_mut(), PROCESS_ALL_ACCESS,
+                process_type, KERNEL_MODE as u32, &mut process_handle) < 0 {
+            return 0;
+        }
+    }
+
+    let whole = allocate_in_process(process_handle, own.size as usize, PAGE_EXECUTE_READWRITE);
+    let carried = whole != 0 && carry_image_across(process, whole, private_offset, shared_size,
+        private_size);
+    if whole != 0 && !carried {
+        free_in_process(process_handle, whole);
+    }
+
+    unsafe { (_ZwClose)(process_handle) };
+
+    if carried { whole } else { 0 }
+}
+
+fn carry_image_across(process: *mut c_void, whole: u64, private_offset: usize, shared_size: usize,
+        private_size: usize) -> bool {
+    let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
+
+    let private = alloc(private_size);
+    if private.is_null() {
+        return false;
+    }
+
+    unsafe {
+        crate::install_writable_half(whole as usize, private as usize);
+
+        let text = core::slice::from_raw_parts(own.base_address as *const u8, shared_size);
+        let half = core::slice::from_raw_parts(private as *const u8, private_size);
+        let carried = write_to(process, whole as usize, text)
+            && write_to(process, (whole + private_offset as u64) as usize, half);
+
+        free(private, private_size);
+
+        carried
+    }
 }
 
 fn put_a_copy_in_the_session_server(pid: u32) {
@@ -2404,6 +2528,7 @@ fn synthesize_zw_stub(index: u32) -> usize {
             at += bytes.len();
         };
         emit_zw_stub(template, stub, index, &mut put);
+        crate::libc::__clear_cache(stub, stub.add(ZW_STUB_SIZE));
     }
 
     stub as usize
@@ -2473,7 +2598,7 @@ unsafe fn emit_zw_stub(template: *const u8, stub: *mut u8, index: u32,
 
 // ntdll's stub for a service begins by loading the same index that the kernel uses.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn service_index_of(ntdll: usize, name: &[u8]) -> u32 {
+fn service_index_of(_process: *mut c_void, ntdll: usize, name: &[u8]) -> u32 {
     let stub = export(ntdll, name);
     if stub == 0 {
         return 0;
@@ -2592,7 +2717,7 @@ fn name_is_in(process: *mut c_void, name: usize, wanted: &[u8]) -> bool {
 const MAX_EXPORT_NAME: usize = 64;
 
 fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _bootstrap: u64,
-        entry: u64, stack: &mut u64) -> bool {
+        entry: u64, stack: &mut u64, step: &mut u64, carrier: &mut *mut c_void) -> bool {
     unsafe {
         let mut process_handle: *mut c_void = core::ptr::null_mut();
         let process_type = (_PsProcessType as *const *mut c_void).read();
@@ -2602,7 +2727,7 @@ fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _b
         }
 
         let created = start_thread_in_process(process, process_handle, arena_here, arena_seen,
-            entry, stack);
+            entry, stack, step, carrier);
 
         (_ZwClose)(process_handle);
 
@@ -2613,7 +2738,8 @@ fn create_user_thread(process: *mut c_void, arena_here: u64, arena_seen: u64, _b
 // The thread is made the way the system makes them, thus it arrives with a block of its own and
 // ntdll accepts calls from it.
 fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, arena_here: u64,
-        arena_seen: u64, entry: u64, remembered: &mut u64) -> bool {
+        arena_seen: u64, entry: u64, remembered: &mut u64, step: &mut u64,
+        carrier: &mut *mut c_void) -> bool {
     let stack = allocate_in_process(process_handle, STACK_SIZE, PAGE_READWRITE);
     if stack == 0 {
         return false;
@@ -2659,13 +2785,9 @@ fn start_thread_in_process(process: *mut c_void, process_handle: *mut c_void, ar
         ((teb + INITIAL_TEB_STACK_LIMIT) as *mut usize).write(stack as usize);
         ((teb + INITIAL_TEB_ALLOCATION_BASE) as *mut usize).write(stack as usize);
 
-        let mut thread: *mut c_void = core::ptr::null_mut();
         let mut client_id = [0usize; 2];
-        let status = start(&mut thread, process_handle, &mut client_id, context, teb, entry,
-            arena_seen, create);
-        if status >= 0 {
-            (_ZwClose)(thread);
-        }
+        let status = start(carrier, process_handle, &mut client_id, context, teb, entry,
+            arena_seen, create, process, ntdll, step);
 
         status >= 0
     }
@@ -2704,7 +2826,8 @@ const SERVICE_NAME: &[u8] = b"NtCreateThreadEx";
 unsafe fn start(thread: *mut *mut c_void, process_handle: *mut c_void, client_id: &mut [usize; 2],
         context: u64, teb: u64, _entry: u64, _argument: u64,
         create: windows_fn!(*mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void, *mut u8,
-            *mut c_void, u8, => i32)) -> i32 {
+            *mut c_void, u8, => i32), _process: *mut c_void, _ntdll: usize,
+        _step: &mut u64) -> i32 {
     unsafe {
         create(thread, THREAD_ALL_ACCESS, core::ptr::null_mut(), process_handle,
             client_id.as_mut_ptr() as *mut c_void, context as *mut u8, teb as *mut c_void, 0)
@@ -2715,15 +2838,155 @@ unsafe fn start(thread: *mut *mut c_void, process_handle: *mut c_void, client_id
 unsafe fn start(thread: *mut *mut c_void, process_handle: *mut c_void, _client_id: &mut [usize; 2],
         _context: u64, _teb: u64, entry: u64, argument: u64,
         create: windows_fn!(*mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void, *mut u8,
-            *mut c_void, u8, => i32)) -> i32 {
+            *mut c_void, u8, => i32), process: *mut c_void, ntdll: usize,
+        taken: &mut u64) -> i32 {
     unsafe {
+        let step = step_to(process, process_handle, ntdll, entry);
+        if step == 0 {
+            return STATUS_NOT_FOUND;
+        }
+        *taken = step;
+
         let create_ex: windows_fn!(*mut *mut c_void, u32, *mut c_void, *mut c_void, *mut c_void,
             *mut c_void, u32, usize, usize, usize, *mut c_void => i32) =
             core::mem::transmute(create);
         create_ex(thread, THREAD_ALL_ACCESS, core::ptr::null_mut(), process_handle,
-            entry as *mut c_void, argument as *mut c_void, 0, 0, 0, 0, core::ptr::null_mut())
+            step as *mut c_void, argument as *mut c_void, 0, 0, 0, 0, core::ptr::null_mut())
     }
 }
+
+#[cfg(target_arch = "aarch64")]
+fn step_to(process: *mut c_void, process_handle: *mut c_void, ntdll: usize, entry: u64) -> u64 {
+    let step = allocate_in_process(process_handle, STEP_SIZE, PAGE_EXECUTE_READWRITE);
+    if step == 0 {
+        return 0;
+    }
+
+    unsafe {
+        let mut apc_state = [0usize; APC_STATE_WORDS];
+        (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8);
+        (step as *mut u32).write(LOAD_STEP_TARGET);
+        ((step + 4) as *mut u32).write(BRANCH_TO_STEP_TARGET);
+        ((step + 8) as *mut u64).write(entry);
+        crate::libc::__clear_cache(step as *const u8, (step + STEP_SIZE as u64) as *const u8);
+        (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8);
+    }
+
+    let_the_guard_know(process, process_handle, ntdll, step);
+
+    step
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn vouch_for_range(_process: *mut c_void, _base: u64, _size: usize) {}
+
+#[cfg(target_arch = "aarch64")]
+fn vouch_for_range(process: *mut c_void, base: u64, size: usize) {
+    let mut process_handle: *mut c_void = core::ptr::null_mut();
+    unsafe {
+        let process_type = (_PsProcessType as *const *mut c_void).read();
+        if (_ObOpenObjectByPointer)(process, 0, core::ptr::null_mut(), PROCESS_ALL_ACCESS,
+                process_type, KERNEL_MODE as u32, &mut process_handle) < 0 {
+            return;
+        }
+    }
+
+    let ntdll = loader_library() as usize;
+    let index = service_index_of(process, ntdll, b"NtSetInformationVirtualMemory");
+    if index != 0 {
+        let mut at = 0;
+        while at < size {
+            let span = (size - at).min(VOUCHED_SPAN);
+            vouch_for(index, process_handle, base + at as u64, span);
+            at += span;
+        }
+    }
+
+    unsafe { (_ZwClose)(process_handle) };
+}
+
+#[cfg(target_arch = "aarch64")]
+fn vouch_for(index: u32, process_handle: *mut c_void, base: u64, span: usize) {
+    let wanted = alloc((span / CALL_TARGET_GRAIN) * 16);
+    if wanted.is_null() {
+        return;
+    }
+
+    unsafe {
+        let entries = wanted as *mut u64;
+        let count = span / CALL_TARGET_GRAIN;
+        for slot in 0..count {
+            entries.add(slot * 2).write((slot * CALL_TARGET_GRAIN) as u64);
+            entries.add(slot * 2 + 1).write(CALL_TARGET_IS_VALID);
+        }
+
+        let tell: windows_fn!(*mut c_void, u32, usize, *mut u8, *mut u8, u32 => i32) =
+            core::mem::transmute(synthesize_zw_stub(index));
+
+        let mut range = [base, span as u64];
+        let mut taken = 0u32;
+        let mut list = [
+            count as u64,
+            &mut taken as *mut u32 as u64,
+            wanted as u64,
+            0,
+            0,
+        ];
+
+        tell(process_handle, CFG_CALL_TARGET_INFORMATION, 1, range.as_mut_ptr() as *mut u8,
+            list.as_mut_ptr() as *mut u8, CALL_TARGET_LIST_SIZE);
+    }
+
+    free(wanted, (span / CALL_TARGET_GRAIN) * 16);
+}
+
+#[cfg(target_arch = "aarch64")]
+const CALL_TARGET_GRAIN: usize = 16;
+#[cfg(target_arch = "aarch64")]
+const VOUCHED_SPAN: usize = 0x10000;
+
+#[cfg(target_arch = "aarch64")]
+fn let_the_guard_know(process: *mut c_void, process_handle: *mut c_void, ntdll: usize, step: u64) {
+    let index = service_index_of(process, ntdll, b"NtSetInformationVirtualMemory");
+    if index == 0 {
+        return;
+    }
+
+    unsafe {
+        let tell: windows_fn!(*mut c_void, u32, usize, *mut u8, *mut u8, u32 => i32) =
+            core::mem::transmute(synthesize_zw_stub(index));
+
+        let mut range = [step, STEP_SIZE as u64];
+        let mut wanted = [0u64, CALL_TARGET_IS_VALID];
+        let mut taken = 0u32;
+        let mut list = [
+            1u64,
+            &mut taken as *mut u32 as u64,
+            wanted.as_mut_ptr() as u64,
+            0,
+            0,
+        ];
+
+        tell(process_handle, CFG_CALL_TARGET_INFORMATION, 1, range.as_mut_ptr() as *mut u8,
+            list.as_mut_ptr() as *mut u8, CALL_TARGET_LIST_SIZE);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+const CFG_CALL_TARGET_INFORMATION: u32 = 2;
+#[cfg(target_arch = "aarch64")]
+const CALL_TARGET_IS_VALID: u64 = 1;
+#[cfg(target_arch = "aarch64")]
+const CALL_TARGET_LIST_SIZE: u32 = 40;
+
+#[cfg(target_arch = "aarch64")]
+const STEP_SIZE: usize = 0x1000;
+#[cfg(target_arch = "aarch64")]
+const LOAD_STEP_TARGET: u32 = 0x5800_0050;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_TO_STEP_TARGET: u32 = 0xd61f_0200;
+#[cfg(target_arch = "aarch64")]
+const STATUS_NOT_FOUND: i32 = -1_073_741_275;
 
 // The argument travels in a register here, and the stack only has to be aligned the way a call
 // would have left it.
@@ -2747,6 +3010,13 @@ fn seed_stack(process: *mut c_void, top: u64, argument: u64) -> u64 {
     }
 
     sp
+}
+
+fn free_in_process(process_handle: *mut c_void, address: u64) {
+    let mut base = address as *mut u8;
+    let mut region = 0usize;
+
+    unsafe { (_ZwFreeVirtualMemory)(process_handle, &mut base, &mut region, MEM_RELEASE) };
 }
 
 fn allocate_in_process(process_handle: *mut c_void, size: usize, protection: u32) -> u64 {
@@ -2783,8 +3053,8 @@ pub struct Primitives {
     pub protect: fn(u64, usize, u32) -> bool,
     pub protection_at: fn(usize) -> u32,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
-    pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo)),
-    pub find_thread: fn(u32) -> Option<ThreadInfo>,
+    pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo), bool),
+    pub find_thread: fn(u32, bool) -> Option<ThreadInfo>,
     pub modify_thread: fn(u32, &mut dyn FnMut(&mut CpuState)) -> bool,
     pub wait: fn(*const u8, Option<u64>, &mut dyn FnMut() -> bool),
     pub wake: fn(*const u8),
@@ -2870,14 +3140,17 @@ mod kernel {
         crate::winnt_paging::enumerate_ranges(found)
     }
 
-    pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
-        super::enumerate_ring_zero_threads(found)
+    pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
+        super::enumerate_ring_zero_threads(found, with_registers)
     }
 
-    pub fn find_thread(id: u32) -> Option<ThreadInfo> {
+    pub fn find_thread(id: u32, with_registers: bool) -> Option<ThreadInfo> {
         let thread = super::ring_zero_thread(id)?;
 
-        Some(ThreadInfo { id, cpu_state: unsafe { super::capture(thread) } })
+        Some(ThreadInfo {
+            id,
+            cpu_state: with_registers.then(|| unsafe { super::capture(thread) }).flatten(),
+        })
     }
 
     pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
@@ -3161,6 +3434,7 @@ pub(crate) const IMAGE_BASE: u64 = 0x50;
 pub(crate) const IMAGE_SIZE: u64 = 0x58;
 pub(crate) const OBSERVED_THREAD: u64 = 0x40;
 pub(crate) const LOADER_LIBRARY: u64 = 0x60;
+pub(crate) const PAGE_SIZE_IN_USE: u64 = 0x68;
 
 pub(crate) const REGISTER_PROCESS: u64 = 0x18;
 pub(crate) const REGISTER_THREAD: u64 = 0x1c;
@@ -3357,11 +3631,9 @@ struct Target {
     introduced: bool,
     text: u64,
     size: u64,
-    private: u64,
-    private_size: usize,
     stack: u64,
-    shared_mdl: *mut c_void,
-    private_mdl: *mut c_void,
+    step: u64,
+    carrier: *mut c_void,
     arena_mdl: *mut c_void,
 }
 
@@ -4306,6 +4578,7 @@ kernel_abi! {
     static _PsGetCurrentThread: windows_fn!( => *mut c_void);
     static _PsGetThreadProcess: windows_fn!(*mut c_void => *mut c_void);
     static _PsGetThreadId: windows_fn!(*mut c_void => u32);
+    static _PsGetThreadTeb: windows_fn!(*mut c_void => *mut c_void);
     static _PsGetContextThread: windows_fn!(*mut c_void, *mut u8, u8 => i32);
     static _PsSetContextThread: windows_fn!(*mut c_void, *mut u8, u8 => i32);
     static _KeStackAttachProcess: windows_fn!(*mut c_void, *mut u8);
@@ -4352,6 +4625,7 @@ kernel_abi! {
         *const u32,
         => i32);
     static _ZwClose: windows_fn!(*mut c_void => i32);
+    static _ZwWaitForSingleObject: windows_fn!(*mut c_void, u8, *const i64 => i32);
     static _ZwCreateEvent: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32);
     static _ExAllocatePool2: windows_fn!(u64, usize, u32 => *mut c_void);
     static _MmCopyVirtualMemory: windows_fn!(*mut c_void, *const c_void, *mut c_void, *mut c_void,

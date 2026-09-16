@@ -1114,8 +1114,8 @@ pub struct Primitives {
     pub protect: fn(u64, usize, u32) -> bool,
     pub protection_at: fn(usize) -> u32,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
-    pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo)),
-    pub find_thread: fn(u32) -> Option<ThreadInfo>,
+    pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo), bool),
+    pub find_thread: fn(u32, bool) -> Option<ThreadInfo>,
     pub modify_thread: fn(u32, &mut dyn FnMut(&mut CpuState)) -> bool,
 }
 
@@ -1252,14 +1252,17 @@ mod kernel {
         unsafe { get_cur_thread_handle() as u64 }
     }
 
-    pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
-        super::enumerate_ring_zero_threads(found)
+    pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
+        super::enumerate_ring_zero_threads(found, with_registers)
     }
 
-    pub fn find_thread(id: u32) -> Option<ThreadInfo> {
+    pub fn find_thread(id: u32, with_registers: bool) -> Option<ThreadInfo> {
         let thread = super::ring_zero_thread(id)?;
 
-        Some(ThreadInfo { id, cpu_state: super::thread_cpu_state(thread) })
+        Some(ThreadInfo {
+            id,
+            cpu_state: with_registers.then(|| super::thread_cpu_state(thread)).flatten(),
+        })
     }
 
     pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
@@ -1643,12 +1646,12 @@ pub fn install_interrupt_handler(
     if handle == 0 { -1 } else { 0 }
 }
 
-pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
-    (primitives().enumerate_threads)(found)
+pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
+    (primitives().enumerate_threads)(found, with_registers)
 }
 
-pub fn find_thread(id: u32) -> Option<ThreadInfo> {
-    (primitives().find_thread)(id)
+pub fn find_thread(id: u32, with_registers: bool) -> Option<ThreadInfo> {
+    (primitives().find_thread)(id, with_registers)
 }
 
 pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
@@ -1690,9 +1693,12 @@ pub fn thread_handle_of(pid: u32, id: u32) -> Option<u32> {
 // The threads of one process, as the copy in it sees them. Ring 3 of this system reaches both
 // the services and the memory the kernel keeps, thus the copy walks the same list the kernel
 // half does and keeps what belongs to it, registers and all.
-pub fn enumerate_threads_of(pid: u32, found: &mut dyn FnMut(ThreadInfo)) {
+pub fn enumerate_threads_of(pid: u32, found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
     enumerate_thread_handles_of(pid, &mut |thread, id| {
-        found(ThreadInfo { id, cpu_state: thread_cpu_state(thread) });
+        found(ThreadInfo {
+            id,
+            cpu_state: with_registers.then(|| thread_cpu_state(thread)).flatten(),
+        });
     });
 }
 
@@ -1734,13 +1740,16 @@ fn ring_zero_thread(id: u32) -> Option<u32> {
     None
 }
 
-fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo)) {
+fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
 
     let mut thread = first;
     while thread != 0 {
-        found(ThreadInfo { id: thread, cpu_state: thread_cpu_state(thread) });
+        found(ThreadInfo {
+            id: thread,
+            cpu_state: with_registers.then(|| thread_cpu_state(thread)).flatten(),
+        });
 
         let next = unsafe { get_next_thread_handle(thread) };
         thread = if next == first { 0 } else { next };

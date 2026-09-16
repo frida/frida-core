@@ -79,6 +79,10 @@ pub extern "C" fn frida_winnt_user_main(arena: usize) {
             ((arena + crate::winnt::IMAGE_SIZE as usize) as *const u64).read_volatile())
     };
 
+    crate::winnt::be_told_page_size(
+        unsafe { ((arena + crate::winnt::PAGE_SIZE_IN_USE as usize) as *const u64).read_volatile() }
+            as usize);
+
     crate::gthread::use_thread_slots(&SLOTS);
 
     unsafe { crate::run_constructors() };
@@ -132,6 +136,16 @@ pub static USER: Primitives = Primitives {
     shared_data,
 };
 
+pub(crate) fn flush_code(start: *const u8, end: *const u8) -> bool {
+    let Some(api) = (unsafe { (*core::ptr::addr_of!(USER_API)).as_ref() }) else {
+        return false;
+    };
+
+    unsafe { (api.flush_code)(CURRENT_PROCESS, start as *mut u8, end as usize - start as usize) };
+
+    true
+}
+
 pub(crate) fn yield_entry_point() -> usize {
     unsafe { user_api().yield_execution as usize }
 }
@@ -153,6 +167,7 @@ fn resolve_user_api() {
             create_event: core::mem::transmute(export(ntdll, b"NtCreateEvent")),
             close: core::mem::transmute(export(ntdll, b"NtClose")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
+            flush_code: core::mem::transmute(export(ntdll, b"NtFlushInstructionCache")),
             create_heap: core::mem::transmute(export(ntdll, b"RtlCreateHeap")),
             add_fault_handler: core::mem::transmute(
                 export(ntdll, b"RtlAddVectoredExceptionHandler")),
@@ -827,6 +842,7 @@ struct UserApi {
     query_memory: windows_fn!(*mut c_void, *mut u8, u32, *mut u8, usize, *mut usize => i32),
     yield_execution: windows_fn!( => i32),
     wait_for_object: windows_fn!(*mut c_void, u8, *const i64 => i32),
+    flush_code: windows_fn!(*mut c_void, *mut u8, usize => i32),
     set_event: windows_fn!(*mut c_void, *mut u32 => i32),
     create_event: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32),
     close: windows_fn!(*mut c_void => i32),
@@ -1169,55 +1185,77 @@ fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
     }
 }
 
-fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
-    let api = thread_list_api();
-    unsafe {
-        let snapshot = (api.create_snapshot)(SNAP_THREAD, 0);
-        if snapshot == INVALID_HANDLE {
-            return;
-        }
-
-        let ours = current_process_id();
-        let mut entry = [0u32; THREAD_ENTRY_WORDS];
-        entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
-        let mut more = (api.first)(snapshot, entry.as_mut_ptr() as *mut u8);
-        while more != 0 {
-            if entry[THREAD_ENTRY_OWNER] == ours {
-                let id = entry[THREAD_ENTRY_ID];
-                found(crate::kernel::ThreadInfo { id, cpu_state: registers_of(id) });
-            }
-            entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
-            more = (api.next)(snapshot, entry.as_mut_ptr() as *mut u8);
-        }
-
-        (api.close)(snapshot);
-    }
+fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo), with_registers: bool) {
+    for_each_thread(&mut |id| {
+        found(crate::kernel::ThreadInfo {
+            id,
+            cpu_state: with_registers.then(|| registers_of(id)).flatten(),
+        });
+        true
+    });
 }
 
 // A thread cannot ask the system about itself: what comes back describes the asking, not the
 // thread as a script would want to see it.
-fn find_thread(id: u32) -> Option<crate::kernel::ThreadInfo> {
+fn find_thread(id: u32, with_registers: bool) -> Option<crate::kernel::ThreadInfo> {
+    let mut found = false;
+    for_each_thread(&mut |seen| {
+        found = seen == id;
+        !found
+    });
+
+    found.then(|| crate::kernel::ThreadInfo {
+        id,
+        cpu_state: with_registers.then(|| registers_of(id)).flatten(),
+    })
+}
+
+fn for_each_thread(visit: &mut dyn FnMut(u32) -> bool) {
     let api = thread_list_api();
+    let mut thread: *mut c_void = core::ptr::null_mut();
+
     unsafe {
-        let snapshot = (api.create_snapshot)(SNAP_THREAD, 0);
-        if snapshot == INVALID_HANDLE {
+        for _ in 0..MAX_THREADS_PER_PROCESS {
+            let mut next: *mut c_void = core::ptr::null_mut();
+            let status = (api.next_thread)(CURRENT_PROCESS, thread,
+                THREAD_QUERY_LIMITED_INFORMATION, 0, 0, &mut next);
+            if !thread.is_null() {
+                (api.close)(thread);
+            }
+            if status < 0 {
+                return;
+            }
+            if next.is_null() {
+                return;
+            }
+            thread = next;
+
+            if let Some(id) = id_of_thread(api, thread) {
+                if !visit(id) {
+                    (api.close)(thread);
+                    return;
+                }
+            }
+        }
+
+        if !thread.is_null() {
+            (api.close)(thread);
+        }
+    }
+}
+
+const MAX_THREADS_PER_PROCESS: usize = 4096;
+
+unsafe fn id_of_thread(api: &ThreadListApi, thread: *mut c_void) -> Option<u32> {
+    let mut basic = [0u8; THREAD_BASIC_INFORMATION_SIZE];
+
+    unsafe {
+        if (api.query_thread)(thread, THREAD_BASIC_INFORMATION, basic.as_mut_ptr(),
+                basic.len() as u32, core::ptr::null_mut()) < 0 {
             return None;
         }
 
-        let ours = current_process_id();
-        let mut found = false;
-        let mut entry = [0u32; THREAD_ENTRY_WORDS];
-        entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
-        let mut more = (api.first)(snapshot, entry.as_mut_ptr() as *mut u8);
-        while more != 0 && !found {
-            found = entry[THREAD_ENTRY_OWNER] == ours && entry[THREAD_ENTRY_ID] == id;
-            entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
-            more = (api.next)(snapshot, entry.as_mut_ptr() as *mut u8);
-        }
-
-        (api.close)(snapshot);
-
-        found.then(|| crate::kernel::ThreadInfo { id, cpu_state: registers_of(id) })
+        Some(basic.as_ptr().add(THREAD_BASIC_ID_OFFSET).cast::<usize>().read_unaligned() as u32)
     }
 }
 
@@ -1286,10 +1324,10 @@ fn thread_list_api() -> &'static ThreadListApi {
         if (*core::ptr::addr_of!(THREAD_LIST_API)).is_none() {
             let library = module_base(peb(), b"kernel32.dll");
             THREAD_LIST_API = Some(ThreadListApi {
-                create_snapshot: core::mem::transmute(
-                    export(library, b"CreateToolhelp32Snapshot")),
-                first: core::mem::transmute(export(library, b"Thread32First")),
-                next: core::mem::transmute(export(library, b"Thread32Next")),
+                next_thread: core::mem::transmute(
+                    export(loader_library(), b"NtGetNextThread")),
+                query_thread: core::mem::transmute(
+                    export(loader_library(), b"NtQueryInformationThread")),
                 open: core::mem::transmute(export(library, b"OpenThread")),
                 get_context: core::mem::transmute(
                     export(loader_library(), b"NtGetContextThread")),
@@ -1305,9 +1343,8 @@ fn thread_list_api() -> &'static ThreadListApi {
 }
 
 struct ThreadListApi {
-    create_snapshot: windows_fn!(u32, u32 => *mut c_void),
-    first: windows_fn!(*mut c_void, *mut u8 => i32),
-    next: windows_fn!(*mut c_void, *mut u8 => i32),
+    next_thread: windows_fn!(*mut c_void, *mut c_void, u32, u32, u32, *mut *mut c_void => i32),
+    query_thread: windows_fn!(*mut c_void, u32, *mut u8, u32, *mut u32 => i32),
     open: windows_fn!(u32, i32, u32 => *mut c_void),
     get_context: windows_fn!(*mut c_void, *mut u8 => i32),
     set_context: windows_fn!(*mut c_void, *const u8 => i32),
@@ -1318,11 +1355,16 @@ struct ThreadListApi {
 
 static mut THREAD_LIST_API: Option<ThreadListApi> = None;
 
-const SNAP_THREAD: u32 = 0x4;
-const INVALID_HANDLE: *mut c_void = usize::MAX as *mut c_void;
-const THREAD_ENTRY_WORDS: usize = 7;
-const THREAD_ENTRY_ID: usize = 2;
-const THREAD_ENTRY_OWNER: usize = 3;
+const THREAD_QUERY_LIMITED_INFORMATION: u32 = 0x0800;
+const THREAD_BASIC_INFORMATION: u32 = 0;
+#[cfg(target_pointer_width = "64")]
+const THREAD_BASIC_INFORMATION_SIZE: usize = 0x30;
+#[cfg(target_pointer_width = "64")]
+const THREAD_BASIC_ID_OFFSET: usize = 0x18;
+#[cfg(target_pointer_width = "32")]
+const THREAD_BASIC_INFORMATION_SIZE: usize = 0x1c;
+#[cfg(target_pointer_width = "32")]
+const THREAD_BASIC_ID_OFFSET: usize = 0x0c;
 
 fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let slot = slot_for_token(token);

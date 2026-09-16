@@ -315,8 +315,26 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/arm64-fires-a-timer-in-live-guest", () => {
+			var h = new Harness ((h) =>
+				winnt_arm64_fires_a_timer_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/arm64-enumerates-threads-in-live-guest", () => {
+			var h = new Harness ((h) =>
+				winnt_arm64_enumerates_threads_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/arm64-hooks-kernel-function-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_arm64_hooks_kernel_function_in_live_guest.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Barebone/WinNt/arm64-injects-into-process-in-live-guest", () => {
+			var h = new SlowHarness ((h) =>
+				winnt_arm64_injects_into_process_in_live_guest.begin (h as SlowHarness));
 			h.run ();
 		});
 
@@ -4452,6 +4470,21 @@ FAIL: %s
 			"send(1 + 1);", "\"payload\":2");
 	}
 
+	private async void winnt_arm64_fires_a_timer_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, parallels_config_from_environment (h, "WINNT_ARM64"), """
+			const before = Date.now();
+			setTimeout(() => { send({ late: Date.now() - before >= 2000 }); }, 3000);
+		""", "\"late\":true");
+	}
+
+	private async void winnt_arm64_enumerates_threads_in_live_guest (Harness h) {
+		yield run_script_in_live_guest (h, parallels_config_from_environment (h, "WINNT_ARM64"), """
+			const threads = Process.enumerateThreads();
+			const sane = threads.length > 0 && threads.every(t => t.id !== 0);
+			send({ sane });
+		""", "\"sane\":true");
+	}
+
 	private async void winnt_arm64_agent_recovers_from_exception_in_live_guest (Harness h) {
 		yield run_script_in_live_guest (h, parallels_config_from_environment (h, "WINNT_ARM64"), """
 			let caught = 'no';
@@ -4462,6 +4495,52 @@ FAIL: %s
 			}
 			send({ caught: caught });
 		""", "\"caught\":\"yes\"");
+	}
+
+	private async void winnt_arm64_injects_into_process_in_live_guest (SlowHarness h) {
+		var config = parallels_config_from_environment (h, "WINNT_ARM64");
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			uint pid = yield find_program (device, "explorer.exe");
+			assert_true (pid != 0);
+
+			var session = yield device.attach (pid, null, null);
+			assert_nonnull (session);
+
+			var script = yield session.create_script ("""
+				recv('ping', () => { send(Process.id >>> 0); });
+				send('ready');
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.size < 1)
+				yield h.process_events ();
+			assert_true (messages[0].contains ("ready"));
+
+			script.post ("""{"type":"ping"}""");
+			while (messages.size < 2)
+				yield h.process_events ();
+			assert_true (messages[1].contains (pid.to_string ()));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
 	}
 
 	private async void winnt_arm64_hooks_kernel_function_in_live_guest (Harness h) {

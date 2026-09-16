@@ -262,14 +262,17 @@ fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
     }
 }
 
-fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
-    crate::win9x::enumerate_threads_of(current_process_id(), found)
+fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo), with_registers: bool) {
+    crate::win9x::enumerate_threads_of(current_process_id(), found, with_registers)
 }
 
-fn find_thread(id: u32) -> Option<crate::kernel::ThreadInfo> {
+fn find_thread(id: u32, with_registers: bool) -> Option<crate::kernel::ThreadInfo> {
     let thread = crate::win9x::thread_handle_of(current_process_id(), id)?;
 
-    Some(crate::kernel::ThreadInfo { id, cpu_state: crate::win9x::thread_cpu_state(thread) })
+    Some(crate::kernel::ThreadInfo {
+        id,
+        cpu_state: with_registers.then(|| crate::win9x::thread_cpu_state(thread)).flatten(),
+    })
 }
 
 fn modify_thread(id: u32, change: &mut dyn FnMut(&mut crate::kernel::CpuState)) -> bool {

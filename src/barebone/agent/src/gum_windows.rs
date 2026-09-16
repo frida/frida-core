@@ -347,7 +347,7 @@ pub extern "C" fn _gum_process_enumerate_ranges(
 pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumThreadRegistry) {
     unsafe { THREAD_REGISTRY = registry };
 
-    kernel::enumerate_threads(&mut |thread| announce_thread(thread.id));
+    kernel::enumerate_threads(&mut |thread| announce_thread(thread.id), false);
 
     if kernel::watches_threads() {
         kernel::watch_threads(announce_thread, announce_thread_is_gone);
@@ -446,11 +446,13 @@ fn announce_thread_is_gone(id: u32) {
 static mut THREAD_REGISTRY: *mut GumThreadRegistry = ptr::null_mut();
 
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer) {
+pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer,
+        flags: GumThreadFlags) {
     let Some(emit) = func else {
         return;
     };
 
+    let wanted = (flags & GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT) != 0;
     kernel::enumerate_threads(&mut |thread| {
         let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
         details.flags = 0;
@@ -462,13 +464,14 @@ pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_
         }
 
         unsafe { emit(&details, user_data) };
-    });
+    }, wanted);
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_barebone_find_thread_by_id(thread_id: GumThreadId, _flags: GumThreadFlags)
+pub extern "C" fn gum_barebone_find_thread_by_id(thread_id: GumThreadId, flags: GumThreadFlags)
         -> *mut GumThreadDetails {
-    let Some(thread) = kernel::find_thread(thread_id as u32) else {
+    let wanted = (flags & GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT) != 0;
+    let Some(thread) = kernel::find_thread(thread_id as u32, wanted) else {
         return ptr::null_mut();
     };
 

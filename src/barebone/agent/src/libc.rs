@@ -134,24 +134,16 @@ pub extern "C" fn __aeabi_uwrite8(value: u64, address: *mut u8) -> u64 {
     value
 }
 
-#[cfg(all(target_arch = "aarch64", not(any(feature = "linux-injected", feature = "xnu-core"))))]
-#[unsafe(no_mangle)]
-pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {
-    unsafe {
-        core::arch::asm!(
-            "ic iallu",     // Invalidate all instruction caches
-            "dsb sy",       // Data synchronization barrier
-            "isb",          // Instruction synchronization barrier
-            options(nomem, nostack),
-        );
-    }
-}
-
 // Invalidating the whole instruction cache is the kernel's to do, and the copy runs where that
 // instruction is not allowed. Line by line is what both halves may ask for.
-#[cfg(all(target_arch = "aarch64", any(feature = "linux-injected", feature = "xnu-core")))]
+#[cfg(target_arch = "aarch64")]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
+    #[cfg(feature = "winnt")]
+    if crate::winnt_user::flush_code(start, end) {
+        return;
+    }
+
     #[cfg(feature = "xnu-core")]
     let told = crate::kernel::cache_shape();
     #[cfg(not(feature = "xnu-core"))]
