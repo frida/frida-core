@@ -183,6 +183,7 @@ namespace Frida.Barebone {
 		uint64 banner = address_of (symbols, KERNEL_BANNER_SYMBOL);
 		if (banner == 0)
 			throw new Error.NOT_SUPPORTED ("System.map names no %s to anchor relocation", KERNEL_BANNER_SYMBOL);
+
 		uint64 banner_offset = banner - linked_base;
 
 		uint64 span = span_of (symbols, linked_base);
@@ -196,6 +197,14 @@ namespace Frida.Barebone {
 					return landing;
 			} catch (Error e) {
 			}
+		}
+
+		// The sweep above only reaches the base when the guest was caught in the kernel's own
+		// text; caught in a module it is a gigabyte away. The window the kernel can be slid
+		// into is small enough to walk outright.
+		for (uint64 landing = KERNEL_TEXT_MIN; landing < KERNEL_TEXT_MAX; landing += KERNEL_ALIGNMENT) {
+			if (yield banner_present_at (gdb, landing + banner_offset, cancellable))
+				return landing;
 		}
 
 		throw new Error.NOT_SUPPORTED ("Unable to find the relocated kernel; is the guest in kernel mode?");
@@ -225,6 +234,8 @@ namespace Frida.Barebone {
 	private const string KERNEL_BANNER_SYMBOL = "linux_banner";
 	private const string KERNEL_BANNER = "Linux version ";
 	private const uint64 KERNEL_ALIGNMENT = 2 * 1024 * 1024;
+	private const uint64 KERNEL_TEXT_MIN = 0xffffffff80000000;
+	private const uint64 KERNEL_TEXT_MAX = 0xffffffffc0000000;
 	private const uint MAX_STEPS_BACK = 512;
 	private const uint ENTER_KERNEL_TIMEOUT_MS = 1000;
 
