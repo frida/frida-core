@@ -8,6 +8,19 @@ namespace Frida {
 			this.script = script;
 		}
 
+		/**
+		 * The emulator's gdbstub needs different help on each host: on Darwin its HVF backend
+		 * mishandles debugging outright, while on Windows the WHPX one syncs the vcpu but
+		 * leaves QEMU believing it is not in long mode.
+		 */
+		private static Frida.Data.Barebone.Blob shim_blob () {
+			#if DARWIN
+				return Frida.Data.Barebone.get_emulator_gdbstub_shim_js_blob ();
+			#else
+				return Frida.Data.Barebone.get_whpx_gdbstub_shim_js_blob ();
+			#endif
+		}
+
 		public static async EmulatorInstrumentation apply (BareboneConfig config, Cancellable? cancellable)
 				throws Error, IOError {
 			var manager = new DeviceManager ();
@@ -16,7 +29,7 @@ namespace Frida {
 				var device = yield manager.get_device_by_type (DeviceType.LOCAL, 0, cancellable);
 				var session = yield device.attach (config.connection.pid, null, cancellable);
 
-				unowned string source = (string) Frida.Data.Barebone.get_emulator_gdbstub_shim_js_blob ().data;
+				unowned string source = (string) shim_blob ().data;
 				var script = yield session.create_script (source, null, cancellable);
 
 				var armed = new Promise<bool> ();
@@ -28,6 +41,7 @@ namespace Frida {
 				yield script.load (cancellable);
 				yield armed.future.wait_async (cancellable);
 
+#if DARWIN
 				string? pipe_path = pipe_socket_path (config);
 				if (pipe_path != null) {
 					var builder = new Json.Builder ();
@@ -40,6 +54,7 @@ namespace Frida {
 					script.post (Json.to_string (builder.get_root (), false));
 				}
 
+#endif
 				var instrumentation = new EmulatorInstrumentation (manager, script);
 				adopted = true;
 				return instrumentation;
