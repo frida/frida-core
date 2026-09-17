@@ -42,6 +42,8 @@ namespace Frida.Barebone {
 		private DebuggerException? _exception;
 		private Gee.Set<string> _features = new Gee.HashSet<string> ();
 		private Gee.List<VirtualBoxThread> threads = new Gee.ArrayList<VirtualBoxThread> ();
+		private Gee.List<Gee.Map<string, uint64?>>? core_registers;
+		private Gee.List<Gee.Map<string, uint64?>>? full_registers;
 		private Gee.Map<uint64?, VirtualBoxBreakpoint> breakpoints =
 			new Gee.HashMap<uint64?, VirtualBoxBreakpoint> (Numeric.uint64_hash, Numeric.uint64_equal);
 
@@ -57,23 +59,81 @@ namespace Frida.Barebone {
 			debugger._features.add ("virtualbox");
 
 			yield console.halt (cancellable);
-			yield debugger.refresh_threads (cancellable);
+			yield debugger.note_stopped (cancellable);
 
 			return debugger;
 		}
 
-		private async void refresh_threads (Cancellable? cancellable) throws Error, IOError {
-			uint count = yield console.query_cpu_count (cancellable);
+		internal async Gee.Map<string, uint64?> read_registers (uint cpu, Cancellable? cancellable)
+				throws Error, IOError {
+			if (full_registers == null)
+				full_registers = yield console.read_registers (cancellable);
+			return full_registers[(int) cpu];
+		}
 
-			threads.clear ();
-			for (uint i = 0; i != count; i++)
-				threads.add (new VirtualBoxThread (i, console, this));
+		internal async uint64? read_register (uint cpu, string name, Cancellable? cancellable)
+				throws Error, IOError {
+			if (name in VirtualBoxConsole.CORE_REGISTERS) {
+				if (core_registers == null)
+					core_registers = yield console.read_core_registers (cancellable);
+				return core_registers[(int) cpu][name];
+			}
 
-			_exception = new DebuggerException (SIGTRAP, null, threads[0]);
+			uint64? val = (yield read_registers (cpu, cancellable))[name];
+			if (val != null)
+				return val;
+
+			return yield console.read_one_register (cpu, name, cancellable);
+		}
+
+		internal async void write_register (uint cpu, string name, uint64 val, Cancellable? cancellable)
+				throws Error, IOError {
+			yield console.write_register (cpu, name, val, cancellable);
+			forget_registers ();
+		}
+
+		private void forget_registers () {
+			core_registers = null;
+			full_registers = null;
+		}
+
+		private async void note_stopped (Cancellable? cancellable) throws Error, IOError {
+			full_registers = null;
+			core_registers = yield console.read_core_registers (cancellable);
+
+			if (threads.size != core_registers.size) {
+				threads.clear ();
+				for (int i = 0; i != core_registers.size; i++)
+					threads.add (new VirtualBoxThread (i, this));
+			}
+
+			VirtualBoxThread resting = threads[0];
+			for (int i = 0; i != core_registers.size; i++) {
+				uint64? cs = core_registers[i]["cs"];
+				if (cs != null && (cs & RING_MASK) == 0) {
+					resting = threads[i];
+					break;
+				}
+			}
+
+			VirtualBoxBreakpoint? hit = null;
+			for (int i = 0; i != core_registers.size; i++) {
+				uint64? pc = core_registers[i]["rip"];
+				if (pc == null)
+					continue;
+				VirtualBoxBreakpoint? bp = breakpoints[pc];
+				if (bp != null) {
+					hit = bp;
+					resting = threads[i];
+					break;
+				}
+			}
+
+			change_state (STOPPED, new DebuggerException (SIGTRAP, hit, resting));
 		}
 
 		public bool has_register (string name) {
-			return name == "rip" || name == "rsp" || name == "gs_base" || name == "cr3";
+			return name == "rip" || name == "rsp" || name == "gs_base" || name == "cr3" || name == "lstar";
 		}
 
 		public BufferBuilder make_buffer_builder () {
@@ -100,6 +160,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
+			forget_registers ();
 			yield console.resume (cancellable);
 			change_state (RUNNING, null);
 		}
@@ -109,7 +170,7 @@ namespace Frida.Barebone {
 				return;
 
 			yield console.halt (cancellable);
-			change_state (STOPPED, _exception);
+			yield note_stopped (cancellable);
 		}
 
 		public void restart () throws Error {
@@ -124,17 +185,12 @@ namespace Frida.Barebone {
 				yield sleep (POLL_INTERVAL_MSEC, cancellable);
 
 				yield console.halt (cancellable);
+				yield note_stopped (cancellable);
 
-				foreach (VirtualBoxThread thread in threads) {
-					uint64 pc = yield thread.read_register ("rip", cancellable);
-					VirtualBoxBreakpoint? bp = breakpoints[pc];
-					if (bp != null) {
-						var caught = new DebuggerException (SIGTRAP, bp, thread);
-						change_state (STOPPED, caught);
-						return caught;
-					}
-				}
+				if (_exception.breakpoint != null)
+					return _exception;
 
+				forget_registers ();
 				yield console.resume (cancellable);
 			}
 		}
@@ -190,6 +246,8 @@ namespace Frida.Barebone {
 		}
 
 		private const uint POLL_INTERVAL_MSEC = 50;
+		private const uint RELEASE_PERIOD_MSEC = 5;
+		private const uint64 RING_MASK = 3;
 		private const uint SIGTRAP = 5;
 	}
 
@@ -211,21 +269,19 @@ namespace Frida.Barebone {
 		}
 
 		private uint cpu;
-		private VirtualBoxConsole console;
 		private weak VirtualBoxDebugger owner;
 
-		public VirtualBoxThread (uint cpu, VirtualBoxConsole console, VirtualBoxDebugger owner) {
+		public VirtualBoxThread (uint cpu, VirtualBoxDebugger owner) {
 			Object (
 				id: "%u".printf (cpu + 1),
 				name: "CPU %u".printf (cpu)
 			);
 			this.cpu = cpu;
-			this.console = console;
 			this.owner = owner;
 		}
 
 		public async void step (Cancellable? cancellable = null) throws Error, IOError {
-			yield console.run ("t", cancellable);
+			throw new Error.NOT_SUPPORTED ("VirtualBox cannot single-step the guest");
 		}
 
 		public void step_and_continue () throws Error {
@@ -233,8 +289,7 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64 read_register (string name, Cancellable? cancellable = null) throws Error, IOError {
-			var registers = yield console.read_registers (cpu, cancellable);
-			uint64? val = registers[name];
+			uint64? val = yield owner.read_register (cpu, name, cancellable);
 			if (val == null)
 				throw new Error.NOT_SUPPORTED ("Register “%s” is not exposed by VirtualBox", name);
 			return val;
@@ -242,12 +297,12 @@ namespace Frida.Barebone {
 
 		public async void write_register (string name, uint64 val, Cancellable? cancellable = null)
 				throws Error, IOError {
-			yield console.write_register (cpu, name, val, cancellable);
+			yield owner.write_register (cpu, name, val, cancellable);
 		}
 
 		public async Gee.Map<string, Variant> read_registers (Cancellable? cancellable = null)
 				throws Error, IOError {
-			var raw = yield console.read_registers (cpu, cancellable);
+			var raw = yield owner.read_registers (cpu, cancellable);
 
 			var registers = new Gee.HashMap<string, Variant> ();
 			foreach (var e in raw.entries)
@@ -258,8 +313,15 @@ namespace Frida.Barebone {
 
 		public async void write_registers (Gee.Map<string, Variant> regs, Cancellable? cancellable = null)
 				throws Error, IOError {
-			foreach (var e in regs.entries)
-				yield console.write_register (cpu, e.key, e.value.get_uint64 (), cancellable);
+			var current = yield owner.read_registers (cpu, cancellable);
+
+			foreach (var e in regs.entries) {
+				uint64 val = e.value.get_uint64 ();
+				if (current[e.key] == val)
+					continue;
+
+				yield owner.write_register (cpu, e.key, val, cancellable);
+			}
 		}
 	}
 
