@@ -54,18 +54,14 @@ namespace Frida.Barebone {
 		}
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
-#if WINDOWS
-			if (address.has_prefix ("handle:")) {
-				connection = adopt_handle (address.substring (7));
-			} else
-#endif
 			{
 				SocketConnectable connectable;
 				if (address.has_prefix ("unix:")) {
 					connectable = new UnixSocketAddress.with_type (address.substring (5), -1,
 						UnixSocketAddressType.PATH);
 				} else {
-					connectable = parse_socket_address (address, port, "localhost", 4444);
+					string endpoint = address.has_prefix ("tcp:") ? address.substring (4) : address;
+					connectable = parse_socket_address (endpoint, port, "localhost", 4444);
 				}
 
 				SocketConnection socket_connection;
@@ -114,14 +110,15 @@ namespace Frida.Barebone {
 		}
 
 #if WINDOWS
-		private static IOStream adopt_handle (string raw) throws Error {
-			int64 value = int64.parse (raw);
-			if (value == 0)
-				throw new Error.INVALID_ARGUMENT ("Invalid QMP handle");
-
-			void * handle = (void *) (uintptr) value;
-			return new SimpleIOStream (new Win32InputStream (handle, false),
-				new Win32OutputStream (handle, false));
+		private static uint16 pick_free_port () throws Error {
+			try {
+				var listener = new SocketListener ();
+				uint16 port = listener.add_any_inet_port (null);
+				listener.close ();
+				return port;
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to reserve a port: %s", e.message);
+			}
 		}
 #endif
 
@@ -260,12 +257,19 @@ namespace Frida.Barebone {
 		private async IOStream plug_hostlink (string chardev, string device, string bus,
 				Cancellable? cancellable) throws Error, IOError {
 #if WINDOWS
-			string name = "frida-hl-" + Uuid.string_random ().substring (0, 8);
+			uint16 hostlink_tcp_port = pick_free_port ();
 
-			yield add_listening_chardev (chardev, name, cancellable);
+			yield add_listening_chardev (chardev, "127.0.0.1:%u".printf (hostlink_tcp_port), cancellable);
 			yield add_serial_port (chardev, bus, "re.frida.hostlink", device, 1, cancellable);
 
-			return yield Pipe.open ("pipe:role=client,name=" + name, cancellable).wait_async (cancellable);
+			try {
+				var conn = yield new SocketClient ().connect_async (
+					new InetSocketAddress.from_string ("127.0.0.1", hostlink_tcp_port), cancellable);
+				Tcp.enable_nodelay (conn.socket);
+				return conn;
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to connect to the hostlink: %s", e.message);
+			}
 #else
 			string socket_path = Path.build_filename (Environment.get_tmp_dir (),
 				"frida-hl-" + Uuid.string_random ().substring (0, 8) + ".sock");
@@ -324,15 +328,6 @@ namespace Frida.Barebone {
 					.add_string_value (id)
 					.set_member_name ("backend")
 					.begin_object ()
-#if WINDOWS
-						.set_member_name ("type")
-						.add_string_value ("pipe")
-						.set_member_name ("data")
-						.begin_object ()
-							.set_member_name ("device")
-							.add_string_value (endpoint)
-						.end_object ()
-#else
 						.set_member_name ("type")
 						.add_string_value ("socket")
 						.set_member_name ("data")
@@ -343,6 +338,17 @@ namespace Frida.Barebone {
 							.add_boolean_value (false)
 							.set_member_name ("addr")
 							.begin_object ()
+#if WINDOWS
+								.set_member_name ("type")
+								.add_string_value ("inet")
+								.set_member_name ("data")
+								.begin_object ()
+									.set_member_name ("host")
+									.add_string_value (endpoint.substring (0, endpoint.last_index_of (":")))
+									.set_member_name ("port")
+									.add_string_value (endpoint.substring (endpoint.last_index_of (":") + 1))
+								.end_object ()
+#else
 								.set_member_name ("type")
 								.add_string_value ("unix")
 								.set_member_name ("data")
@@ -350,9 +356,9 @@ namespace Frida.Barebone {
 									.set_member_name ("path")
 									.add_string_value (endpoint)
 								.end_object ()
+#endif
 							.end_object ()
 						.end_object ()
-#endif
 					.end_object ()
 				.end_object ();
 			yield execute_command ("chardev-add", args.get_root (), cancellable);
