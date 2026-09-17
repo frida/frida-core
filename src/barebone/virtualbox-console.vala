@@ -8,6 +8,11 @@ namespace Frida.Barebone {
 		private uint sequence;
 		private uint cpu_count;
 
+		public bool physical_addressing {
+			get;
+			set;
+		}
+
 		private VirtualBoxConsole (SocketConnection connection) {
 			this.connection = connection;
 			this.input = connection.get_input_stream ();
@@ -114,7 +119,7 @@ namespace Frida.Barebone {
 					size_t count = size_t.min (chunk - at, MAX_WORDS_PER_READ);
 					batch.append_printf ("dq %s L%x
 ",
-						format_address (start + (done + at) * WORD_SIZE), (uint) count);
+						format_location (start + (done + at) * WORD_SIZE), (uint) count);
 				}
 
 				append_words (raw, yield run_many (batch.str, cancellable), chunk);
@@ -122,7 +127,7 @@ namespace Frida.Barebone {
 			}
 
 			if (raw.len < span)
-				throw new Error.INVALID_ARGUMENT ("Short read at %s", format_address (address));
+				throw new Error.INVALID_ARGUMENT ("Short read at %s", format_location (address));
 
 			size_t offset = (size_t) (address - start);
 			return new Bytes (raw.data[offset:offset + size]);
@@ -130,7 +135,7 @@ namespace Frida.Barebone {
 
 		public async void write_memory (uint64 address, Bytes bytes, Cancellable? cancellable)
 				throws Error, IOError {
-			if (bytes.get_size () >= MIN_BYTES_PER_STAGED_WRITE)
+			if (!physical_addressing && bytes.get_size () >= MIN_BYTES_PER_STAGED_WRITE)
 				yield write_memory_from_file (address, bytes, cancellable);
 			else
 				yield write_memory_word_by_word (address, bytes, cancellable);
@@ -161,7 +166,7 @@ namespace Frida.Barebone {
 			}
 
 			try {
-				yield run ("writegstmem '%s' %s".printf (path, format_address (address)), cancellable);
+				yield run ("writegstmem '%s' %s".printf (path, format_location (address)), cancellable);
 			} finally {
 				FileUtils.unlink (path);
 			}
@@ -181,11 +186,11 @@ namespace Frida.Barebone {
 					for (uint b = 0; b != WORD_SIZE; b++)
 						word |= ((uint64) data[i + b]) << (b * 8);
 					batch.append_printf ("eq %s %s
-", format_address (at), format_address (word));
+", format_location (at), format_address (word));
 					i += WORD_SIZE;
 				} else {
 					batch.append_printf ("eb %s %02x
-", format_address (at), data[i]);
+", format_location (at), data[i]);
 					i++;
 				}
 
@@ -395,6 +400,10 @@ namespace Frida.Barebone {
 					taken++;
 				}
 			}
+		}
+
+		private string format_location (uint64 address) {
+			return (physical_addressing ? "%%%%%016llx" : "0x%016llx").printf (address);
 		}
 
 		private static string format_address (uint64 address) {

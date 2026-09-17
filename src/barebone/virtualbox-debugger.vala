@@ -179,6 +179,7 @@ namespace Frida.Barebone {
 
 		public async DebuggerException continue_until_exception (Cancellable? cancellable = null)
 				throws Error, IOError {
+			yield release_parked_processors (cancellable);
 			yield resume (cancellable);
 
 			while (true) {
@@ -193,6 +194,37 @@ namespace Frida.Barebone {
 				forget_registers ();
 				yield console.resume (cancellable);
 			}
+		}
+
+		private async void release_parked_processors (Cancellable? cancellable) throws Error, IOError {
+			if (_state != STOPPED || breakpoints.is_empty)
+				return;
+
+			var parked = new Gee.ArrayList<VirtualBoxBreakpoint> ();
+			foreach (var registers in yield console.read_core_registers (cancellable)) {
+				uint64? pc = registers["rip"];
+				if (pc == null)
+					continue;
+
+				VirtualBoxBreakpoint? bp = breakpoints[pc];
+				if (bp != null && !parked.contains (bp))
+					parked.add (bp);
+			}
+			if (parked.is_empty)
+				return;
+
+			foreach (var bp in parked)
+				yield bp.disable (cancellable);
+
+			forget_registers ();
+			yield console.resume (cancellable);
+			yield sleep (RELEASE_PERIOD_MSEC, cancellable);
+			yield console.halt (cancellable);
+
+			foreach (var bp in parked)
+				yield bp.enable (cancellable);
+
+			forget_registers ();
 		}
 
 		private async void sleep (uint msec, Cancellable? cancellable) throws IOError {
