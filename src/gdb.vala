@@ -63,6 +63,8 @@ namespace Frida.GDB {
 		private Gee.Queue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
 		private Promise<uint>? write_request;
 		private Gee.Queue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
+		private Gee.Queue<string> pending_stops = new Gee.ArrayQueue<string> ();
+		private bool handling_stops = false;
 
 		protected Gee.Set<string> supported_features = new Gee.HashSet<string> ();
 		protected Gee.List<Register>? registers;
@@ -1196,7 +1198,9 @@ namespace Frida.GDB {
 					return true;
 				case NOTIFICATION_TYPE_STOP:
 				case NOTIFICATION_TYPE_STOP_WITH_PROPERTIES:
-					handle_stop.begin (data);
+					pending_stops.offer (data);
+					if (!handling_stops)
+						handle_pending_stops.begin ();
 					return true;
 				case NOTIFICATION_TYPE_OUTPUT:
 					handle_output (data);
@@ -1210,6 +1214,16 @@ namespace Frida.GDB {
 			change_state (STOPPED);
 			foreach (var observer in on_stop.to_array ())
 				observer.func ();
+		}
+
+		private async void handle_pending_stops () throws Error, IOError {
+			handling_stops = true;
+			try {
+				while (!pending_stops.is_empty)
+					yield handle_stop (pending_stops.poll ());
+			} finally {
+				handling_stops = false;
+			}
 		}
 
 		private async void handle_stop (string data) throws Error, IOError {
