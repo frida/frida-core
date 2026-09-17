@@ -311,6 +311,11 @@ namespace Frida.BareboneTest {
 		});
 #endif
 
+		GLib.Test.add_func ("/Barebone/VirtualBox/console-drives-the-guest", () => {
+			var h = new SlowHarness ((h) => virtualbox_console_drives_the_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/maps-out-an-x86-64-kernel-in-live-guest", () => {
 			var h = new SlowHarness ((h) => winnt_maps_out_an_x86_64_kernel_in_live_guest.begin (h as SlowHarness));
 			h.run ();
@@ -4523,6 +4528,59 @@ FAIL: %s
 		h.done ();
 	}
 #endif
+
+	private async void virtualbox_console_drives_the_guest (SlowHarness h) {
+		string? port = Environment.get_variable ("FRIDA_TEST_WINNT_X86_64_CONSOLE_PORT");
+		if (port == null) {
+			h.done ();
+			return;
+		}
+
+		try {
+			var console = yield Barebone.VirtualBoxConsole.open ("127.0.0.1", (uint16) uint.parse (port), null);
+			yield console.halt (null);
+
+			uint cpus = yield console.query_cpu_count (null);
+			assert_true (cpus >= 1);
+
+			var registers = yield console.read_registers (0, null);
+			assert_true (registers.has_key ("rip"));
+			assert_true (registers.has_key ("rsp"));
+			assert_true (registers.has_key ("gs_base"));
+			uint64 rsp = registers["rsp"];
+			assert_true (rsp > uint32.MAX);
+
+			var kernel_images = yield console.read_loaded_images (null);
+			assert_true (kernel_images.size > 20);
+			bool saw_kernel = false;
+			foreach (var image in kernel_images) {
+				if (image.name == "nt")
+					saw_kernel = true;
+			}
+			assert_true (saw_kernel);
+
+			Bytes original = yield console.read_memory (rsp, 8, null);
+			assert_true (original.get_size () == 8);
+
+			yield console.write_memory (rsp, new Bytes ({ 0x11, 0x22, 0x33, 0x44 }), null);
+			Bytes changed = yield console.read_memory (rsp, 4, null);
+			assert_true (changed.get (0) == 0x11 && changed.get (3) == 0x44);
+
+			yield console.write_memory (rsp, new Bytes (original.get_data ()[0:4]), null);
+			Bytes restored = yield console.read_memory (rsp, 4, null);
+			assert_true (restored.compare (new Bytes (original.get_data ()[0:4])) == 0);
+
+			yield console.resume (null);
+		} catch (GLib.Error e) {
+			printerr ("
+FAIL: %s
+
+", e.message);
+			assert_not_reached ();
+		}
+
+		h.done ();
+	}
 
 	private async void winnt_maps_out_an_x86_64_kernel_in_live_guest (SlowHarness h) {
 		string? port = Environment.get_variable ("FRIDA_TEST_WINNT_X86_64_GDB_PORT");
