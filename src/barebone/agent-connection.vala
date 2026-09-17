@@ -30,6 +30,7 @@ namespace Frida.Barebone {
 		private Allocator allocator;
 		private Gee.List<ModuleInfo> kernel_modules;
 		private Gee.List<SymbolInfo> kernel_symbols;
+		private Gee.Map<string, uint64?> kernel_notes;
 
 		private KernelFlavor flavor;
 		private Allocation elf_allocation;
@@ -54,7 +55,8 @@ namespace Frida.Barebone {
 
 		public AgentConnection (BareboneInjectedAgentConfig agent_config, BareboneImageConfig? image_config,
 				BareboneKernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
-				Allocator allocator, Gee.List<ModuleInfo> kernel_modules, Gee.List<SymbolInfo> kernel_symbols) {
+				Allocator allocator, Gee.List<ModuleInfo> kernel_modules, Gee.List<SymbolInfo> kernel_symbols,
+				Gee.Map<string, uint64?> kernel_notes) {
 			this.agent_config = agent_config;
 			this.image_config = image_config;
 			this.kernel_kind = kernel_kind;
@@ -64,6 +66,7 @@ namespace Frida.Barebone {
 			this.allocator = allocator;
 			this.kernel_modules = kernel_modules;
 			this.kernel_symbols = kernel_symbols;
+			this.kernel_notes = kernel_notes;
 		}
 
 		public async void open (Cancellable? cancellable) throws Error, IOError {
@@ -275,6 +278,8 @@ namespace Frida.Barebone {
 			// What a kernel does not say about itself and the agent cannot work out from where it
 			// runs: the host looks once and passes on what it found.
 			config_builder.open (new VariantType ("a(st)"));
+			foreach (var e in kernel_notes.entries)
+				config_builder.add ("(st)", e.key, e.value);
 			if (xnu_layout != null) {
 				config_builder.add ("(st)", "process.number", xnu_layout.number_offset);
 				config_builder.add ("(st)", "process.name", xnu_layout.name_offset);

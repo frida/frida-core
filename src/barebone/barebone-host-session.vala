@@ -230,6 +230,7 @@ namespace Frida {
 
 			Gee.List<Barebone.ModuleInfo> kernel_modules = new Gee.ArrayList<Barebone.ModuleInfo> ();
 			Gee.List<Barebone.SymbolInfo> kernel_symbols = new Gee.ArrayList<Barebone.SymbolInfo> ();
+			var kernel_notes = new Gee.HashMap<string, uint64?> ();
 			if (config.kernel == WIN9X) {
 				var win9x_layout = yield Barebone.collect_win9x_layout (machine, cancellable);
 				kernel_modules = win9x_layout.modules;
@@ -238,6 +239,7 @@ namespace Frida {
 				var winnt_layout = yield Barebone.collect_winnt_layout (machine, cancellable);
 				kernel_modules = winnt_layout.modules;
 				kernel_symbols = winnt_layout.symbols;
+				kernel_notes[Barebone.MODULE_LIST_NOTE] = winnt_layout.module_list;
 			} else if (config.kernel == LINUX) {
 				var kernel = image as BareboneLinuxKernelConfig;
 				if (kernel == null)
@@ -291,7 +293,7 @@ namespace Frida {
 			var agent_config = config.agent as BareboneInjectedAgentConfig;
 			if (agent_config != null) {
 				agent_connection = new Barebone.AgentConnection (agent_config, config.image, config.kernel, relocation,
-					kernel_base, machine, allocator, kernel_modules, kernel_symbols);
+					kernel_base, machine, allocator, kernel_modules, kernel_symbols, kernel_notes);
 				agent_connection.progress.connect ((status, fraction) => connecting (status, 0.2 + 0.8 * fraction));
 				yield agent_connection.open (cancellable);
 			}

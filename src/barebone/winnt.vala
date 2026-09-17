@@ -9,15 +9,16 @@ namespace Frida.Barebone {
 
 		Anchors anchors = yield find_anchors (machine, shape, cancellable);
 
-		foreach (LoadedModule module in yield read_loaded_modules (machine, anchors.module_list, shape, cancellable)) {
+		LoadedModule? kernel = yield read_first_loaded_module (machine, anchors.module_list, shape, cancellable);
+		if (kernel != null) {
 			modules.add (new ModuleInfo () {
-				name = module.name,
+				name = kernel.name,
 				version = "",
-				offset = module.base_address,
-				size = module.size,
+				offset = kernel.base_address,
+				size = kernel.size,
 			});
 
-			yield add_export_symbols (machine, module, symbols, cancellable);
+			yield add_export_symbols (machine, kernel, symbols, cancellable);
 		}
 
 		if (anchors.process_list_head != 0) {
@@ -29,7 +30,7 @@ namespace Frida.Barebone {
 			});
 		}
 
-		return new WinNtLayout (modules, symbols);
+		return new WinNtLayout (modules, symbols, anchors.module_list);
 	}
 
 	public sealed class WinNtLayout : Object {
@@ -43,8 +44,13 @@ namespace Frida.Barebone {
 			construct;
 		}
 
-		public WinNtLayout (Gee.List<ModuleInfo> modules, Gee.List<SymbolInfo> symbols) {
-			Object (modules: modules, symbols: symbols);
+		public uint64 module_list {
+			get;
+			construct;
+		}
+
+		public WinNtLayout (Gee.List<ModuleInfo> modules, Gee.List<SymbolInfo> symbols, uint64 module_list) {
+			Object (modules: modules, symbols: symbols, module_list: module_list);
 		}
 	}
 
@@ -152,15 +158,14 @@ namespace Frida.Barebone {
 	}
 
 	private static string image_pointer_register (Debugger debugger) {
-		return (debugger.arch == Frida.TargetArch.ARM64) ? KERNEL_PCR_REGISTER : KERNEL_STACK_REGISTER;
+		return (debugger.arch == TargetArch.ARM64) ? KERNEL_PCR_REGISTER : KERNEL_STACK_REGISTER;
 	}
 
 	private static async uint64 find_image_below_pointers (Machine machine, uint64 seed, Shape shape,
 			Gee.Set<uint64?> visited, Cancellable? cancellable) throws Error, IOError {
 		Debugger debugger = machine.debugger;
 		uint64 seed_page = seed - (seed % PCR_SCAN_SIZE);
-		Buffer page = debugger.make_buffer (yield debugger.read_byte_array (seed_page, PCR_SCAN_SIZE,
-			cancellable));
+		Buffer page = debugger.make_buffer (yield debugger.read_byte_array (seed_page, PCR_SCAN_SIZE, cancellable));
 
 		for (size_t offset = 0; offset != PCR_SCAN_SIZE; offset += shape.pointer_size) {
 			uint64 candidate = read_pointer (page, offset, shape);
@@ -371,32 +376,26 @@ namespace Frida.Barebone {
 		return head;
 	}
 
-	private static async Gee.List<LoadedModule> read_loaded_modules (Machine machine, uint64 head, Shape shape,
+	private static async LoadedModule? read_first_loaded_module (Machine machine, uint64 head, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
-		var modules = new Gee.ArrayList<LoadedModule> ();
-
 		Debugger debugger = machine.debugger;
+
 		uint64 entry = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (head, shape.pointer_size,
 			cancellable)), 0, shape);
-		var visited = new Gee.HashSet<uint64?> ((n) => (uint) (*(uint64 *) n), (a, b) => *(uint64 *) a == *(uint64 *) b);
-		while (entry != head && is_kernel_address (entry, shape) && !visited.contains (entry)) {
-			visited.add (entry);
+		if (entry == head || !is_kernel_address (entry, shape))
+			return null;
 
-			Buffer e = debugger.make_buffer (yield debugger.read_byte_array (entry, shape.table_entry_size, cancellable));
+		Buffer e = debugger.make_buffer (yield debugger.read_byte_array (entry, shape.table_entry_size, cancellable));
 
-			uint64 base_address = read_pointer (e, shape.dll_base, shape);
-			if (is_kernel_address (base_address, shape)) {
-				modules.add (new LoadedModule () {
-					base_address = base_address,
-					size = e.read_uint32 (shape.image_size),
-					name = yield read_unicode_string (machine, e, shape.base_name, shape, cancellable),
-				});
-			}
+		uint64 base_address = read_pointer (e, shape.dll_base, shape);
+		if (!is_kernel_address (base_address, shape))
+			return null;
 
-			entry = read_pointer (e, FORWARD_LINK_OFFSET, shape);
-		}
-
-		return modules;
+		return new LoadedModule () {
+			base_address = base_address,
+			size = e.read_uint32 (shape.image_size),
+			name = yield read_unicode_string (machine, e, shape.base_name, shape, cancellable),
+		};
 	}
 
 	private class LoadedModule {
@@ -536,6 +535,7 @@ namespace Frida.Barebone {
 	private const uint64 EXCEPTION_LEVEL_MASK = 3;
 	private const uint64 KERNEL_EXCEPTION_LEVEL = 1;
 
+	public const string MODULE_LIST_NOTE = "kernel.modules";
 	public const string PROCESS_LIST_HEAD = "PsActiveProcessHead";
 	private const size_t PROCESS_LIST_HEAD_OFFSET = 0x50;
 

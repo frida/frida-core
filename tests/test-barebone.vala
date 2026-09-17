@@ -4412,7 +4412,7 @@ FAIL: %s
 
 			// All of these addresses are above the limit of a 32-bit kernel.
 			assert_true (kernel.offset > uint32.MAX);
-			assert_true (layout.modules.size > 20);
+			assert_true (layout.module_list > uint32.MAX);
 
 			bool named = false;
 			bool wide = true;
@@ -4459,7 +4459,7 @@ FAIL: %s
 			assert_nonnull (kernel);
 
 			assert_true (kernel.offset > uint32.MAX);
-			assert_true (layout.modules.size > 20);
+			assert_true (layout.module_list > uint32.MAX);
 
 			bool named = false;
 			bool process_list = false;
@@ -4506,7 +4506,7 @@ FAIL: %s
 			assert_nonnull (kernel);
 
 			assert_true (kernel.offset > uint32.MAX);
-			assert_true (layout.modules.size > 20);
+			assert_true (layout.module_list > uint32.MAX);
 
 			bool named = false;
 			bool process_list = false;
