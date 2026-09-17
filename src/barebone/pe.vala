@@ -102,10 +102,16 @@ namespace Frida.Barebone {
 		return headers.read_uint32 (pe + OPTIONAL_HEADER_OFFSET + IMAGE_SIZE_OFFSET);
 	}
 
-	// Part of an image can be out of memory. Read one page at a time and let the absent pages
-	// read as zero, because no name or table entry has that value.
+	// Part of an image can be out of memory. Read it in one go when it is fully present, and
+	// otherwise one page at a time, letting the absent pages read as zero, because no name or
+	// table entry has that value.
 	private static async Bytes read_present_pages (Debugger debugger, uint64 address, size_t size,
 			Cancellable? cancellable) throws Error, IOError {
+		try {
+			return yield debugger.read_byte_array (address, size, cancellable);
+		} catch (Error e) {
+		}
+
 		var result = new uint8[size];
 
 		size_t offset = 0;
