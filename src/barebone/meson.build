@@ -29,6 +29,7 @@ backend_sources += files(
   'parallels-stub.vala',
   'virtualbox-stub.vala',
   'virtualbox-console.vala',
+  'virtualbox-debugger.vala',
   'arch-x86' / 'machine.vala',
   'arch-x86_64' / 'machine.vala',
   'arch-arm' / 'machine.vala',

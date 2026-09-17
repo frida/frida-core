@@ -316,6 +316,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/VirtualBox/debugger-catches-a-breakpoint", () => {
+			var h = new SlowHarness ((h) => virtualbox_debugger_catches_a_breakpoint.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/maps-out-an-x86-64-kernel-in-live-guest", () => {
 			var h = new SlowHarness ((h) => winnt_maps_out_an_x86_64_kernel_in_live_guest.begin (h as SlowHarness));
 			h.run ();
@@ -4571,6 +4576,50 @@ FAIL: %s
 			assert_true (restored.compare (new Bytes (original.get_data ()[0:4])) == 0);
 
 			yield console.resume (null);
+		} catch (GLib.Error e) {
+			printerr ("
+FAIL: %s
+
+", e.message);
+			assert_not_reached ();
+		}
+
+		h.done ();
+	}
+
+	private async void virtualbox_debugger_catches_a_breakpoint (SlowHarness h) {
+		string? port = Environment.get_variable ("FRIDA_TEST_WINNT_X86_64_CONSOLE_PORT");
+		if (port == null) {
+			h.done ();
+			return;
+		}
+
+		try {
+			Debugger debugger = yield Barebone.VirtualBoxDebugger.open ("127.0.0.1",
+				(uint16) uint.parse (port), null);
+			assert_true (debugger.arch == Frida.TargetArch.X64);
+			assert_true (debugger.pointer_size == 8);
+			assert_true (debugger.state == STOPPED);
+
+			uint64 site = yield debugger.exception.thread.read_register ("rip", null);
+			assert_true (site > uint32.MAX);
+
+			Bytes before = yield debugger.read_byte_array (site, 2, null);
+
+			var bp = yield debugger.add_breakpoint (SOFT, site, 1, null);
+			Bytes patched = yield debugger.read_byte_array (site, 2, null);
+			assert_true (patched.get (0) == 0xeb && patched.get (1) == 0xfe);
+
+			var caught = yield debugger.continue_until_exception (null);
+			assert_true (caught.breakpoint == bp);
+			assert_true (debugger.state == STOPPED);
+			assert_true ((yield caught.thread.read_register ("rip", null)) == site);
+
+			yield bp.remove (null);
+			Bytes restored = yield debugger.read_byte_array (site, 2, null);
+			assert_true (restored.compare (before) == 0);
+
+			yield debugger.close (null);
 		} catch (GLib.Error e) {
 			printerr ("
 FAIL: %s
