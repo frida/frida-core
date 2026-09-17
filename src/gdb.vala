@@ -63,6 +63,14 @@ namespace Frida.GDB {
 			}
 		}
 
+		protected virtual bool stop_notifications_accepted {
+			get {
+				return true;
+			}
+		}
+
+		protected int64 last_packet_arrival_time = get_monotonic_time ();
+
 		protected void set_max_packet_size (size_t size) {
 			max_packet_size = size;
 		}
@@ -1114,6 +1122,7 @@ namespace Frida.GDB {
 			while (true) {
 				try {
 					var packet = yield read_packet ();
+					last_packet_arrival_time = get_monotonic_time ();
 
 					dispatch_packet (packet);
 				} catch (GLib.Error error) {
@@ -1230,6 +1239,8 @@ namespace Frida.GDB {
 					return true;
 				case NOTIFICATION_TYPE_STOP:
 				case NOTIFICATION_TYPE_STOP_WITH_PROPERTIES:
+					if (!stop_notifications_accepted)
+						return true;
 					pending_stops.offer (data);
 					if (!handling_stops)
 						handle_pending_stops.begin ();
