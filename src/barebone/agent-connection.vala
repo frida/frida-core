@@ -17,7 +17,9 @@ namespace Frida.Barebone {
 		private BareboneInjectedAgentConfig agent_config;
 		private string? hostlink_socket_path;
 		private BareboneVsockPipeTransportConfig? pipe_vsock_transport;
+#if !WINDOWS
 		private SocketService? pipe_vsock_service;
+#endif
 		private IOStream? pipe_vsock_stream;
 		private SourceFunc? pipe_vsock_accept_handler;
 		private BareboneImageConfig? image_config;
