@@ -246,6 +246,23 @@ mod arch {
         PAGE_SIZE
     }
 
+    pub fn present_span(address: usize) -> (bool, usize) {
+        for level in TOP_LEVEL..TABLE_LEVEL {
+            let entry = entry_at(level, address);
+            let span = 1usize << LEVEL_SHIFTS[level];
+            if (entry & PAGE_PRESENT as u64) == 0 {
+                return (false, span);
+            }
+            if (entry & PAGE_LARGE as u64) != 0 {
+                return (true, span);
+            }
+        }
+
+        let entry = entry_at(TABLE_LEVEL, address);
+
+        ((entry & PAGE_PRESENT as u64) != 0, PAGE_SIZE)
+    }
+
     fn entry_at(level: usize, address: usize) -> u64 {
         unsafe { entry_pointer(level, address).read_volatile() }
     }
@@ -525,6 +542,8 @@ macro_rules! read_system_register {
 use read_system_register;
 
 pub use arch::protection_at;
+#[cfg(target_arch = "x86_64")]
+pub use arch::present_span;
 
 use arch::{reprotect, walk_kernel_space};
 

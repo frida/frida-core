@@ -301,7 +301,7 @@ mod entrypoint_blob {
 
             kernel::install_fault_reporter();
             #[cfg(feature = "winnt")]
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
             kernel::disarm_patchguard();
 
             #[cfg(feature = "linux-injected")]
