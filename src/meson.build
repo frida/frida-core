@@ -1,5 +1,7 @@
 base_sources = [
   'frida.vala',
+  'linux-kernel-image.vala',
+  'xnu-kernelcache.vala',
   'frida-glue.c',
   'package-manager.vala',
   'control-service.vala',

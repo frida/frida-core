@@ -217,7 +217,7 @@ namespace Frida {
 				if (image.base != null) {
 					kernel_base = image.base.address;
 				} else {
-					var payload = yield Barebone.Img4.parse_file (File.new_for_path (image.file), cancellable);
+					var payload = Barebone.Img4.parse (((BareboneXnuKernelcacheConfig) image).kernelcache.blob);
 					uint64? summaries = image.symbols["gLoadedKextSummaries"];
 					relocation = yield Barebone.KernelRelocation.compute (machine, payload.data,
 						summaries ?? 0, cancellable);
@@ -236,9 +236,11 @@ namespace Frida {
 				kernel_modules = winnt_layout.modules;
 				kernel_symbols = winnt_layout.symbols;
 			} else if (config.kernel == LINUX) {
-				if (image == null)
-					throw new Error.INVALID_ARGUMENT ("Missing image.file naming the kernel's System.map");
-				var linux_layout = yield Barebone.collect_linux_layout (machine, image.file, cancellable);
+				var kernel = image as BareboneLinuxKernelConfig;
+				if (kernel == null)
+					throw new Error.INVALID_ARGUMENT ("Config for 'image' must carry the kernel's symbols");
+				var symbols = Barebone.adopt_kernel_symbols (kernel.kernel);
+				var linux_layout = yield Barebone.collect_linux_layout (machine, symbols, cancellable);
 				kernel_base = linux_layout.base_address;
 				kernel_modules = linux_layout.modules;
 				kernel_symbols = linux_layout.symbols;

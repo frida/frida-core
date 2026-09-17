@@ -6300,9 +6300,14 @@ FAIL: %s
 			config.connection.flavor = ANDROID_EMULATOR;
 		}
 		config.kernel = LINUX;
-		config.image = new BareboneImageConfig () {
-			file = system_map,
-		};
+		try {
+			config.image = new BareboneLinuxKernelConfig () {
+				kernel = LinuxSystemMap.open (system_map),
+			};
+		} catch (Error e) {
+			h.done ();
+			return null;
+		}
 		BareboneInjectingTransportConfig transport;
 		string? vsock_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_VSOCK_PATH");
 		if (vsock_path != null) {

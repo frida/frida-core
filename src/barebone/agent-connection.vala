@@ -115,7 +115,7 @@ namespace Frida.Barebone {
 			Layout layout;
 			uint64 preferred_base = 0;
 			if (image_carries_symbols) {
-				var payload = yield Img4.parse_file (File.new_for_path (image_config.file), cancellable);
+				var payload = Img4.parse (((BareboneXnuKernelcacheConfig) image_config).kernelcache.blob);
 				var kernelcache = Layout.parse_kernelcache (payload.data);
 				preferred_base = kernelcache.preferred_address;
 				if (relocation != null) {

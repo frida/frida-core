@@ -2264,8 +2264,25 @@ namespace Frida {
 	 *      }
 	 *    },
 	 *    "image": {
+	 *      "type": "xnu-kernelcache",
 	 *      "file": "/path/to/kernelcache.research.iphone12b",
 	 *      "base": "0xfffffff007004000"
+	 *    }
+	 *  }
+	 *
+	 * 6. Naming a Linux kernel, as the image itself or as the System.map beside it:
+	 *  {
+	 *    "kernel": "linux",
+	 *    "image": {
+	 *      "type": "linux-kernel-image",
+	 *      "file": "/path/to/Image"
+	 *    }
+	 *  }
+	 *  {
+	 *    "kernel": "linux",
+	 *    "image": {
+	 *      "type": "linux-system-map",
+	 *      "file": "/path/to/System.map"
 	 *    }
 	 *  }
 	 */
@@ -2355,6 +2372,13 @@ namespace Frida {
 				return true;
 			}
 
+			if (property_name == "image") {
+				var v = Value (typeof (BareboneImageConfig));
+				v.set_object (deserialize_image (property_node));
+				value = v;
+				return true;
+			}
+
 			if (property_name == "kernel") {
 				var v = Value (typeof (BareboneKernelKind));
 				v.set_enum (parse_kernel_kind (property_node.get_string ()));
@@ -2364,6 +2388,41 @@ namespace Frida {
 
 			value = Value (pspec.value_type);
 			return false;
+		}
+
+		private static BareboneImageConfig deserialize_image (Json.Node node) {
+			if (node.get_node_type () != Json.NodeType.OBJECT)
+				return new BareboneInvalidImageConfig ("Config for 'image' is invalid");
+
+			unowned Json.Object obj = node.get_object ();
+			string kind = obj.get_string_member_with_default ("type", "");
+
+			if (kind != "xnu-kernelcache" && kind != "linux-kernel-image" && kind != "linux-system-map") {
+				return new BareboneInvalidImageConfig (
+					"Config for 'image.type' must name what the image is");
+			}
+
+			string file = obj.get_string_member_with_default ("file", "");
+			if (file == "")
+				return new BareboneInvalidImageConfig ("Config for 'image.file' is missing");
+
+			try {
+				if (kind == "xnu-kernelcache") {
+					var xnu = (BareboneXnuKernelcacheConfig) Json.gobject_deserialize (
+						typeof (BareboneXnuKernelcacheConfig), node);
+					xnu.kernelcache = XnuKernelcache.open (file);
+					return xnu;
+				}
+
+				var linux = (BareboneLinuxKernelConfig) Json.gobject_deserialize (
+					typeof (BareboneLinuxKernelConfig), node);
+				linux.kernel = (kind == "linux-system-map")
+					? (LinuxKernelSymbols) LinuxSystemMap.open (file)
+					: (LinuxKernelSymbols) LinuxKernelImage.open (file);
+				return linux;
+			} catch (Error e) {
+				return new BareboneInvalidImageConfig (e.message);
+			}
 		}
 
 		private static BareboneKernelKind parse_kernel_kind (string? name) {
@@ -3055,12 +3114,7 @@ namespace Frida {
 		}
 	}
 
-	public sealed class BareboneImageConfig : Object, Json.Serializable {
-		public string file {
-			get;
-			set;
-		}
-
+	public abstract class BareboneImageConfig : Object, Json.Serializable {
 		public BareboneMemoryAddress base {
 			get;
 			set;
@@ -3103,10 +3157,7 @@ namespace Frida {
 				func (e.key, e.value);
 		}
 
-		public void check () throws Error {
-			if (file == null)
-				throw new Error.NOT_SUPPORTED ("Config for 'image.file' is missing");
-
+		public virtual void check () throws Error {
 			if (@base != null)
 				@base.check ();
 
@@ -3146,6 +3197,53 @@ namespace Frida {
 
 			value = Value (pspec.value_type);
 			return false;
+		}
+	}
+
+	public sealed class BareboneInvalidImageConfig : BareboneImageConfig {
+		private string reason;
+
+		internal BareboneInvalidImageConfig (string reason) {
+			this.reason = reason;
+		}
+
+		public override void check () throws Error {
+			throw new Error.NOT_SUPPORTED ("%s", reason);
+		}
+	}
+
+	/**
+	 * An XNU kernelcache already read, so a caller that has one does not name a path.
+	 */
+	public sealed class BareboneXnuKernelcacheConfig : BareboneImageConfig {
+		public XnuKernelcache kernelcache {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (kernelcache == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'image.kernelcache' is missing");
+
+			base.check ();
+		}
+	}
+
+	/**
+	 * A Linux kernel already read, as an image or as the System.map beside it, so a caller
+	 * that asked it what the kernel names does not pay for it twice.
+	 */
+	public sealed class BareboneLinuxKernelConfig : BareboneImageConfig {
+		public LinuxKernelSymbols kernel {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (kernel == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'image.kernel' is missing");
+
+			base.check ();
 		}
 	}
 

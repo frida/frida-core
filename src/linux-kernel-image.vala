@@ -1,5 +1,146 @@
-[CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
-namespace Frida.Barebone {
+namespace Frida {
+	/**
+	 * What a Linux kernel names, taken from wherever the caller happens to have it. Ask it
+	 * what the kernel names to tell what a guest supports before anything is launched, and
+	 * hand it to a barebone session so nothing is read twice.
+	 */
+	public abstract class LinuxKernelSymbols : Object {
+		/**
+		 * Whether the kernel names @name.
+		 *
+		 * @param name the symbol to look for
+		 */
+		public bool has_symbol (string name) {
+			uint64 address;
+			return try_find_symbol (name, out address);
+		}
+
+		/**
+		 * Looks up the address @name was linked for.
+		 *
+		 * @param name the symbol to look for
+		 * @param address the address it was linked for
+		 */
+		public abstract bool try_find_symbol (string name, out uint64 address);
+
+		internal abstract Gee.List<LinuxKernelSymbol> to_list ();
+	}
+
+	/**
+	 * A kernel image: a raw one, a gzip-compressed one, or a bzImage whose payload is packed
+	 * with LZ4. Its symbols come from the kallsyms tables embedded in it.
+	 */
+	public sealed class LinuxKernelImage : LinuxKernelSymbols {
+		private KallsymsTable table;
+
+		private LinuxKernelImage (KallsymsTable table) {
+			this.table = table;
+		}
+
+		/**
+		 * Finds the kallsyms tables in @blob, without decoding the names yet.
+		 *
+		 * @param blob the kernel image
+		 */
+		public static LinuxKernelImage from_blob (Bytes blob) throws Error {
+			return new LinuxKernelImage (KallsymsTable.load (blob.get_data ()));
+		}
+
+		/**
+		 * Reads the kernel image at @path.
+		 *
+		 * @param path the image's location
+		 */
+		public static LinuxKernelImage open (string path) throws Error {
+			return from_blob (FS.read_all_bytes_sync (File.new_for_path (path)));
+		}
+
+		public override bool try_find_symbol (string name, out uint64 address) {
+			return table.try_find (name, out address);
+		}
+
+		internal override Gee.List<LinuxKernelSymbol> to_list () {
+			return table.to_list ();
+		}
+	}
+
+	/**
+	 * The System.map a kernel build leaves beside its image: a line per symbol, each an
+	 * address, a one-letter type, and a name.
+	 */
+	public sealed class LinuxSystemMap : LinuxKernelSymbols {
+		private Gee.List<LinuxKernelSymbol> symbols;
+
+		private LinuxSystemMap (Gee.List<LinuxKernelSymbol> symbols) {
+			this.symbols = symbols;
+		}
+
+		/**
+		 * Reads a System.map.
+		 *
+		 * @param blob the map's text
+		 */
+		public static LinuxSystemMap from_blob (Bytes blob) throws Error {
+			var symbols = new Gee.ArrayList<LinuxKernelSymbol> ();
+
+			var text = (string) blob.get_data ();
+			foreach (unowned string line in text.split ("
+")) {
+				string[] fields = line.split (" ", 3);
+				if (fields.length != 3)
+					continue;
+
+				uint64 address;
+				if (!uint64.try_parse (fields[0], out address, null, 16))
+					continue;
+
+				symbols.add (new LinuxKernelSymbol () {
+					name = fields[2].strip (),
+					address = address,
+					symbol_type = 0xf,
+					section = 0x10,
+				});
+			}
+
+			if (symbols.is_empty)
+				throw new Error.INVALID_ARGUMENT ("Map names no symbols");
+
+			return new LinuxSystemMap (symbols);
+		}
+
+		/**
+		 * Reads the System.map at @path.
+		 *
+		 * @param path the map's location
+		 */
+		public static LinuxSystemMap open (string path) throws Error {
+			return from_blob (FS.read_all_bytes_sync (File.new_for_path (path)));
+		}
+
+		public override bool try_find_symbol (string name, out uint64 address) {
+			foreach (var symbol in symbols) {
+				if (symbol.name == name) {
+					address = symbol.address;
+					return true;
+				}
+			}
+
+			address = 0;
+			return false;
+		}
+
+		internal override Gee.List<LinuxKernelSymbol> to_list () {
+			return symbols;
+		}
+	}
+
+	internal class LinuxKernelSymbol {
+		public string name;
+		public uint64 address;
+		public uint8 symbol_type;
+		public uint8 section;
+	}
+
 	/**
 	 * Reconstructs a kernel's symbols from the kallsyms tables embedded in its on-disk image,
 	 * so a System.map is not needed. The image is a raw kernel, a gzip-compressed one, or an
@@ -7,59 +148,115 @@ namespace Frida.Barebone {
 	 * The tables are located by their structure and the names are decoded with the token table,
 	 * pairing each name with the address it was linked for.
 	 */
-	internal class KallsymsImage {
-		public static Gee.List<SymbolInfo> parse (uint8[] image) throws Error {
-			uint8[] raw = unpack (image);
+	internal class KallsymsTable {
+		private uint8[] raw;
+		private string[] tokens;
+		private uint num_syms;
+		private uint table_pos;
+		private uint names_pos;
+		private uint64 relative_base;
+		private bool absolute;
+		private bool percpu;
 
-			var tokens = find_tokens (raw);
-
-			uint num_syms;
-			uint table_pos;
-			uint names_pos;
-			uint64 relative_base;
-			bool absolute;
-			bool percpu = false;
+		public static KallsymsTable load (uint8[] image) throws Error {
+			var table = new KallsymsTable ();
+			table.raw = unpack (image);
+			table.tokens = find_tokens (table.raw);
 
 			try {
-				absolute = find_addresses (raw, out table_pos, out num_syms, out relative_base);
-				names_pos = find_names (raw, tokens, num_syms);
+				table.absolute = find_addresses (table.raw, out table.table_pos, out table.num_syms,
+					out table.relative_base);
+				table.names_pos = find_names (table.raw, table.tokens, table.num_syms);
 			} catch (Error e) {
-				if (!find_percpu_layout (raw, tokens, out table_pos, out num_syms, out relative_base,
-						out names_pos)) {
+				if (!find_percpu_layout (table.raw, table.tokens, out table.table_pos, out table.num_syms,
+					out table.relative_base, out table.names_pos)) {
 					throw e;
 				}
-				absolute = false;
-				percpu = true;
+				table.absolute = false;
+				table.percpu = true;
 			}
 
-			var symbols = new Gee.ArrayList<SymbolInfo> ();
+			return table;
+		}
+
+		public bool try_find (string name, out uint64 address) {
+			uint p = names_pos;
+			for (uint i = 0; i != num_syms; i++) {
+				uint len = raw[p];
+				uint start = p + 1;
+				if ((len & 0x80) != 0) {
+					len = (len & 0x7f) | (raw[start] << 7);
+					start++;
+				}
+
+				if (names_symbol (start, len, name)) {
+					address = address_at (i);
+					return true;
+				}
+
+				p = start + len;
+			}
+
+			address = 0;
+			return false;
+		}
+
+		public Gee.List<LinuxKernelSymbol> to_list () {
+			var symbols = new Gee.ArrayList<LinuxKernelSymbol> ();
 			uint p = names_pos;
 			for (uint i = 0; i != num_syms; i++) {
 				string name;
 				p = decode_symbol (raw, p, tokens, out name);
 				if (name.length < 2)
 					continue;
-				uint64 address;
-				if (absolute) {
-					address = read_u64 (raw, table_pos + i * 8);
-				} else {
-					int32 offset = read_i32 (raw, table_pos + i * 4);
-					if (percpu) {
-						address = (offset >= 0)
-							? (uint64) offset
-							: relative_base - 1 + (uint64) (-(int64) offset);
-					} else {
-						address = relative_base + (int64) offset;
-					}
-				}
-				symbols.add (new SymbolInfo () {
+				symbols.add (new LinuxKernelSymbol () {
 					name = name.substring (1),
-					offset = address,
+					address = address_at (i),
 					symbol_type = 0xf,
 					section = 0x10,
 				});
 			}
 			return symbols;
+		}
+
+		/**
+		 * Compares a name against its tokens where it sits, so nothing is built to throw away.
+		 * The first character each symbol carries is its type, which the caller does not name.
+		 */
+		private bool names_symbol (uint start, uint len, string name) {
+			char* needle = (char*) name;
+			bool typed = false;
+
+			for (uint i = 0; i != len; i++) {
+				char* c = (char*) tokens[raw[start + i]];
+				if (!typed) {
+					if (*c == '\0')
+						return false;
+					c++;
+					typed = true;
+				}
+
+				for (; *c != '\0'; c++) {
+					if (*needle != *c)
+						return false;
+					needle++;
+				}
+			}
+
+			return typed && *needle == '\0';
+		}
+
+		private uint64 address_at (uint i) {
+			if (absolute)
+				return read_u64 (raw, table_pos + i * 8);
+
+			int32 offset = read_i32 (raw, table_pos + i * 4);
+			if (!percpu)
+				return relative_base + (int64) offset;
+
+			return (offset >= 0)
+				? (uint64) offset
+				: relative_base - 1 + (uint64) (-(int64) offset);
 		}
 
 		private const uint MIN_SYMS = 1024;

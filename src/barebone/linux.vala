@@ -5,11 +5,8 @@ namespace Frida.Barebone {
 	 * linked for. The running kernel is somewhere else, so the two are told apart here: the
 	 * image in memory says where it landed, and every symbol moves by the same distance.
 	 */
-	public static async LinuxLayout collect_linux_layout (Machine machine, string image_path,
-			Cancellable? cancellable) throws Error, IOError {
-		var symbols = yield collect_symbols (image_path, cancellable);
-		if (symbols.is_empty)
-			throw new Error.INVALID_ARGUMENT ("Kernel names no symbols");
+	public static async LinuxLayout collect_linux_layout (Machine machine,
+			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
 
 		uint64 linked_base = base_of (symbols);
 		uint64 running_base = yield find_running_kernel (machine, linked_base, symbols, cancellable);
@@ -28,58 +25,16 @@ namespace Frida.Barebone {
 		return new LinuxLayout (running_base, modules, symbols);
 	}
 
-	/**
-	 * The kernel's symbols come from either a System.map named alongside it or the kernel image
-	 * itself: a System.map is ASCII text, an image is a gzip stream or raw binary. The image is
-	 * mined for its embedded kallsyms so no separate map need be supplied.
-	 */
-	private static async Gee.List<SymbolInfo> collect_symbols (string path, Cancellable? cancellable)
-			throws Error, IOError {
-		var bytes = yield FS.read_all_bytes (File.new_for_path (path), cancellable);
-		unowned uint8[] data = bytes.get_data ();
-		if (looks_like_system_map (data))
-			return parse_system_map ((string) data);
-		return KallsymsImage.parse (data);
-	}
-
-	private static bool looks_like_system_map (uint8[] data) {
-		if (data.length >= 2 && data[0] == 0x1f && data[1] == 0x8b)
-			return false;
-		uint limit = uint.min (data.length, 512);
-		for (uint i = 0; i != limit; i++) {
-			uint8 c = data[i];
-			if (c == '\n' || c == '\r' || c == '\t')
-				continue;
-			if (c < 0x20 || c >= 0x7f)
-				return false;
-		}
-		return true;
-	}
-
-	/**
-	 * Each line is an address, a one-letter type, and a name. Only the text and data symbols
-	 * are worth carrying: the rest name sections and boundaries the agent never asks for.
-	 */
-	private static Gee.List<SymbolInfo> parse_system_map (string text) {
+	public static Gee.List<SymbolInfo> adopt_kernel_symbols (LinuxKernelSymbols kernel) {
 		var symbols = new Gee.ArrayList<SymbolInfo> ();
-
-		foreach (unowned string line in text.split ("\n")) {
-			string[] fields = line.split (" ", 3);
-			if (fields.length != 3)
-				continue;
-
-			uint64 address;
-			if (!uint64.try_parse (fields[0], out address, null, 16))
-				continue;
-
+		foreach (var symbol in kernel.to_list ()) {
 			symbols.add (new SymbolInfo () {
-				name = fields[2].strip (),
-				offset = address,
-				symbol_type = 0xf,
-				section = 0x10,
+				name = symbol.name,
+				offset = symbol.address,
+				symbol_type = symbol.symbol_type,
+				section = symbol.section,
 			});
 		}
-
 		return symbols;
 	}
 

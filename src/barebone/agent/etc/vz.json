@@ -20,6 +20,7 @@
     }
   },
   "image": {
+    "type": "xnu-kernelcache",
     "file": "/Users/oleavr/src/vphone-cli/vm/iPhone17,3_26.1_23B85_Restore/kernelcache.research.vresearch101",
     "symbols": {
       "panic": "0x12a2814",

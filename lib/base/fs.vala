@@ -90,6 +90,18 @@ namespace Frida.FS {
 		yield write_all_bytes (f, new Bytes (t.data), cancellable);
 	}
 
+	public Bytes read_all_bytes_sync (File f) throws Error {
+		try {
+			uint8[] contents;
+			f.load_contents (null, out contents, null);
+			return new Bytes.take ((owned) contents);
+		} catch (GLib.Error e) {
+			if (e is IOError.NOT_FOUND)
+				throw new Error.INVALID_ARGUMENT ("%s", e.message);
+			throw new Error.PERMISSION_DENIED ("%s", e.message);
+		}
+	}
+
 	public async Bytes read_all_bytes (File f, Cancellable? cancellable) throws Error, IOError {
 		try {
 			return yield f.load_bytes_async (cancellable, null);
