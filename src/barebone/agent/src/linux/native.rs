@@ -71,8 +71,9 @@ pub fn let_the_file_go(file: *mut c_void) {
 
 pub fn wait_for_a_word(file: *mut c_void) -> bool {
     let mut byte = 0u8;
+    let mut position: i64 = 0;
 
-    unsafe { _kernel_read(file, 0, &mut byte, 1) == 1 }
+    unsafe { _kernel_read(file, &mut byte, 1, &mut position) == 1 }
 }
 
 pub fn leave_a_word(file: *mut c_void) {
@@ -795,7 +796,7 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _find_task_by_vpid: unsafe extern "C" fn(c_uint) -> *mut c_void;
     #[cfg(not(target_arch = "x86"))]
-    static _kernel_read: unsafe extern "C" fn(*mut c_void, i64, *mut u8, usize) -> isize;
+    static _kernel_read: unsafe extern "C" fn(*mut c_void, *mut u8, usize, *mut i64) -> isize;
     #[cfg(not(target_arch = "x86"))]
     static _kernel_write: unsafe extern "C" fn(*mut c_void, *const u8, usize, i64) -> isize;
     // Allocation profiling renamed the entry points in 6.10; before that the

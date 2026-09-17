@@ -67,7 +67,7 @@ fn listen_to_the_copy(says: *mut c_void) {
 
 unsafe extern "C" fn carry_what_the_copy_says(argument: *mut c_void, _reason: i32) {
     while native::wait_for_a_word(argument) {
-        native::wake(argument as *const u8);
+        crate::nudge_the_loop(crate::glib::wakeup_token());
     }
 }
 
