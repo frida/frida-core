@@ -14,8 +14,8 @@ use crate::winnt::{
     REGISTER_PROCESS, REGISTER_THREAD, STOP_REQUEST,
     BOOTSTRAP_CLIENT_ID, BOOTSTRAP_CONTEXT, BOOTSTRAP_CREATE_THREAD, BOOTSTRAP_HANDLE,
     BOOTSTRAP_INITIAL_TEB, BOOTSTRAP_TERMINATE_THREAD, TARGET_WAKE_HANDLE,
-    USER_SHARED_DATA, AGENT_WAKE_HANDLE, ENTRY_DLL_BASE_OFFSET, ENTRY_FULL_NAME_OFFSET,
-    ENTRY_SIZE_OF_IMAGE_OFFSET, LDR_IN_LOAD_ORDER_OFFSET, LOADER_LIBRARY, PEB_LDR_OFFSET,
+    USER_SHARED_DATA, AGENT_WAKE_HANDLE,
+    LDR_IN_LOAD_ORDER_OFFSET, LOADER_LIBRARY, PEB_LDR_OFFSET,
     CONTEXT_ALIGNMENT, CONTEXT_CONTROL, CONTEXT_FLAGS, CONTEXT_FULL, CONTEXT_PC, CONTEXT_SIZE,
     PEB_PARAMETERS_OFFSET,
     POINTER_SIZE, export, module_base, read_pointer, read_u32,
@@ -506,39 +506,9 @@ pub fn describe_module(base: u64) -> Option<LoadedModule> {
 
 // The loader keeps a list of what this process has mapped, and the copy can read it directly.
 pub fn enumerate_modules() -> Vec<LoadedModule> {
-    let mut modules = Vec::new();
+    let head = unsafe { read_pointer(peb() + PEB_LDR_OFFSET) } + LDR_IN_LOAD_ORDER_OFFSET;
 
-    unsafe {
-        let head = read_pointer(peb() + PEB_LDR_OFFSET) + LDR_IN_LOAD_ORDER_OFFSET;
-        let mut entry = read_pointer(head);
-        while entry != head {
-            let base = read_pointer(entry + ENTRY_DLL_BASE_OFFSET);
-            if base != 0 {
-                modules.push(LoadedModule {
-                    path: wide_text_at(entry + ENTRY_FULL_NAME_OFFSET),
-                    base: base as u64,
-                    size: read_u32(entry + ENTRY_SIZE_OF_IMAGE_OFFSET) as u64,
-                });
-            }
-            entry = read_pointer(entry);
-        }
-    }
-
-    modules
-}
-
-fn wide_text_at(record: usize) -> String {
-    unsafe {
-        let characters = (read_pointer(record + UNICODE_STRING_BUFFER) / 1) as *const u16;
-        let length = (record as *const u16).read() as usize / 2;
-
-        let mut text = String::new();
-        for index in 0..length {
-            text.push(char::from_u32(characters.add(index).read() as u32).unwrap_or('?'));
-        }
-
-        text
-    }
+    crate::winnt::enumerate_modules_in_list(head)
 }
 
 pub struct LoadedModule {
@@ -793,8 +763,6 @@ const PEB_IMAGE_BASE_OFFSET: usize = 0x10;
 
 #[cfg(target_arch = "x86")]
 const UNICODE_STRING_SIZE: usize = 8;
-#[cfg(target_pointer_width = "32")]
-const UNICODE_STRING_BUFFER: usize = 4;
 #[cfg(target_arch = "x86")]
 const PARAMETERS_DESKTOP_OFFSET: usize = 0x78;
 #[cfg(target_pointer_width = "32")]
@@ -812,8 +780,6 @@ const STARTUP_INFO_SIZE: usize = 0x44;
 
 #[cfg(target_arch = "x86_64")]
 const UNICODE_STRING_SIZE: usize = 16;
-#[cfg(target_pointer_width = "64")]
-const UNICODE_STRING_BUFFER: usize = 8;
 #[cfg(target_arch = "x86_64")]
 const PARAMETERS_DESKTOP_OFFSET: usize = 0xc0;
 #[cfg(target_pointer_width = "64")]

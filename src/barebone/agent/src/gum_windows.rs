@@ -14,6 +14,7 @@ use crate::{
     kernel,
 };
 use crate::bindings::{GumCpuContext, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT};
+#[cfg(not(feature = "winnt"))]
 use alloc::format;
 use core::ptr;
 
@@ -130,26 +131,10 @@ pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRegistry) {
-    #[cfg(any(feature = "win9x", feature = "winnt"))]
     if crate::running_in_a_process() {
         register_the_process_modules(registry);
-        return;
-    }
-
-    unsafe {
-        let modules = &*core::ptr::addr_of!(crate::MODULE_INFO);
-
-        for module_info in modules.iter() {
-            let path = format!("{}{}", kernel::MODULE_DIRECTORY, module_info.name);
-            let range = GumMemoryRange {
-                base_address: module_info.offset as u64,
-                size: module_info.size as gsize,
-            };
-
-            let module = gum::gum_native_module_new(&path, &module_info.version, &range);
-            gum_barebone_register_module(registry, module);
-            g_object_unref(module as gpointer);
-        }
+    } else {
+        register_the_kernel_modules(registry);
     }
 }
 
@@ -298,19 +283,41 @@ static mut LOADER_UNLOAD: gpointer = ptr::null_mut();
 
 fn register_the_process_modules(registry: *mut GumModuleRegistry) {
     for module in kernel::enumerate_modules() {
-        #[cfg(any(feature = "win9x", feature = "winnt"))]
         known_mut().insert(module.base);
 
-        let range = GumMemoryRange {
-            base_address: module.base,
-            size: module.size as gsize,
-        };
+        register_module(registry, &module.path, "", module.base, module.size);
+    }
+}
 
-        unsafe {
-            let native = gum::gum_native_module_new(&module.path, "", &range);
-            gum_barebone_register_module(registry, native);
-            g_object_unref(native as gpointer);
-        }
+fn register_the_kernel_modules(registry: *mut GumModuleRegistry) {
+    #[cfg(feature = "winnt")]
+    for module in crate::winnt::enumerate_kernel_modules() {
+        register_module(registry, &module.path, "", module.base, module.size);
+    }
+
+    #[cfg(not(feature = "winnt"))]
+    for module_info in unsafe { &*core::ptr::addr_of!(crate::MODULE_INFO) }.iter() {
+        let path = format!("{}{}", kernel::MODULE_DIRECTORY, module_info.name);
+        register_module(
+            registry,
+            &path,
+            &module_info.version,
+            module_info.offset as u64,
+            module_info.size as u64,
+        );
+    }
+}
+
+fn register_module(registry: *mut GumModuleRegistry, path: &str, version: &str, base: u64, size: u64) {
+    let range = GumMemoryRange {
+        base_address: base,
+        size: size as gsize,
+    };
+
+    unsafe {
+        let module = gum::gum_native_module_new(path, version, &range);
+        gum_barebone_register_module(registry, module);
+        g_object_unref(module as gpointer);
     }
 }
 

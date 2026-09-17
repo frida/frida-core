@@ -4,6 +4,8 @@
 
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1955,9 +1957,12 @@ pub struct ProcessInfo {
 // Find only the head of the list. Read the other data with the accessors that the kernel
 // exports, thus the code assumes no layout.
 pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
-    let head = unsafe { _PsActiveProcessHead };
     let system = unsafe { (_PsInitialSystemProcess as *const usize).read_volatile() };
-    if head == 0 || system == 0 {
+    if system == 0 {
+        return;
+    }
+    let head = active_process_head(system);
+    if head == 0 {
         return;
     }
 
@@ -1979,6 +1984,75 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
         entry = unsafe { (entry as *const usize).read_volatile() };
     }
 }
+
+fn active_process_head(system: usize) -> usize {
+    let known = ACTIVE_PROCESS_HEAD.load(Ordering::Relaxed);
+    if known != 0 {
+        return known;
+    }
+
+    let mut head = unsafe { _PsActiveProcessHead };
+    if head == 0 {
+        head = sweep_for_active_process_head(system);
+    }
+    ACTIVE_PROCESS_HEAD.store(head, Ordering::Relaxed);
+
+    head
+}
+
+fn sweep_for_active_process_head(system: usize) -> usize {
+    let base = KERNEL_BASE.load(Ordering::Relaxed);
+    if base == 0 {
+        return 0;
+    }
+    let size = unsafe {
+        (*core::ptr::addr_of!(crate::MODULE_INFO))
+            .iter()
+            .find(|m| m.offset as usize == base)
+            .map(|m| m.size as usize)
+    };
+    let Some(size) = size else {
+        return 0;
+    };
+
+    for offset in (0..PROCESS_SCAN_SIZE).step_by(core::mem::size_of::<usize>()) {
+        let node = system + offset;
+        let Some(forward) = try_read_word(node) else { continue };
+        let Some(backward) = try_read_word(node + core::mem::size_of::<usize>()) else { continue };
+        if !is_kernel_word(forward) || !is_kernel_word(backward) {
+            continue;
+        }
+        if try_read_word(forward + core::mem::size_of::<usize>()) != Some(node) {
+            continue;
+        }
+
+        let mut entry = backward;
+        for _ in 0..MAX_PROCESSES_WALKED {
+            if entry.wrapping_sub(base) < size {
+                return entry;
+            }
+            let Some(previous) = try_read_word(entry + core::mem::size_of::<usize>()) else { break };
+            if previous == entry || !is_kernel_word(previous) {
+                break;
+            }
+            entry = previous;
+        }
+    }
+
+    0
+}
+
+fn try_read_word(address: usize) -> Option<usize> {
+    unsafe { try_read_pointer(address) }
+}
+
+fn is_kernel_word(value: usize) -> bool {
+    (value as isize) < 0 && value % core::mem::size_of::<usize>() == 0
+}
+
+static ACTIVE_PROCESS_HEAD: AtomicUsize = AtomicUsize::new(0);
+const PROCESS_SCAN_SIZE: usize = 0x800;
+const MAX_PROCESSES_WALKED: usize = 4096;
 
 // A process keeps its path in its user-mode block. Thus attach to that address space to read
 // it. The processes of the kernel have no such block and keep a short name.
@@ -3433,6 +3507,48 @@ fn loader_library_in(process: *mut c_void) -> u64 {
 }
 
 static mut LOADER_LIBRARY_SEEN: u64 = 0;
+
+pub(crate) fn enumerate_kernel_modules() -> Vec<LoadedModule> {
+    match crate::kernel::noted("kernel.modules") {
+        Some(head) => enumerate_modules_in_list(head as usize),
+        None => Vec::new(),
+    }
+}
+
+pub(crate) fn enumerate_modules_in_list(head: usize) -> Vec<LoadedModule> {
+    let mut modules = Vec::new();
+
+    unsafe {
+        let mut entry = read_pointer(head);
+        while entry != head {
+            let base = read_pointer(entry + ENTRY_DLL_BASE_OFFSET);
+            if base != 0 {
+                modules.push(LoadedModule {
+                    path: wide_text_at(entry + ENTRY_FULL_NAME_OFFSET),
+                    base: base as u64,
+                    size: read_u32(entry + ENTRY_SIZE_OF_IMAGE_OFFSET) as u64,
+                });
+            }
+            entry = read_pointer(entry);
+        }
+    }
+
+    modules
+}
+
+pub(crate) fn wide_text_at(record: usize) -> String {
+    unsafe {
+        let characters = read_pointer(record + UNICODE_STRING_BUFFER_OFFSET) as *const u16;
+        let length = (record as *const u16).read() as usize / 2;
+
+        let mut text = String::new();
+        for index in 0..length {
+            text.push(char::from_u32(characters.add(index).read() as u32).unwrap_or('?'));
+        }
+
+        text
+    }
+}
 
 pub(crate) fn module_base(peb: usize, wanted: &[u8]) -> usize {
     unsafe {
