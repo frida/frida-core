@@ -57,6 +57,12 @@ namespace Frida.GDB {
 		private AckMode ack_mode = SEND_ACKS;
 		internal bool bulk_registers = true;
 
+		protected virtual bool pipelining_supported {
+			get {
+				return true;
+			}
+		}
+
 		protected void set_max_packet_size (size_t size) {
 			max_packet_size = size;
 		}
@@ -64,6 +70,7 @@ namespace Frida.GDB {
 		private Promise<uint>? write_request;
 		private Gee.Queue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
 		private Gee.Queue<string> pending_stops = new Gee.ArrayQueue<string> ();
+		private bool awaiting_response = false;
 		private bool handling_stops = false;
 
 		protected Gee.Set<string> supported_features = new Gee.HashSet<string> ();
@@ -1073,6 +1080,12 @@ namespace Frida.GDB {
 
 			var pending = new PendingResponse ((owned) predicate, query_with_predicate.callback);
 			pending_responses.offer (pending);
+			if (!pipelining_supported) {
+				if (awaiting_response)
+					pending.unsent_request = request;
+				else
+					awaiting_response = true;
+			}
 
 			var cancel_source = new CancellableSource (cancellable);
 			cancel_source.set_callback (() => {
@@ -1081,7 +1094,8 @@ namespace Frida.GDB {
 			});
 			cancel_source.attach (MainContext.get_thread_default ());
 
-			write_bytes (request);
+			if (pending.unsent_request == null)
+				write_bytes (request);
 
 			yield;
 
@@ -1168,6 +1182,7 @@ namespace Frida.GDB {
 				return true;
 
 			pending_responses.remove (pr);
+			send_next_unsent_request ();
 
 			pr.complete_with_response (packet);
 			return true;
@@ -1178,8 +1193,25 @@ namespace Frida.GDB {
 			if (pr == null)
 				throw new Error.PROTOCOL ("Unexpected response");
 			pending_responses.remove (pr);
+			send_next_unsent_request ();
 
 			pr.complete_with_response (response);
+		}
+
+		private void send_next_unsent_request () {
+			if (pipelining_supported)
+				return;
+
+			awaiting_response = false;
+			foreach (var next in pending_responses) {
+				if (next.unsent_request != null) {
+					Bytes request = next.unsent_request;
+					next.unsent_request = null;
+					awaiting_response = true;
+					write_bytes (request);
+					return;
+				}
+			}
 		}
 
 		protected bool try_handle_notification (Packet packet) throws Error {
@@ -1552,6 +1584,7 @@ namespace Frida.GDB {
 
 		private class PendingResponse {
 			public ResponsePredicate? predicate;
+			public Bytes? unsent_request;
 
 			public Packet? response {
 				get;
