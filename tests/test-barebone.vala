@@ -321,6 +321,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/x86-64-agent-runs-in-live-guest", () => {
+			var h = new SlowHarness ((h) => winnt_x86_64_agent_runs_in_live_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/maps-out-an-x86-64-kernel-in-live-guest", () => {
 			var h = new SlowHarness ((h) => winnt_maps_out_an_x86_64_kernel_in_live_guest.begin (h as SlowHarness));
 			h.run ();
@@ -4545,10 +4550,10 @@ FAIL: %s
 			var console = yield Barebone.VirtualBoxConsole.open ("127.0.0.1", (uint16) uint.parse (port), null);
 			yield console.halt (null);
 
-			uint cpus = yield console.query_cpu_count (null);
-			assert_true (cpus >= 1);
+			var cpus = yield console.read_registers (null);
+			assert_true (cpus.size >= 1);
 
-			var registers = yield console.read_registers (0, null);
+			var registers = cpus[0];
 			assert_true (registers.has_key ("rip"));
 			assert_true (registers.has_key ("rsp"));
 			assert_true (registers.has_key ("gs_base"));
@@ -4629,6 +4634,11 @@ FAIL: %s
 		}
 
 		h.done ();
+	}
+
+	private async void winnt_x86_64_agent_runs_in_live_guest (SlowHarness h) {
+		yield run_script_in_live_guest (h, virtualbox_config_from_environment (h, "WINNT_X86_64"),
+			"send(1 + 1);", "\"payload\":2");
 	}
 
 	private async void winnt_maps_out_an_x86_64_kernel_in_live_guest (SlowHarness h) {
@@ -6562,6 +6572,33 @@ FAIL: %s
 		var transport = new BareboneHostlinkTransportConfig () {
 			qmp = "unix:" + qmp_path,
 			bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
+		};
+		try {
+			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);
+		} catch (Error e) {
+			h.done ();
+			return null;
+		}
+
+		return config;
+	}
+
+	private BareboneConfig? virtualbox_config_from_environment (Frida.Test.AsyncHarness h, string prefix) {
+		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
+		string? serial_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_SERIAL");
+		string? console_port = Environment.get_variable (@"FRIDA_TEST_$(prefix)_CONSOLE_PORT");
+		if (agent_path == null || serial_path == null || console_port == null) {
+			h.done ();
+			return null;
+		}
+
+		var config = new BareboneConfig ();
+		config.connection.host = "127.0.0.1";
+		config.connection.port = (uint16) uint.parse (console_port);
+		config.connection.flavor = VIRTUALBOX_CONSOLE;
+		config.kernel = WINNT;
+		var transport = new BareboneSerialTransportConfig () {
+			path = serial_path,
 		};
 		try {
 			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);

@@ -105,7 +105,16 @@ namespace Frida {
 				throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
 			}
 
-			connecting ("Connecting to the GDB remote stub", 0.0);
+			connecting ("Connecting to the debugger", 0.0);
+
+			if (config.connection.flavor == BareboneStubFlavor.VIRTUALBOX_CONSOLE) {
+				var console_debugger = yield Barebone.VirtualBoxDebugger.open (config.connection.host,
+					config.connection.port, cancellable);
+				host_session = yield establish (config, console_debugger, (owned) connecting, cancellable);
+				host_session.agent_session_detached.connect (on_agent_session_detached);
+
+				return host_session;
+			}
 			IOStream stream;
 			try {
 				var client = new SocketClient ();
