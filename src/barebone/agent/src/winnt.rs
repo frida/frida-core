@@ -444,6 +444,10 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     unsafe { (_MmMapIoSpace)(phys_addr as i64, size as usize, MM_NON_CACHED) }
 }
 
+pub fn address_is_valid(address: usize) -> bool {
+    unsafe { (_MmIsAddressValid)(address as *const c_void) != 0 }
+}
+
 pub fn virt_to_phys(vaddr: u64) -> u64 {
     unsafe { (_MmGetPhysicalAddress)(vaddr as *const c_void) }
 }
@@ -615,25 +619,388 @@ static mut THREAD_VANISHED: Option<fn(u32)> = None;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn install_fault_reporter() {
     unsafe {
-        FAULT_CHAIN[INVALID_OPCODE as usize] = hook_gate(INVALID_OPCODE, frida_winnt_fault_thunk_ud);
-        FAULT_CHAIN[GENERAL_PROTECTION as usize] =
-            hook_gate(GENERAL_PROTECTION, frida_winnt_fault_thunk_gp);
-        FAULT_CHAIN[PAGE_FAULT as usize] = hook_gate(PAGE_FAULT, frida_winnt_fault_thunk_pf);
+        if HOOKED_DISPATCH != 0 {
+            return;
+        }
+        let Some(dispatch) = exception_dispatch() else {
+            return;
+        };
+
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+        let outcome = crate::bindings::gum_interceptor_replace_fast(
+            interceptor,
+            dispatch as *mut c_void,
+            on_exception_dispatch as *mut c_void,
+            &raw mut ORIGINAL_DISPATCH as *mut *mut c_void,
+            core::ptr::null(),
+        );
+        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        if outcome != 0 {
+            return;
+        }
+
+        HOOKED_DISPATCH = dispatch;
     }
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn release_fault_reporter() {
     unsafe {
-        for vector in [INVALID_OPCODE, GENERAL_PROTECTION, PAGE_FAULT] {
-            let previous = FAULT_CHAIN[vector as usize];
-            if previous != 0 {
-                FAULT_CHAIN[vector as usize] = 0;
-                restore_gate(vector, previous);
-            }
+        if HOOKED_DISPATCH == 0 {
+            return;
         }
+
+        let interceptor = crate::bindings::gum_interceptor_obtain();
+        crate::bindings::gum_interceptor_revert(interceptor, HOOKED_DISPATCH as *mut c_void);
+        HOOKED_DISPATCH = 0;
     }
 }
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn exception_dispatch() -> Option<usize> {
+    let table = descriptor_table_base();
+    let from_opcode_entry = gate_handler(table, INVALID_OPCODE);
+    let from_protection_entry = gate_handler(table, GENERAL_PROTECTION);
+
+    let (image, span) = kernel_text(from_protection_entry)?;
+
+    let from_opcode = call_targets(jump_out_of(from_opcode_entry)?, image, span)?;
+    let from_protection = call_targets(jump_out_of(from_protection_entry)?, image, span)?;
+
+    let builder = from_protection
+        .into_iter()
+        .filter(|target| from_opcode.contains(target))
+        .max_by_key(|target| frame_size(*target))
+        .filter(|target| frame_size(*target) >= SMALLEST_DISPATCH_FRAME)?;
+
+    call_targets(builder, image, span)?
+        .into_iter()
+        .max_by_key(|target| saved_registers(*target))
+        .filter(|target| saved_registers(*target) >= FEWEST_DISPATCH_SAVES)
+}
+
+#[cfg(target_arch = "x86")]
+fn gate_handler(table: usize, vector: u32) -> usize {
+    let gate = (table + (vector as usize * GATE_SIZE)) as *const u16;
+    unsafe { ((gate.add(3).read() as usize) << 16) | (gate.read() as usize) }
+}
+#[cfg(target_arch = "x86_64")]
+fn gate_handler(table: usize, vector: u32) -> usize {
+    let gate = (table + (vector as usize * GATE_SIZE)) as *const u16;
+    unsafe {
+        ((gate.add(4) as *const u32).read() as usize) << 32
+            | ((gate.add(3).read() as usize) << 16)
+            | (gate.read() as usize)
+    }
+}
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn kernel_text(inside: usize) -> Option<(usize, usize)> {
+    unsafe {
+        (*core::ptr::addr_of!(crate::MODULE_INFO))
+            .iter()
+            .find(|m| inside.wrapping_sub(m.offset as usize) < m.size as usize)
+            .map(|m| (m.offset as usize, m.size as usize))
+    }
+}
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn jump_out_of(entry: usize) -> Option<usize> {
+    let code = unsafe { core::slice::from_raw_parts(entry as *const u8, ENTRY_WINDOW) };
+    let mut at = 0;
+    while at + 5 <= code.len() {
+        if code[at] == JUMP_NEAR {
+            let displacement = i32::from_le_bytes(code[at + 1..at + 5].try_into().ok()?) as isize;
+            let target = (entry + at + 5).wrapping_add_signed(displacement);
+            if target > entry && target - entry < ENTRY_WINDOW {
+                return Some(target);
+            }
+        }
+        at += 1;
+    }
+
+    None
+}
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn call_targets(from: usize, image: usize, span: usize) -> Option<alloc::vec::Vec<usize>> {
+    let tail = from;
+
+    let mut targets = alloc::vec::Vec::new();
+    let code = unsafe { core::slice::from_raw_parts(tail as *const u8, ENTRY_WINDOW) };
+    let mut at = 0;
+    while at + 5 <= code.len() {
+        if code[at] == CALL_NEAR {
+            let displacement = i32::from_le_bytes(code[at + 1..at + 5].try_into().ok()?) as isize;
+            let target = (tail + at + 5).wrapping_add_signed(displacement);
+            if target.wrapping_sub(image) < span && !targets.contains(&target) {
+                targets.push(target);
+            }
+        }
+        at += 1;
+    }
+
+    Some(targets)
+}
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn frame_size(entry: usize) -> usize {
+    let code = unsafe { core::slice::from_raw_parts(entry as *const u8, PROLOGUE_WINDOW) };
+    let width = STACK_SUB_WIDE.len();
+
+    let mut at = 0;
+    while at + width + 4 <= code.len() {
+        if code[at..at + width] == STACK_SUB_WIDE {
+            return u32::from_le_bytes(code[at + width..at + width + 4].try_into().unwrap()) as usize;
+        }
+        if code[at..at + width] == STACK_SUB_NARROW {
+            return code[at + width] as usize;
+        }
+        at += 1;
+    }
+
+    0
+}
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn saved_registers(entry: usize) -> usize {
+    let code = unsafe { core::slice::from_raw_parts(entry as *const u8, PROLOGUE_WINDOW) };
+
+    let mut saved = 0;
+    let mut at = 0;
+    while at < code.len() {
+        match code[at] {
+            0x40 | 0x41 => at += 1,
+            0x50..=0x57 => {
+                saved += 1;
+                at += 1;
+            }
+            _ => break,
+        }
+    }
+
+    saved
+}
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn on_exception_dispatch(record: *mut u8, exception_frame: *mut u8,
+        trap: *mut u8, previous_mode: u8, first_chance: u8) {
+    let onward: unsafe extern "win64" fn(*mut u8, *mut u8, *mut u8, u8, u8) =
+        unsafe { core::mem::transmute(ORIGINAL_DISPATCH) };
+
+    if previous_mode as u32 != KERNEL_MODE || trap.is_null() || record.is_null() {
+        unsafe { onward(record, exception_frame, trap, previous_mode, first_chance) };
+        return;
+    }
+
+    let pc = unsafe { trap.byte_add(TRAP_PC).cast::<u64>().read() };
+    let (base, span) = crate::own_code();
+    if (pc as usize).wrapping_sub(base) >= span {
+        unsafe { onward(record, exception_frame, trap, previous_mode, first_chance) };
+        return;
+    }
+
+    let code = unsafe { record.cast::<u32>().read() };
+    let accessed = unsafe { record.byte_add(RECORD_INFORMATION + 8).cast::<usize>().read() };
+
+    let mut cpu_context = unsafe {
+        crate::bindings::_GumX64CpuContext {
+            rip: pc,
+            r15: 0,
+            r14: 0,
+            r13: 0,
+            r12: 0,
+            r11: trap.byte_add(TRAP_R11).cast::<u64>().read(),
+            r10: trap.byte_add(TRAP_R10).cast::<u64>().read(),
+            r9: trap.byte_add(TRAP_R9).cast::<u64>().read(),
+            r8: trap.byte_add(TRAP_R8).cast::<u64>().read(),
+            rdi: trap.byte_add(TRAP_RDI).cast::<u64>().read(),
+            rsi: trap.byte_add(TRAP_RSI).cast::<u64>().read(),
+            rbp: trap.byte_add(TRAP_RBP).cast::<u64>().read(),
+            rsp: trap.byte_add(TRAP_SP).cast::<u64>().read(),
+            rbx: trap.byte_add(TRAP_RBX).cast::<u64>().read(),
+            rdx: trap.byte_add(TRAP_RDX).cast::<u64>().read(),
+            rcx: trap.byte_add(TRAP_RCX).cast::<u64>().read(),
+            rax: trap.byte_add(TRAP_RAX).cast::<u64>().read(),
+            xmm: core::ptr::null_mut(),
+        }
+    };
+
+    if !handle_with(vector_for(code), pc, accessed, &mut cpu_context) {
+        unsafe { onward(record, exception_frame, trap, previous_mode, first_chance) };
+        return;
+    }
+
+    unsafe {
+        trap.byte_add(TRAP_PC).cast::<u64>().write(cpu_context.rip);
+        trap.byte_add(TRAP_SP).cast::<u64>().write(cpu_context.rsp);
+        trap.byte_add(TRAP_R11).cast::<u64>().write(cpu_context.r11);
+        trap.byte_add(TRAP_R10).cast::<u64>().write(cpu_context.r10);
+        trap.byte_add(TRAP_R9).cast::<u64>().write(cpu_context.r9);
+        trap.byte_add(TRAP_R8).cast::<u64>().write(cpu_context.r8);
+        trap.byte_add(TRAP_RDI).cast::<u64>().write(cpu_context.rdi);
+        trap.byte_add(TRAP_RSI).cast::<u64>().write(cpu_context.rsi);
+        trap.byte_add(TRAP_RBP).cast::<u64>().write(cpu_context.rbp);
+        trap.byte_add(TRAP_RBX).cast::<u64>().write(cpu_context.rbx);
+        trap.byte_add(TRAP_RDX).cast::<u64>().write(cpu_context.rdx);
+        trap.byte_add(TRAP_RCX).cast::<u64>().write(cpu_context.rcx);
+        trap.byte_add(TRAP_RAX).cast::<u64>().write(cpu_context.rax);
+    }
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn on_exception_dispatch(record: *mut u8, exception_frame: *mut u8,
+        trap: *mut u8, previous_mode: u8, first_chance: u8) {
+    let onward: unsafe extern "stdcall" fn(*mut u8, *mut u8, *mut u8, u8, u8) =
+        unsafe { core::mem::transmute(ORIGINAL_DISPATCH) };
+
+    if previous_mode as u32 != KERNEL_MODE || trap.is_null() || record.is_null() {
+        unsafe { onward(record, exception_frame, trap, previous_mode, first_chance) };
+        return;
+    }
+
+    let pc = unsafe { trap.byte_add(TRAP_PC).cast::<u32>().read() };
+    let (base, span) = crate::own_code();
+    if (pc as usize).wrapping_sub(base) >= span {
+        unsafe { onward(record, exception_frame, trap, previous_mode, first_chance) };
+        return;
+    }
+
+    let code = unsafe { record.cast::<u32>().read() };
+    let accessed = unsafe { record.byte_add(RECORD_INFORMATION + 4).cast::<usize>().read() };
+
+    let mut cpu_context = unsafe {
+        crate::bindings::_GumIA32CpuContext {
+            eip: pc,
+            edi: trap.byte_add(TRAP_RDI).cast::<u32>().read(),
+            esi: trap.byte_add(TRAP_RSI).cast::<u32>().read(),
+            ebp: trap.byte_add(TRAP_RBP).cast::<u32>().read(),
+            esp: trap.byte_add(TRAP_SP).cast::<u32>().read(),
+            ebx: trap.byte_add(TRAP_RBX).cast::<u32>().read(),
+            edx: trap.byte_add(TRAP_RDX).cast::<u32>().read(),
+            ecx: trap.byte_add(TRAP_RCX).cast::<u32>().read(),
+            eax: trap.byte_add(TRAP_RAX).cast::<u32>().read(),
+            xmm: core::ptr::null_mut(),
+        }
+    };
+
+    if !handle_with(vector_for(code), pc as u64, accessed, &mut cpu_context) {
+        unsafe { onward(record, exception_frame, trap, previous_mode, first_chance) };
+        return;
+    }
+
+    unsafe {
+        trap.byte_add(TRAP_PC).cast::<u32>().write(cpu_context.eip);
+        trap.byte_add(TRAP_SP).cast::<u32>().write(cpu_context.esp);
+        trap.byte_add(TRAP_RDI).cast::<u32>().write(cpu_context.edi);
+        trap.byte_add(TRAP_RSI).cast::<u32>().write(cpu_context.esi);
+        trap.byte_add(TRAP_RBP).cast::<u32>().write(cpu_context.ebp);
+        trap.byte_add(TRAP_RBX).cast::<u32>().write(cpu_context.ebx);
+        trap.byte_add(TRAP_RDX).cast::<u32>().write(cpu_context.edx);
+        trap.byte_add(TRAP_RCX).cast::<u32>().write(cpu_context.ecx);
+        trap.byte_add(TRAP_RAX).cast::<u32>().write(cpu_context.eax);
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn vector_for(code: u32) -> u32 {
+    match code {
+        STATUS_ACCESS_VIOLATION | STATUS_IN_PAGE_ERROR => PAGE_FAULT,
+        STATUS_ILLEGAL_INSTRUCTION => INVALID_OPCODE,
+        STATUS_PRIVILEGED_INSTRUCTION => GENERAL_PROTECTION,
+        STATUS_INTEGER_DIVIDE_BY_ZERO => DIVIDE_ERROR,
+        STATUS_SINGLE_STEP => DEBUG_TRAP,
+        _ => GENERAL_PROTECTION,
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+static mut HOOKED_DISPATCH: usize = 0;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+static mut ORIGINAL_DISPATCH: *mut c_void = core::ptr::null_mut();
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const PROLOGUE_WINDOW: usize = 0x20;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const SMALLEST_DISPATCH_FRAME: usize = 0x100;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const FEWEST_DISPATCH_SAVES: usize = 4;
+#[cfg(target_arch = "x86_64")]
+const STACK_SUB_WIDE: [u8; 3] = [0x48, 0x81, 0xec];
+#[cfg(target_arch = "x86_64")]
+const STACK_SUB_NARROW: [u8; 3] = [0x48, 0x83, 0xec];
+#[cfg(target_arch = "x86")]
+const STACK_SUB_WIDE: [u8; 2] = [0x81, 0xec];
+#[cfg(target_arch = "x86")]
+const STACK_SUB_NARROW: [u8; 2] = [0x83, 0xec];
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const ENTRY_WINDOW: usize = 0x600;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const JUMP_NEAR: u8 = 0xe9;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const CALL_NEAR: u8 = 0xe8;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const RECORD_INFORMATION: usize = if cfg!(target_arch = "x86_64") { 0x20 } else { 0x14 };
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const DIVIDE_ERROR: u32 = 0;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const DEBUG_TRAP: u32 = 1;
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const STATUS_ACCESS_VIOLATION: u32 = 0xc000_0005;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const STATUS_IN_PAGE_ERROR: u32 = 0xc000_0006;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const STATUS_ILLEGAL_INSTRUCTION: u32 = 0xc000_001d;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const STATUS_PRIVILEGED_INSTRUCTION: u32 = 0xc000_0096;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const STATUS_INTEGER_DIVIDE_BY_ZERO: u32 = 0xc000_0094;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const STATUS_SINGLE_STEP: u32 = 0x8000_0004;
+
+#[cfg(target_arch = "x86_64")]
+const TRAP_RAX: usize = 0x30;
+#[cfg(target_arch = "x86_64")]
+const TRAP_RCX: usize = 0x38;
+#[cfg(target_arch = "x86_64")]
+const TRAP_RDX: usize = 0x40;
+#[cfg(target_arch = "x86_64")]
+const TRAP_R8: usize = 0x48;
+#[cfg(target_arch = "x86_64")]
+const TRAP_R9: usize = 0x50;
+#[cfg(target_arch = "x86_64")]
+const TRAP_R10: usize = 0x58;
+#[cfg(target_arch = "x86_64")]
+const TRAP_R11: usize = 0x60;
+#[cfg(target_arch = "x86_64")]
+const TRAP_RBX: usize = 0x140;
+#[cfg(target_arch = "x86_64")]
+const TRAP_RDI: usize = 0x148;
+#[cfg(target_arch = "x86_64")]
+const TRAP_RSI: usize = 0x150;
+#[cfg(target_arch = "x86_64")]
+const TRAP_RBP: usize = 0x158;
+#[cfg(target_arch = "x86_64")]
+const TRAP_PC: usize = 0x168;
+#[cfg(target_arch = "x86_64")]
+const TRAP_SP: usize = 0x180;
+
+#[cfg(target_arch = "x86")]
+const TRAP_RAX: usize = 0x4c;
+#[cfg(target_arch = "x86")]
+const TRAP_RCX: usize = 0x48;
+#[cfg(target_arch = "x86")]
+const TRAP_RDX: usize = 0x44;
+#[cfg(target_arch = "x86")]
+const TRAP_RBX: usize = 0x64;
+#[cfg(target_arch = "x86")]
+const TRAP_RDI: usize = 0x5c;
+#[cfg(target_arch = "x86")]
+const TRAP_RSI: usize = 0x60;
+#[cfg(target_arch = "x86")]
+const TRAP_RBP: usize = 0x68;
+#[cfg(target_arch = "x86")]
+const TRAP_PC: usize = 0x70;
+#[cfg(target_arch = "x86")]
+const TRAP_SP: usize = 0x7c;
 
 #[cfg(target_arch = "aarch64")]
 pub fn install_fault_reporter() {
@@ -1290,61 +1657,6 @@ const SYNDROME_BREAKPOINT: u32 = 0x30;
 #[cfg(target_arch = "aarch64")]
 const SYNDROME_SOFTWARE_STEP: u32 = 0x32;
 
-#[cfg(target_arch = "x86")]
-unsafe fn restore_gate(vector: u32, handler: usize) {
-    let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;
-
-    unsafe {
-        gate.write(handler as u16);
-        gate.add(3).write((handler >> 16) as u16);
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-unsafe fn restore_gate(vector: u32, handler: usize) {
-    let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;
-
-    unsafe {
-        gate.write(handler as u16);
-        gate.add(3).write((handler >> 16) as u16);
-        (gate.add(4) as *mut u32).write((handler >> 32) as u32);
-    }
-}
-
-#[cfg(target_arch = "x86")]
-unsafe fn hook_gate(vector: u32, thunk: unsafe extern "C" fn()) -> usize {
-    let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;
-
-    unsafe {
-        let previous = ((gate.add(3).read() as usize) << 16) | (gate.read() as usize);
-
-        let handler = thunk as usize;
-        gate.write(handler as u16);
-        gate.add(3).write((handler >> 16) as u16);
-
-        previous
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-unsafe fn hook_gate(vector: u32, thunk: unsafe extern "C" fn()) -> usize {
-    let gate = (descriptor_table_base() + (vector as usize * GATE_SIZE)) as *mut u16;
-
-    unsafe {
-        let high = gate.add(4) as *mut u32;
-        let previous = ((high.read() as usize) << 32)
-            | ((gate.add(3).read() as usize) << 16)
-            | (gate.read() as usize);
-
-        let handler = thunk as usize;
-        gate.write(handler as u16);
-        gate.add(3).write((handler >> 16) as u16);
-        high.write((handler >> 32) as u32);
-
-        previous
-    }
-}
-
 fn descriptor_table_base() -> usize {
     let mut descriptor = [0u8; DESCRIPTOR_SIZE];
     unsafe {
@@ -1363,57 +1675,6 @@ const DESCRIPTOR_SIZE: usize = 2 + core::mem::size_of::<usize>();
 
 // Report only the faults from our own code. Send the other faults, primarily the paging
 // faults of the kernel, to the handler that was there before.
-#[cfg(target_arch = "x86")]
-#[unsafe(no_mangle)]
-extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u32) -> usize {
-    let rip_slot = fault_frame_pc_slot(fault);
-    // A fault from ring 3 is never ours, because all of our code runs in ring 0. Do not use our
-    // own ranges to decide this, because that reads our data in an unknown context.
-    if (unsafe { frame.add(rip_slot + 1).read() } & 3) != 0 {
-        return unsafe { FAULT_CHAIN[fault as usize] };
-    }
-
-    let eip_slot = rip_slot;
-    let eip = unsafe { frame.add(eip_slot).read() };
-
-    let mut cpu_context = unsafe {
-        crate::bindings::_GumIA32CpuContext {
-            eip,
-            edi: frame.read(),
-            esi: frame.add(1).read(),
-            ebp: frame.add(2).read(),
-            esp: frame.add(3).read(),
-            ebx: frame.add(4).read(),
-            edx: frame.add(5).read(),
-            ecx: frame.add(6).read(),
-            eax: frame.add(7).read(),
-            xmm: core::ptr::null_mut(),
-        }
-    };
-
-    if !handle(fault, eip as u64, &mut cpu_context) {
-        return unsafe { FAULT_CHAIN[fault as usize] };
-    }
-
-    // Gum returns a different stack pointer, but an iret in the same privilege level does not
-    // load one. Thus the thunk puts the registers back from a record.
-    unsafe {
-        RESUME = [
-            cpu_context.eip,
-            cpu_context.edi,
-            cpu_context.esi,
-            cpu_context.ebp,
-            cpu_context.esp,
-            cpu_context.ebx,
-            cpu_context.edx,
-            cpu_context.ecx,
-            cpu_context.eax,
-            frame.add(eip_slot + 2).read(),
-        ];
-    }
-
-    0
-}
 
 // A thunk cannot name data, the image being position-independent. Thus it asks for the record.
 #[cfg(target_arch = "x86")]
@@ -1422,76 +1683,8 @@ extern "C" fn frida_winnt_resume_block() -> *mut u32 {
     &raw mut RESUME as *mut u32
 }
 
-#[cfg(target_arch = "x86")]
-static mut RESUME: [u32; 10] = [0; 10];
-
 // A long-mode frame always contains the stack pointer. Thus write the values from Gum into
 // the frame.
-#[cfg(target_arch = "x86_64")]
-#[unsafe(no_mangle)]
-extern "C" fn frida_winnt_on_fault(fault: u32, frame: *mut u64) -> usize {
-    let rip_slot = fault_frame_pc_slot(fault);
-    // A fault from ring 3 is never ours, because all of our code runs in ring 0. Do not use our
-    // own ranges to decide this, because that reads our data in an unknown context.
-    if (unsafe { frame.add(rip_slot + 1).read() } & 3) != 0 {
-        return unsafe { FAULT_CHAIN[fault as usize] };
-    }
-
-    let rip = unsafe { frame.add(rip_slot).read() };
-
-    let mut cpu_context = unsafe {
-        crate::bindings::_GumX64CpuContext {
-            rip,
-            r15: frame.read(),
-            r14: frame.add(1).read(),
-            r13: frame.add(2).read(),
-            r12: frame.add(3).read(),
-            r11: frame.add(4).read(),
-            r10: frame.add(5).read(),
-            r9: frame.add(6).read(),
-            r8: frame.add(7).read(),
-            rdi: frame.add(8).read(),
-            rsi: frame.add(9).read(),
-            rbp: frame.add(10).read(),
-            rsp: frame.add(rip_slot + STACK_POINTER_IN_FRAME).read(),
-            rbx: frame.add(12).read(),
-            rdx: frame.add(13).read(),
-            rcx: frame.add(14).read(),
-            rax: frame.add(15).read(),
-            xmm: core::ptr::null_mut(),
-        }
-    };
-
-    if !handle(fault, rip, &mut cpu_context) {
-        return unsafe { FAULT_CHAIN[fault as usize] };
-    }
-
-    unsafe {
-        frame.add(rip_slot).write(cpu_context.rip);
-        frame.add(rip_slot + STACK_POINTER_IN_FRAME).write(cpu_context.rsp);
-
-        frame.write(cpu_context.r15);
-        frame.add(1).write(cpu_context.r14);
-        frame.add(2).write(cpu_context.r13);
-        frame.add(3).write(cpu_context.r12);
-        frame.add(4).write(cpu_context.r11);
-        frame.add(5).write(cpu_context.r10);
-        frame.add(6).write(cpu_context.r9);
-        frame.add(7).write(cpu_context.r8);
-        frame.add(8).write(cpu_context.rdi);
-        frame.add(9).write(cpu_context.rsi);
-        frame.add(10).write(cpu_context.rbp);
-        frame.add(12).write(cpu_context.rbx);
-        frame.add(13).write(cpu_context.rdx);
-        frame.add(14).write(cpu_context.rcx);
-        frame.add(15).write(cpu_context.rax);
-    }
-
-    0
-}
-
-#[cfg(target_arch = "x86_64")]
-const STACK_POINTER_IN_FRAME: usize = 3;
 
 fn handle(fault: u32, pc: u64, cpu_context: &mut crate::bindings::GumCpuContext) -> bool {
     handle_with(fault, pc, faulting_address(), cpu_context)
@@ -1509,18 +1702,6 @@ fn handle_with(fault: u32, pc: u64, accessed: usize,
     };
 
     handled != 0
-}
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn fault_frame_pc_slot(fault: u32) -> usize {
-    const VECTOR: usize = 1;
-
-    let error_code = match fault {
-        8 | 10 | 11 | 12 | 13 | 14 | 17 | 21 => 1,
-        _ => 0,
-    };
-
-    PUSHED_REGISTERS + VECTOR + error_code
 }
 
 #[cfg(target_arch = "x86")]
@@ -1547,8 +1728,6 @@ fn faulting_address() -> usize {
     }
     address
 }
-
-static mut FAULT_CHAIN: [usize; 32] = [0; 32];
 
 const INVALID_OPCODE: u32 = 6;
 const GENERAL_PROTECTION: u32 = 13;
@@ -4465,9 +4644,6 @@ static KERNEL_BASE: AtomicUsize = AtomicUsize::new(0);
 unsafe extern "C" {
     fn frida_winnt_run_on_stack(stack_top: *mut u8, entry: unsafe extern "C" fn(*mut c_void),
         context: *mut c_void);
-    fn frida_winnt_fault_thunk_ud();
-    fn frida_winnt_fault_thunk_gp();
-    fn frida_winnt_fault_thunk_pf();
 }
 
 // To give a fault back to the kernel, remove only the vector from the frame. Thus the error
@@ -4492,42 +4668,6 @@ frida_winnt_run_on_stack:
     pop ebp
     ret
 
-.macro FAULT_THUNK name, vector
-.global \name
-\name:
-    push \vector
-    pushad
-    push esp
-    push \vector
-    call frida_winnt_on_fault
-    add esp, 8
-    test eax, eax
-    jnz 1f
-    call frida_winnt_resume_block
-    mov ebx, eax
-    mov esp, [ebx + 16]
-    push dword ptr [ebx + 36]
-    popfd
-    push dword ptr [ebx]
-    push dword ptr [ebx + 32]
-    push dword ptr [ebx + 20]
-    mov edi, [ebx + 4]
-    mov esi, [ebx + 8]
-    mov ebp, [ebx + 12]
-    mov edx, [ebx + 24]
-    mov ecx, [ebx + 28]
-    pop ebx
-    pop eax
-    ret
-1:
-    mov [esp + 32], eax
-    popad
-    ret
-.endm
-
-FAULT_THUNK frida_winnt_fault_thunk_ud, 6
-FAULT_THUNK frida_winnt_fault_thunk_gp, 13
-FAULT_THUNK frida_winnt_fault_thunk_pf, 14
 "#
 );
 
@@ -4595,31 +4735,7 @@ frida_winnt_run_on_stack:
 // To chain, remove only the vector, thus the error code stays where the previous handler
 // reads it. The return must also step over that code, because iret reads the frame from the
 // position that the processor used.
-.macro FAULT_THUNK name, vector, error_code
-.global \name
-\name:
-    push \vector
-    PUSH_GPRS
-    mov rdi, \vector
-    mov rsi, rsp
-    mov rbx, rsp
-    and rsp, -16
-    call frida_winnt_on_fault
-    mov rsp, rbx
-    test rax, rax
-    jnz 1f
-    POP_GPRS
-    add rsp, 8 + \error_code
-    iretq
-1:
-    mov [rsp + GPR_BYTES], rax
-    POP_GPRS
-    ret
-.endm
 
-FAULT_THUNK frida_winnt_fault_thunk_ud, 6, 0
-FAULT_THUNK frida_winnt_fault_thunk_gp, 13, 8
-FAULT_THUNK frida_winnt_fault_thunk_pf, 14, 8
 "#
 );
 
@@ -4958,3 +5074,4 @@ unsafe extern "C" {
 pub(crate) fn virtual_for_physical(phys_addr: u64) -> *mut u8 {
     unsafe { (_MmGetVirtualForPhysical)(phys_addr as i64) as *mut u8 }
 }
+
