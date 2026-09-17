@@ -752,10 +752,13 @@ namespace Frida.GDB {
 				throws Error, IOError {
 			var xml = new StringBuilder.sized (4096);
 
+			size_t max_chunk_size = max_packet_size - Packet.OVERHEAD - 1;
+
 			uint offset = 0;
 			char status = 'l';
 			do {
-				var response = yield query_simple ("qXfer:features:read:%s:%x,1ffff".printf (name, offset), cancellable);
+				var response = yield query_simple ("qXfer:features:read:%s:%x,%x".printf (name, offset,
+					(uint) max_chunk_size), cancellable);
 
 				string payload = response.payload;
 				if (payload.length == 0 || payload[0] == 'E') {
