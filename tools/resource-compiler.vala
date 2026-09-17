@@ -360,8 +360,10 @@ namespace Frida {
 
 					csource.put_string ("extern const char " + blob_identifier + "[];\n");
 
+					ImageKind image = image_kind (input.source);
+
 					if (toolchain == Toolchain.MICROSOFT) {
-						obj.write (blob_identifier, prepared_resource.file.read ());
+						obj.write (blob_identifier, prepared_resource.file.read (), image == NONE);
 					} else {
 						if (toolchain == Toolchain.APPLE) {
 							var allow_dead_strip_directive = ".subsections_via_symbols\n";
@@ -371,8 +373,7 @@ namespace Frida {
 						var align_for_generic_simd_compatibility = ".align 4\n";
 						var align_for_maximum_page_size_on_darwin = ".align 14\n";
 
-						var is_dylib = input.name.has_suffix (".dylib");
-						if (is_dylib)
+						if (image == MACHO)
 							asource.put_string (align_for_maximum_page_size_on_darwin);
 						else
 							asource.put_string (align_for_generic_simd_compatibility);
@@ -381,7 +382,7 @@ namespace Frida {
 						asource.put_string ("FRIDA_CSYM (" + blob_identifier + "):\n");
 						asource.put_string (".incbin " + quote (prepared_resource.file.get_path ()) + "\n");
 
-						if (!is_dylib)
+						if (image == NONE)
 							asource.put_string (".byte 0\n");
 					}
 				}
@@ -543,6 +544,29 @@ namespace Frida {
 			return builder.str;
 		}
 
+		private static ImageKind image_kind (string path) throws Error {
+			var magic = new uint8[4];
+			size_t n;
+			var stream = File.new_for_commandline_arg (path).read ();
+			stream.read_all (magic, out n, null);
+			stream.close ();
+
+			if (n < magic.length)
+				return NONE;
+
+			if (magic[0] == 'M' && magic[1] == 'Z')
+				return PE;
+
+			if (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F')
+				return ELF;
+
+			uint32 word = magic[0] | (magic[1] << 8) | (magic[2] << 16) | (magic[3] << 24);
+			if (word == 0xfeedfacf || word == 0xfeedface || word == 0xbebafeca)
+				return MACHO;
+
+			return NONE;
+		}
+
 		private static string quote (string path) {
 			string lit = path
 				.replace ("\\", "\\\\")
@@ -628,6 +652,13 @@ namespace Frida {
 				this.name = name;
 				this.files = new Gee.ArrayList<ResourceFile> ();
 			}
+		}
+
+		private enum ImageKind {
+			NONE,
+			PE,
+			MACHO,
+			ELF
 		}
 
 		private class ResourceFile {
@@ -743,7 +774,7 @@ namespace Frida {
 				}
 			}
 
-			public void write (string name, InputStream data) throws Error {
+			public void write (string name, InputStream data, bool terminate) throws Error {
 				if (rdata_size % SECTION_DATA_ALIGNMENT != 0) {
 					var padding = new uint8[SECTION_DATA_ALIGNMENT - (rdata_size % SECTION_DATA_ALIGNMENT)];
 					stream.write_all (padding, null);
@@ -764,6 +795,13 @@ namespace Frida {
 					stream.write_all (buf, null);
 					rdata_size += bytes_read;
 					rdata_crc = Checksum.crc32 (buf, rdata_crc);
+				}
+
+				if (terminate) {
+					uint8 terminator[] = { 0 };
+					stream.write_all (terminator, null);
+					rdata_size += terminator.length;
+					rdata_crc = Checksum.crc32 (terminator, rdata_crc);
 				}
 			}
 
