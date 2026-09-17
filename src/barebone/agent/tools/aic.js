@@ -5,7 +5,7 @@ const listener = Interceptor.attach(ptr('0xfffffff0080863e8'), function (args) {
   console.log(`IOInterruptController::registerInterrupt() called with handler=${handler} from ${this.returnAddress}`);
   //listener.detach();
 });
-$gdb.continue();
+$debugger.continue();
 
 //const listener = Interceptor.attach(ptr('0xfffffff0091cb4cc'), function (args) {
 //  const aic = args[0];
@@ -17,7 +17,7 @@ $gdb.continue();
 //  Object.assign(globalThis, { aic, service });
 //  listener.detach();
 //});
-//$gdb.continue();
+//$debugger.continue();
 
 //Interceptor.attach(ptr('0xfffffff007a55728'), function () {
 //  console.log('Stopped on thread about to call thread_block()');
@@ -27,7 +27,7 @@ $gdb.continue();
 //    console.log('Oops:', e);
 //  }
 //});
-//$gdb.continue();
+//$debugger.continue();
 
 const IO_SERVICE_VTABLE_LENGTH = 168;
 

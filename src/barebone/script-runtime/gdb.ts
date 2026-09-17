@@ -1,6 +1,6 @@
 import { BNativePointer, BInt64, BUInt64 } from "./primitives.js";
 
-export const gdb = $gdb;
+export const gdb = $debugger;
 
 export interface GDBClient {
     state: GDBState;
@@ -80,4 +80,4 @@ export type GDBBreakpointKind =
     | "access"
     ;
 
-declare const $gdb: GDBClient;
+declare const $debugger: GDBClient;

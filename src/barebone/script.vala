@@ -461,9 +461,9 @@ namespace Frida {
 		}
 
 		private void add_program (string source, string name) throws Error {
-			unowned string package_marker = "ðŸ“¦\n";
-			unowned string delimiter_marker = "\nâœ„\n";
-			unowned string alias_marker = "â†» ";
+			unowned string package_marker = "📦\n";
+			unowned string delimiter_marker = "\n✄\n";
+			unowned string alias_marker = "↻ ";
 
 			if (source.has_prefix (package_marker)) {
 				rt.set_module_loader_func (normalize_module_name, load_module);
