@@ -32,6 +32,8 @@ OBJECT_TYPE_PATTERN = re.compile(r"\bpublic\s+(sealed |abstract )?(class|interfa
 
 TOPLEVEL_NAMES = [
     "frida.vala",
+    "linux-kernel-image.vala",
+    "xnu-kernelcache.vala",
     "package-manager.vala",
     "control-service.vala",
     "portal-service.vala",

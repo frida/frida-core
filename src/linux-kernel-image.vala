@@ -23,7 +23,13 @@ namespace Frida {
 		 */
 		public abstract bool try_find_symbol (string name, out uint64 address);
 
-		internal abstract Gee.List<LinuxKernelSymbol> to_list ();
+		internal Gee.List<LinuxKernelSymbol> to_list () {
+			var image = this as LinuxKernelImage;
+			if (image != null)
+				return image.table.to_list ();
+
+			return ((LinuxSystemMap) this).symbols;
+		}
 	}
 
 	/**
@@ -31,7 +37,7 @@ namespace Frida {
 	 * with LZ4. Its symbols come from the kallsyms tables embedded in it.
 	 */
 	public sealed class LinuxKernelImage : LinuxKernelSymbols {
-		private KallsymsTable table;
+		internal KallsymsTable table;
 
 		private LinuxKernelImage (KallsymsTable table) {
 			this.table = table;
@@ -58,10 +64,6 @@ namespace Frida {
 		public override bool try_find_symbol (string name, out uint64 address) {
 			return table.try_find (name, out address);
 		}
-
-		internal override Gee.List<LinuxKernelSymbol> to_list () {
-			return table.to_list ();
-		}
 	}
 
 	/**
@@ -69,7 +71,7 @@ namespace Frida {
 	 * address, a one-letter type, and a name.
 	 */
 	public sealed class LinuxSystemMap : LinuxKernelSymbols {
-		private Gee.List<LinuxKernelSymbol> symbols;
+		internal Gee.List<LinuxKernelSymbol> symbols;
 
 		private LinuxSystemMap (Gee.List<LinuxKernelSymbol> symbols) {
 			this.symbols = symbols;
@@ -127,10 +129,6 @@ namespace Frida {
 
 			address = 0;
 			return false;
-		}
-
-		internal override Gee.List<LinuxKernelSymbol> to_list () {
-			return symbols;
 		}
 	}
 
