@@ -23,7 +23,7 @@ base_sources = [
 extra_vala_args = []
 
 if host_os == 'windows'
-  base_sources += 'windows.vala'
+  base_sources += ['windows.vala', 'windows-glue.c']
 else
   base_sources += 'posix.vala'
   extra_vala_args += '--pkg=posix'

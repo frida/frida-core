@@ -1,4 +1,8 @@
 namespace Frida {
+	namespace WindowsNamedPipe {
+		public extern IOStream open_client (string path) throws GLib.Error;
+	}
+
 	public sealed class StdioPipes : Object {
 		public OutputStream input {
 			get;

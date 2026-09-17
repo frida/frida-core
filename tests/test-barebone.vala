@@ -304,6 +304,13 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+#if WINDOWS
+		GLib.Test.add_func ("/Barebone/SerialTransport/round-trips-over-a-named-pipe", () => {
+			var h = new Harness ((h) => serial_transport_round_trips_over_a_named_pipe.begin (h as Harness));
+			h.run ();
+		});
+#endif
+
 		GLib.Test.add_func ("/Barebone/WinNt/maps-out-an-x86-64-kernel-in-live-guest", () => {
 			var h = new SlowHarness ((h) => winnt_maps_out_an_x86_64_kernel_in_live_guest.begin (h as SlowHarness));
 			h.run ();
@@ -4480,6 +4487,42 @@ FAIL: %s
 
 		h.done ();
 	}
+
+#if WINDOWS
+	private async void serial_transport_round_trips_over_a_named_pipe (Harness h) {
+		string name = "frida-test-serial-%u".printf (Random.next_int ());
+
+		try {
+			var server = new WindowsPipe (@"pipe:role=server,name=$name");
+			var client = WindowsNamedPipe.open_client (@"\\\\.\\pipe\\$name");
+
+			uint8[] sent = { 0x13, 0x37, 0x00, 0xff, 0x42 };
+			yield client.get_output_stream ().write_all_async (sent, Priority.DEFAULT, null, null);
+
+			var received = new uint8[sent.length];
+			yield server.get_input_stream ().read_all_async (received, Priority.DEFAULT, null, null);
+			assert_true (Memory.cmp (received, sent, sent.length) == 0);
+
+			uint8[] answer = { 0xaa, 0xbb, 0xcc };
+			yield server.get_output_stream ().write_all_async (answer, Priority.DEFAULT, null, null);
+
+			var echoed = new uint8[answer.length];
+			yield client.get_input_stream ().read_all_async (echoed, Priority.DEFAULT, null, null);
+			assert_true (Memory.cmp (echoed, answer, answer.length) == 0);
+
+			yield client.close_async (Priority.DEFAULT, null);
+			yield server.close_async (Priority.DEFAULT, null);
+		} catch (GLib.Error e) {
+			printerr ("
+FAIL: %s
+
+", e.message);
+			assert_not_reached ();
+		}
+
+		h.done ();
+	}
+#endif
 
 	private async void winnt_maps_out_an_x86_64_kernel_in_live_guest (SlowHarness h) {
 		string? port = Environment.get_variable ("FRIDA_TEST_WINNT_X86_64_GDB_PORT");

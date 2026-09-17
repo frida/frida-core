@@ -382,19 +382,19 @@ namespace Frida.Barebone {
 
 		private async void connect_serial_transport (BareboneSerialTransportConfig config,
 				Cancellable? cancellable) throws Error, IOError {
-#if WINDOWS
-			throw new Error.NOT_SUPPORTED ("Serial transport is not available on this OS");
-#else
-			var client = new SocketClient ();
 			try {
+#if WINDOWS
+				adopt_hostlink_streams (WindowsNamedPipe.open_client (config.path));
+#else
+				var client = new SocketClient ();
 				adopt_hostlink_streams (yield client.connect_async (new UnixSocketAddress (config.path),
 					cancellable));
+#endif
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("Unable to reach the serial port of the guest: %s", e.message);
 			}
 
 			listening = new Promise<bool> ();
-#endif
 		}
 
 		private async void open_pipe_vsock_listener (string path, Cancellable? cancellable) throws Error, IOError {
