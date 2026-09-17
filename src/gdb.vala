@@ -101,6 +101,8 @@ namespace Frida.GDB {
 
 		private bool binary_writes_supported = true;
 
+		private const string CLIENT_FEATURES = "xmlRegisters=i386,arm,aarch64";
+
 		private const char STOP_CHARACTER = 0x03;
 		private const string ACK_NOTIFICATION = "+";
 		private const string NACK_NOTIFICATION = "-";
@@ -145,7 +147,8 @@ namespace Frida.GDB {
 
 				yield prepare_connection (cancellable);
 
-				string supported_response = yield query_property ("Supported", cancellable);
+				string supported_response = yield query_property_with_arguments ("Supported",
+					CLIENT_FEATURES, cancellable);
 				supported_features.add_all_array (supported_response.split (";"));
 
 				foreach (string feature in supported_features) {
@@ -1039,7 +1042,13 @@ namespace Frida.GDB {
 		}
 
 		public async string query_property (string name, Cancellable? cancellable) throws Error, IOError {
-			Packet response = yield query_simple ("q" + name, cancellable);
+			return yield query_property_with_arguments (name, null, cancellable);
+		}
+
+		public async string query_property_with_arguments (string name, string? arguments,
+				Cancellable? cancellable) throws Error, IOError {
+			string request = (arguments != null) ? @"q$name:$arguments" : "q" + name;
+			Packet response = yield query_simple (request, cancellable);
 
 			unowned string val = response.payload;
 			string ack = "q%s:".printf (name);
