@@ -249,7 +249,7 @@ namespace Frida.Barebone {
 
 		public async void set_physical_memory_mode (bool enabled, Cancellable? cancellable = null)
 				throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("The VirtualBox debugger console addresses memory virtually");
+			console.physical_addressing = enabled;
 		}
 
 		public async string run_remote_command (string command, Cancellable? cancellable = null)
