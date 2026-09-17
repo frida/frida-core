@@ -115,6 +115,7 @@ namespace Frida {
 
 				return host_session;
 			}
+
 			IOStream stream;
 			try {
 				var client = new SocketClient ();
@@ -278,7 +279,7 @@ namespace Frida {
 					alloc_function = relocation.translate (alloc_function);
 					free_function = relocation.translate (free_function);
 				}
-				Gum.PageProtection pool_protection = (config.kernel == WINNT || config.kernel == WIN9X)
+				Gum.PageProtection pool_protection = (config.kernel == WIN9X)
 					? Gum.PageProtection.READ | Gum.PageProtection.WRITE | Gum.PageProtection.EXECUTE
 					: Gum.PageProtection.READ | Gum.PageProtection.WRITE;
 				allocator = new Barebone.TargetFunctionsAllocator (machine, page_size, pool_protection, tfa,
