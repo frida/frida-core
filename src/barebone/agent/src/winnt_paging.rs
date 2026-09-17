@@ -2,6 +2,8 @@
 // that you calculate from the page, and no kernel export is necessary. The two word sizes
 // differ only in the address of the self-map and the number of levels.
 
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
     let mut at = address as usize & !(PAGE_SIZE - 1);
     let end = address as usize + size;
@@ -216,8 +218,22 @@ mod arch {
     // The kernel maps its pool with large pages, which have no page table. Thus the self-map has
     // no entry to change, and such a mapping is left alone, being already writable and executable.
     pub fn reprotect(address: usize, gum_prot: u32) -> usize {
-        if !maps_small_page(address) {
-            return 0;
+        for level in TOP_LEVEL..TABLE_LEVEL {
+            let entry = entry_pointer(level, address);
+            let value = unsafe { entry.read_volatile() };
+            if (value & PAGE_PRESENT as u64) == 0 {
+                return 0;
+            }
+            if (value & PAGE_LARGE as u64) == 0 {
+                continue;
+            }
+
+            unsafe {
+                entry.write_volatile(apply_protection(value, gum_prot as u64,
+                    PAGE_WRITEABLE as u64, PAGE_NO_EXECUTE));
+            }
+
+            return 1usize << LEVEL_SHIFTS[level];
         }
 
         let entry = entry_pointer(TABLE_LEVEL, address);
@@ -230,25 +246,64 @@ mod arch {
         PAGE_SIZE
     }
 
-    fn maps_small_page(address: usize) -> bool {
-        for level in TOP_LEVEL..TABLE_LEVEL {
-            let entry = entry_at(level, address);
-            if (entry & PAGE_PRESENT as u64) == 0 || (entry & PAGE_LARGE as u64) != 0 {
-                return false;
-            }
-        }
-
-        true
-    }
-
     fn entry_at(level: usize, address: usize) -> u64 {
         unsafe { entry_pointer(level, address).read_volatile() }
     }
 
     fn entry_pointer(level: usize, address: usize) -> *mut u64 {
         let index = (address >> LEVEL_SHIFTS[level]) & LEVEL_INDEX_MASKS[level];
-        (LEVEL_BASES[level] + index * 8) as *mut u64
+        (level_bases()[level] + index * 8) as *mut u64
     }
+
+    fn level_bases() -> [usize; 4] {
+        let known = SELF_MAP_INDEX.load(Ordering::Relaxed);
+        if known != NO_SELF_MAP {
+            return bases_from(known);
+        }
+
+        let index = discover_self_map().unwrap_or(LEGACY_SELF_MAP_INDEX);
+        SELF_MAP_INDEX.store(index, Ordering::Relaxed);
+
+        bases_from(index)
+    }
+
+    fn bases_from(index: usize) -> [usize; 4] {
+        let pte = sign_extend(index << LEVEL_SHIFTS[0]);
+        let pde = pte + (index << LEVEL_SHIFTS[1]);
+        let ppe = pde + (index << LEVEL_SHIFTS[2]);
+        let pxe = ppe + (index << LEVEL_SHIFTS[3]);
+
+        [pxe, ppe, pde, pte]
+    }
+
+    fn discover_self_map() -> Option<usize> {
+        let probe = discover_self_map as usize;
+        let expected = crate::winnt::virt_to_phys(probe as u64) & ADDRESS_MASK;
+        if expected == 0 {
+            return None;
+        }
+
+        for index in 0..ENTRIES_PER_TABLE {
+            let bases = bases_from(index);
+            let slot = bases[TABLE_LEVEL]
+                + ((probe >> LEVEL_SHIFTS[TABLE_LEVEL]) & LEVEL_INDEX_MASKS[TABLE_LEVEL]) * 8;
+            if !crate::winnt::address_is_valid(slot) {
+                continue;
+            }
+
+            let entry = unsafe { (slot as *const u64).read_volatile() };
+            if (entry & PAGE_PRESENT as u64) != 0 && (entry & ADDRESS_MASK) == expected {
+                return Some(index);
+            }
+        }
+
+        None
+    }
+
+    static SELF_MAP_INDEX: AtomicUsize = AtomicUsize::new(NO_SELF_MAP);
+    const NO_SELF_MAP: usize = usize::MAX;
+    const LEGACY_SELF_MAP_INDEX: usize = 0x1ed;
+    const ADDRESS_MASK: u64 = 0x0000_ffff_ffff_f000;
 
     fn sign_extend(address: usize) -> usize {
         (((address << CANONICAL_SPARE_BITS) as isize) >> CANONICAL_SPARE_BITS) as usize
