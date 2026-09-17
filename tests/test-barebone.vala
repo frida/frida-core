@@ -304,6 +304,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/WinNt/maps-out-an-x86-64-kernel-in-live-guest", () => {
+			var h = new SlowHarness ((h) => winnt_maps_out_an_x86_64_kernel_in_live_guest.begin (h as SlowHarness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/WinNt/arm64-agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => winnt_arm64_agent_runs_in_live_guest.begin (h as Harness));
 			h.run ();
@@ -4470,6 +4475,56 @@ FAIL: %s
 			yield debugger.close (null);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		}
+
+		h.done ();
+	}
+
+	private async void winnt_maps_out_an_x86_64_kernel_in_live_guest (SlowHarness h) {
+		string? port = Environment.get_variable ("FRIDA_TEST_WINNT_X86_64_GDB_PORT");
+		if (port == null) {
+			h.done ();
+			return;
+		}
+
+		try {
+			var client = new SocketClient ();
+			var connection = yield client.connect_to_host_async ("127.0.0.1", (uint16) uint.parse (port), null);
+			var debugger = yield Barebone.VirtualBoxStubClient.open (connection, null);
+			assert_true (debugger.arch == Frida.TargetArch.X64);
+			assert_true (debugger.pointer_size == 8);
+
+			var machine = new Barebone.X64Machine (debugger);
+			var layout = yield Barebone.collect_winnt_layout (machine, null);
+
+			Barebone.ModuleInfo? kernel = null;
+			foreach (var m in layout.modules) {
+				if (m.name.down () == "ntoskrnl.exe")
+					kernel = m;
+			}
+			assert_nonnull (kernel);
+
+			assert_true (kernel.offset > uint32.MAX);
+			assert_true (layout.modules.size > 20);
+
+			bool named = false;
+			bool process_list = false;
+			foreach (var sym in layout.symbols) {
+				if (sym.name == "KeBugCheckEx")
+					named = true;
+				if (sym.name == Barebone.PROCESS_LIST_HEAD)
+					process_list = true;
+			}
+			assert_true (named);
+			assert_true (process_list);
+
+			yield debugger.close (null);
+		} catch (GLib.Error e) {
+			printerr ("
+FAIL: %s
+
+", e.message);
 			assert_not_reached ();
 		}
 
