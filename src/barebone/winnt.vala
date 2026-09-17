@@ -18,7 +18,7 @@ namespace Frida.Barebone {
 				size = kernel.size,
 			});
 
-			yield add_export_symbols (machine, kernel, symbols, cancellable);
+			yield add_export_symbols (machine, kernel, anchors.exports, symbols, cancellable);
 		}
 
 		if (anchors.process_list_head != 0) {
@@ -56,22 +56,35 @@ namespace Frida.Barebone {
 
 	private static async Anchors find_anchors (Machine machine, Shape shape, Cancellable? cancellable)
 			throws Error, IOError {
-		if (!processor_control_region_is_reachable (machine.debugger, shape))
-			return yield read_anchors_from_kernel (machine, shape, cancellable);
+		if (processor_control_region_is_reachable (machine.debugger, shape)) {
+			uint64 version_block = yield find_version_block (machine, shape, cancellable);
+			if (version_block != 0) {
+				return new Anchors () {
+					module_list = yield read_loaded_module_list (machine, version_block, shape,
+						cancellable),
+					process_list_head = yield read_process_list_head (machine, version_block, shape,
+						cancellable),
+				};
+			}
+		}
 
-		uint64 version_block = yield find_version_block (machine, shape, cancellable);
-		uint64 module_list = yield read_loaded_module_list (machine, version_block, shape, cancellable);
-		uint64 process_list_head = yield read_process_list_head (machine, version_block, shape, cancellable);
+		return yield read_anchors_from_kernel (machine, shape, cancellable);
+	}
 
-		return new Anchors () {
-			module_list = module_list,
-			process_list_head = process_list_head,
-		};
+	private class KernelImage {
+		public uint64 address;
+		public Gee.List<Export> exports;
+
+		public KernelImage (uint64 address, Gee.List<Export> exports) {
+			this.address = address;
+			this.exports = exports;
+		}
 	}
 
 	private class Anchors {
 		public uint64 module_list;
 		public uint64 process_list_head;
+		public Gee.List<Export>? exports;
 	}
 
 	private static bool processor_control_region_is_reachable (Debugger debugger, Shape shape) {
@@ -82,41 +95,58 @@ namespace Frida.Barebone {
 
 	private static async Anchors read_anchors_from_kernel (Machine machine, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
-		uint64 kernel = yield find_kernel_image (machine, shape, cancellable);
+		KernelImage found = yield find_kernel_image (machine, shape, cancellable);
+		uint64 kernel = found.address;
 
-		uint64 module_list = yield find_export (machine, kernel, LOADED_MODULE_LIST, cancellable);
+		uint64 module_list = 0;
+		foreach (Export e in found.exports) {
+			if (e.name == LOADED_MODULE_LIST) {
+				module_list = kernel + e.rva;
+				break;
+			}
+		}
 		if (!is_kernel_address (module_list, shape))
 			throw new Error.NOT_SUPPORTED ("Unable to find the loaded module list");
-		uint64 process_list_head = yield find_process_list_head (machine, kernel, shape, cancellable);
 
 		return new Anchors () {
 			module_list = module_list,
-			process_list_head = process_list_head,
+			process_list_head = 0,
+			exports = found.exports,
 		};
 	}
 
-	private static async uint64 find_kernel_image (Machine machine, Shape shape, Cancellable? cancellable)
-			throws Error, IOError {
+	private static async KernelImage find_kernel_image (Machine machine, Shape shape,
+			Cancellable? cancellable) throws Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		for (uint attempt = 0; attempt != MAX_CATCH_ATTEMPTS; attempt++) {
 			if (yield stopped_in_kernel_mode (debugger, cancellable)) {
 				DebuggerThread thread = debugger.exception.thread;
-				var visited = new Gee.HashSet<uint64?> ((n) => (uint) (*(uint64 *) n),
-					(a, b) => *(uint64 *) a == *(uint64 *) b);
+				var visited = make_visited ();
+
+				string? entry = system_call_entry_register (debugger);
+				if (entry != null) {
+					uint64 handler = yield thread.read_register (entry, cancellable);
+					if (is_kernel_address (handler, shape)) {
+						KernelImage? image = yield find_image_below (machine, handler, visited,
+							cancellable);
+						if (image != null)
+							return image;
+					}
+				}
 
 				uint64 pc = yield thread.read_register (program_counter_register (debugger), cancellable);
 				if (is_kernel_address (pc, shape)) {
-					uint64 image = yield find_image_below (machine, pc, visited, cancellable);
-					if (image != 0)
+					KernelImage? image = yield find_image_below (machine, pc, visited, cancellable);
+					if (image != null)
 						return image;
 				}
 
 				uint64 seed = yield thread.read_register (image_pointer_register (debugger), cancellable);
 				if (is_kernel_address (seed, shape)) {
-					uint64 image = yield find_image_below_pointers (machine, seed, shape, visited,
-						cancellable);
-					if (image != 0)
+					KernelImage? image = yield find_image_below_pointers (machine, seed, shape,
+						visited, cancellable);
+					if (image != null)
 						return image;
 				}
 			}
@@ -127,6 +157,13 @@ namespace Frida.Barebone {
 		throw new Error.NOT_SUPPORTED ("Unable to find the kernel image");
 	}
 
+	private static string? system_call_entry_register (Debugger debugger) {
+		if (debugger.arch != TargetArch.X64 || !debugger.has_register (SYSTEM_CALL_ENTRY_REGISTER))
+			return null;
+
+		return SYSTEM_CALL_ENTRY_REGISTER;
+	}
+
 	private static string program_counter_register (Debugger debugger) {
 		switch (debugger.arch) {
 			case IA32:	return "eip";
@@ -135,34 +172,59 @@ namespace Frida.Barebone {
 		}
 	}
 
-	private static async uint64 find_image_below (Machine machine, uint64 address, Gee.Set<uint64?> visited,
-			Cancellable? cancellable) throws Error, IOError {
-		uint64 image = address - (address % KERNEL_IMAGE_ALIGNMENT);
+	private static async KernelImage? find_image_below (Machine machine, uint64 address,
+			Gee.Set<uint64?> visited, Cancellable? cancellable) throws Error, IOError {
+		KernelImage? image = yield sweep_for_image_below (machine, address, LARGE_PAGE_SIZE,
+			make_visited (), cancellable);
+		if (image != null)
+			return image;
+
+		return yield sweep_for_image_below (machine, address, KERNEL_IMAGE_ALIGNMENT, visited,
+			cancellable);
+	}
+
+	private static Gee.Set<uint64?> make_visited () {
+		return new Gee.HashSet<uint64?> ((n) => (uint) (*(uint64 *) n),
+			(a, b) => *(uint64 *) a == *(uint64 *) b);
+	}
+
+	private static async KernelImage? sweep_for_image_below (Machine machine, uint64 address,
+			uint64 stride, Gee.Set<uint64?> visited, Cancellable? cancellable) throws Error, IOError {
+		uint64 image = address - (address % stride);
 		for (uint step = 0; step != MAX_IMAGE_STEPS && visited.size != MAX_IMAGE_PROBES; step++,
-				image -= KERNEL_IMAGE_ALIGNMENT) {
+				image -= stride) {
 			if (!visited.add (image))
 				break;
 
-			uint64 module_list;
+			Gee.List<Export> candidate;
 			try {
-				module_list = yield find_export (machine, image, LOADED_MODULE_LIST, cancellable);
+				candidate = yield enumerate_exports (machine, image, cancellable);
 			} catch (Error e) {
 				continue;
 			}
 
+			uint64 module_list = 0;
+			foreach (Export e in candidate) {
+				if (e.name == LOADED_MODULE_LIST) {
+					module_list = image + e.rva;
+					break;
+				}
+			}
+
 			if (module_list != 0)
-				return image;
+				return new KernelImage (image, candidate);
 		}
 
-		return 0;
+		return null;
 	}
 
 	private static string image_pointer_register (Debugger debugger) {
 		return (debugger.arch == TargetArch.ARM64) ? KERNEL_PCR_REGISTER : KERNEL_STACK_REGISTER;
 	}
 
-	private static async uint64 find_image_below_pointers (Machine machine, uint64 seed, Shape shape,
-			Gee.Set<uint64?> visited, Cancellable? cancellable) throws Error, IOError {
+	private static async KernelImage? find_image_below_pointers (Machine machine, uint64 seed,
+			Shape shape, Gee.Set<uint64?> visited, Cancellable? cancellable) throws Error, IOError {
+
 		Debugger debugger = machine.debugger;
 		uint64 seed_page = seed - (seed % PCR_SCAN_SIZE);
 		Buffer page = debugger.make_buffer (yield debugger.read_byte_array (seed_page, PCR_SCAN_SIZE, cancellable));
@@ -172,84 +234,12 @@ namespace Frida.Barebone {
 			if (!is_kernel_address (candidate, shape))
 				continue;
 
-			uint64 image = yield find_image_below (machine, candidate, visited, cancellable);
-			if (image != 0)
+			KernelImage? image = yield find_image_below (machine, candidate, visited, cancellable);
+			if (image != null)
 				return image;
 		}
 
-		return 0;
-	}
-
-	private static async uint64 find_process_list_head (Machine machine, uint64 kernel, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
-		Debugger debugger = machine.debugger;
-
-		uint64 holder = yield find_export (machine, kernel, INITIAL_PROCESS, cancellable);
-		if (!is_kernel_address (holder, shape))
-			return 0;
-
-		uint64 process = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (holder, shape.pointer_size,
-			cancellable)), 0, shape);
-		if (!is_kernel_address (process, shape))
-			return 0;
-
-		uint32 image_size = yield read_image_size (machine, kernel, cancellable);
-		Buffer body = debugger.make_buffer (yield debugger.read_byte_array (process, PROCESS_SCAN_SIZE, cancellable));
-
-		for (size_t offset = 0; offset != PROCESS_SCAN_SIZE - (2 * (size_t) shape.pointer_size);
-				offset += shape.pointer_size) {
-			uint64 node = process + offset;
-			if (!(yield links_back_to (machine, node, read_pointer (body, offset, shape), shape, cancellable)))
-				continue;
-
-			uint64 head = yield walk_to_image (machine, node, kernel, image_size, shape, cancellable);
-			if (head != 0)
-				return head;
-		}
-
-		return 0;
-	}
-
-	private static async bool links_back_to (Machine machine, uint64 node, uint64 forward, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
-		if (!is_kernel_address (forward, shape))
-			return false;
-
-		Debugger debugger = machine.debugger;
-		Buffer neighbour;
-		try {
-			neighbour = debugger.make_buffer (yield debugger.read_byte_array (forward, 2 * shape.pointer_size,
-				cancellable));
-		} catch (Error e) {
-			return false;
-		}
-
-		return read_pointer (neighbour, shape.pointer_size, shape) == node;
-	}
-
-	private static async uint64 walk_to_image (Machine machine, uint64 node, uint64 image, uint32 image_size,
-			Shape shape, Cancellable? cancellable) throws Error, IOError {
-		Debugger debugger = machine.debugger;
-
-		uint64 entry = node;
-		for (uint step = 0; step != MAX_PROCESSES; step++) {
-			Buffer links;
-			try {
-				links = debugger.make_buffer (yield debugger.read_byte_array (entry, shape.pointer_size, cancellable));
-			} catch (Error e) {
-				return 0;
-			}
-
-			entry = read_pointer (links, 0, shape);
-			if (!is_kernel_address (entry, shape))
-				return 0;
-			if (entry == node)
-				return 0;
-			if (entry >= image && entry < image + image_size)
-				return entry;
-		}
-
-		return 0;
+		return null;
 	}
 
 	// The processor control region points to the block that a kernel debugger uses. That block
@@ -259,16 +249,18 @@ namespace Frida.Barebone {
 		Debugger debugger = machine.debugger;
 
 		uint64 pcr_base = yield find_processor_control_region (machine, shape, cancellable);
+		if (pcr_base == 0)
+			return 0;
 
 		Buffer pcr = debugger.make_buffer (yield debugger.read_byte_array (pcr_base,
 			shape.version_block + shape.pointer_size, cancellable));
 		uint64 version_block = read_pointer (pcr, shape.version_block, shape);
 		if (!is_kernel_address (version_block, shape))
-			throw new Error.NOT_SUPPORTED ("Unable to find the kernel debugger version block");
+			return 0;
 
 		Buffer v = debugger.make_buffer (yield debugger.read_byte_array (version_block, VERSION_BLOCK_SIZE, cancellable));
 		if (v.read_uint16 (MACHINE_TYPE_OFFSET) != shape.machine_type)
-			throw new Error.NOT_SUPPORTED ("Kernel is not the architecture the stub reports");
+			return 0;
 
 		return version_block;
 	}
@@ -281,9 +273,7 @@ namespace Frida.Barebone {
 		Debugger debugger = machine.debugger;
 
 		if (shape.pointer_size == 4) {
-			if (yield points_at_itself (machine, PCR_BASE, shape, cancellable))
-				return PCR_BASE;
-			throw new Error.NOT_SUPPORTED ("Unable to find the processor control region");
+			return (yield points_at_itself (machine, PCR_BASE, shape, cancellable)) ? PCR_BASE : 0;
 		}
 
 		for (uint attempt = 0; attempt != MAX_CATCH_ATTEMPTS; attempt++) {
@@ -302,7 +292,7 @@ namespace Frida.Barebone {
 			yield catch_processor_again (debugger, cancellable);
 		}
 
-		throw new Error.NOT_SUPPORTED ("Unable to find the processor control region");
+		return 0;
 	}
 
 	// You can read only the value that GS holds now. Thus continue the guest and try again.
@@ -405,12 +395,17 @@ namespace Frida.Barebone {
 	}
 
 	private static async void add_export_symbols (Machine machine, LoadedModule module,
-			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
+			Gee.List<Export>? known, Gee.List<SymbolInfo> symbols, Cancellable? cancellable)
+			throws Error, IOError {
 		Gee.List<Export> exports;
-		try {
-			exports = yield enumerate_exports (machine, module.base_address, cancellable);
-		} catch (Error e) {
-			return;
+		if (known != null) {
+			exports = known;
+		} else {
+			try {
+				exports = yield enumerate_exports (machine, module.base_address, cancellable);
+			} catch (Error e) {
+				return;
+			}
 		}
 
 		foreach (Export e in exports) {
@@ -520,15 +515,14 @@ namespace Frida.Barebone {
 
 	private const string KERNEL_PCR_REGISTER = "x18";
 	private const string KERNEL_STACK_REGISTER = "rsp";
+	private const string SYSTEM_CALL_ENTRY_REGISTER = "lstar";
 	private const size_t PCR_SCAN_SIZE = 0x1000;
 	private const uint64 KERNEL_IMAGE_ALIGNMENT = 0x10000;
+	private const uint64 LARGE_PAGE_SIZE = 0x200000;
 	private const uint MAX_IMAGE_STEPS = 512;
 	private const uint MAX_IMAGE_PROBES = 4096;
 
 	private const string LOADED_MODULE_LIST = "PsLoadedModuleList";
-	private const string INITIAL_PROCESS = "PsInitialSystemProcess";
-	private const size_t PROCESS_SCAN_SIZE = 0x800;
-	private const uint MAX_PROCESSES = 512;
 
 	private const uint64 RING_MASK = 3;
 	private const uint EXCEPTION_LEVEL_SHIFT = 2;
