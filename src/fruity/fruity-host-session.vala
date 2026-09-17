@@ -1584,7 +1584,7 @@ namespace Frida {
 				yield lldb.close (cancellable);
 			}
 
-			private async void handle_exception (GDB.Exception exception) throws Error, IOError {
+			private async void handle_exception (DebuggerException exception) throws Error, IOError {
 				var e = (Frida.LLDB.Exception) exception;
 
 				var sig = (LLDB.Signal) e.signum;
@@ -1601,7 +1601,7 @@ namespace Frida {
 						switch (action) {
 							case RESUME: {
 								resumed = true;
-								yield lldb.continue (io_cancellable);
+								yield lldb.resume (io_cancellable);
 
 								return;
 							}
@@ -1620,7 +1620,7 @@ namespace Frida {
 								yield thread.write_register ("x0", 0x1337, io_cancellable);
 
 								if (resumed)
-									yield lldb.continue (io_cancellable);
+									yield lldb.resume (io_cancellable);
 								else
 									yield continue_gadget_threads (io_cancellable);
 

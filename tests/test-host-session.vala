@@ -4457,7 +4457,7 @@ namespace Frida.HostSessionTest {
 					var gdb = yield Frida.Barebone.VzStubClient.open (connection);
 
 					printerr ("arch=%s pointer_size=%u\n", gdb.arch.to_nick (), gdb.pointer_size);
-					assert_true (gdb.arch == GDB.TargetArch.ARM64);
+					assert_true (gdb.arch == TargetArch.ARM64);
 					assert_true (gdb.pointer_size == 8);
 					assert_true ("vf-phy-mem-mode" in gdb.features);
 
@@ -4483,7 +4483,7 @@ namespace Frida.HostSessionTest {
 					yield;
 
 					printerr ("[halt] resuming for 1s\n");
-					yield gdb.continue ();
+					yield gdb.resume ();
 					var rsrc = new TimeoutSource (1000);
 					rsrc.set_callback (vz_stub.callback);
 					rsrc.attach (MainContext.get_thread_default ());

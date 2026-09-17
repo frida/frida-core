@@ -26,7 +26,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void settle (Cancellable? cancellable) throws Error, IOError {
-			yield machine.gdb.continue (cancellable);
+			yield machine.debugger.resume (cancellable);
 		}
 	}
 
@@ -72,7 +72,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void settle (Cancellable? cancellable) throws Error, IOError {
-			GDB.Client gdb = machine.gdb;
+			Debugger debugger = machine.debugger;
 
 			// The vphone research kernel panics on any synchronous exception taken while a
 			// debugger is attached, which the worker hits in the allocator during gum_init.
@@ -80,20 +80,20 @@ namespace Frida.Barebone {
 			bool leaving_is_safe = arm64 != null && arm64.physical_memory != null
 				&& Environment.get_variable ("FRIDA_BAREBONE_STAY") == null;
 			if (leaving_is_safe) {
-				yield gdb.detach (cancellable);
+				yield debugger.detach (cancellable);
 				has_left = true;
 			} else {
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 			}
 		}
 
 		private async void run_until_thread_block (uint64 address, Cancellable? cancellable) throws Error, IOError {
-			GDB.Client gdb = machine.gdb;
-			var bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
+			Debugger debugger = machine.debugger;
+			var bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
 
-			GDB.Breakpoint? hit = null;
+			DebuggerBreakpoint? hit = null;
 			do {
-				var exception = yield gdb.continue_until_exception (cancellable);
+				var exception = yield debugger.continue_until_exception (cancellable);
 				hit = exception.breakpoint;
 			} while (hit != bp);
 
@@ -209,7 +209,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void settle (Cancellable? cancellable) throws Error, IOError {
-			yield machine.gdb.continue (cancellable);
+			yield machine.debugger.resume (cancellable);
 		}
 
 		// A task passing voluntarily through the scheduler is a context the agent can be injected
@@ -217,16 +217,16 @@ namespace Frida.Barebone {
 		// scheduler with interrupts masked, and injecting from the idle task deadlocks a sleeping
 		// callee (module_alloc, execmem_alloc), so those hits are skipped and a real task awaited.
 		private async void run_until_schedule (uint64 address, Cancellable? cancellable) throws Error, IOError {
-			GDB.Client gdb = machine.gdb;
-			var bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
+			Debugger debugger = machine.debugger;
+			var bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
 
 			SymbolInfo? system_state = symbols["system_state"];
 			uint64 system_state_address = (system_state != null) ? kernel_base + system_state.offset : 0;
 
-			GDB.Exception? exception = null;
+			DebuggerException? exception = null;
 			bool ready = false;
 			do {
-				exception = yield gdb.continue_until_exception (cancellable);
+				exception = yield debugger.continue_until_exception (cancellable);
 				ready = false;
 				if (exception.breakpoint != bp)
 					continue;
@@ -251,7 +251,7 @@ namespace Frida.Barebone {
 
 		// Linux on arm64 runs with FIQ permanently masked, so only the IRQ mask distinguishes a
 		// sleepable task (interrupts on) from the idle loop and interrupt-context reschedules.
-		private async bool interrupts_masked (GDB.Thread thread, Cancellable? cancellable) throws Error, IOError {
+		private async bool interrupts_masked (DebuggerThread thread, Cancellable? cancellable) throws Error, IOError {
 			if (machine is IA32Machine || machine is X64Machine) {
 				uint64 eflags = yield thread.read_register ("eflags", cancellable);
 				return (eflags & INTERRUPT_ENABLE_BIT) == 0;
@@ -291,25 +291,25 @@ namespace Frida.Barebone {
 		}
 
 		public async void settle (Cancellable? cancellable) throws Error, IOError {
-			yield machine.gdb.continue (cancellable);
+			yield machine.debugger.resume (cancellable);
 		}
 
 		private async void run_until_yield_point (Cancellable? cancellable) throws Error, IOError {
-			GDB.Client gdb = machine.gdb;
-			var bp = yield gdb.add_breakpoint (SOFT, yield_point, 1, cancellable);
+			Debugger debugger = machine.debugger;
+			var bp = yield debugger.add_breakpoint (SOFT, yield_point, 1, cancellable);
 
 			while (true) {
-				var exception = yield gdb.continue_until_exception (cancellable);
-				if (exception.breakpoint == bp && yield stopped_in_ring_zero (gdb, cancellable))
+				var exception = yield debugger.continue_until_exception (cancellable);
+				if (exception.breakpoint == bp && yield stopped_in_ring_zero (debugger, cancellable))
 					break;
 			}
 
 			yield bp.remove (cancellable);
 		}
 
-		private async bool stopped_in_ring_zero (GDB.Client gdb, Cancellable? cancellable)
+		private async bool stopped_in_ring_zero (Debugger debugger, Cancellable? cancellable)
 				throws Error, IOError {
-			uint64 cs = yield gdb.exception.thread.read_register ("cs", cancellable);
+			uint64 cs = yield debugger.exception.thread.read_register ("cs", cancellable);
 
 			return (cs & RING_MASK) == 0;
 		}
@@ -352,24 +352,24 @@ namespace Frida.Barebone {
 		}
 
 		public async void settle (Cancellable? cancellable) throws Error, IOError {
-			yield machine.gdb.continue (cancellable);
+			yield machine.debugger.resume (cancellable);
 		}
 
 		private async void run_until_yield_point (Cancellable? cancellable) throws Error, IOError {
-			GDB.Client gdb = machine.gdb;
-			var bp = yield gdb.add_breakpoint (SOFT, yield_point, breakpoint_size_for (gdb), cancellable);
+			Debugger debugger = machine.debugger;
+			var bp = yield debugger.add_breakpoint (SOFT, yield_point, breakpoint_size_for (debugger), cancellable);
 
 			while (true) {
-				var exception = yield gdb.continue_until_exception (cancellable);
-				if (exception.breakpoint == bp && yield stopped_in_kernel_mode (gdb, cancellable))
+				var exception = yield debugger.continue_until_exception (cancellable);
+				if (exception.breakpoint == bp && yield stopped_in_kernel_mode (debugger, cancellable))
 					break;
 			}
 
 			yield bp.remove (cancellable);
 		}
 
-		private static size_t breakpoint_size_for (GDB.Client gdb) {
-			return (gdb.arch == GDB.TargetArch.ARM64) ? 4 : 1;
+		private static size_t breakpoint_size_for (Debugger debugger) {
+			return (debugger.arch == TargetArch.ARM64) ? 4 : 1;
 		}
 	}
 }

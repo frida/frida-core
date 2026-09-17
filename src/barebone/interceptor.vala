@@ -11,13 +11,13 @@ namespace Frida.Barebone {
 			construct;
 		}
 
-		public GDB.Breakpoint.Kind breakpoint_kind {
+		public BreakpointKind breakpoint_kind {
 			get;
 			set;
 			default = SOFT;
 		}
 
-		private GDB.Client gdb;
+		private Debugger debugger;
 
 		private Gee.Map<uint64?, BreakpointEntry> breakpoint_entries =
 			new Gee.HashMap<uint64?, BreakpointEntry> (Numeric.uint64_hash, Numeric.uint64_equal);
@@ -37,12 +37,12 @@ namespace Frida.Barebone {
 		}
 
 		construct {
-			gdb = machine.gdb;
-			gdb.notify["state"].connect (on_gdb_state_changed);
+			debugger = machine.debugger;
+			debugger.notify["state"].connect (on_gdb_state_changed);
 		}
 
 		~Interceptor () {
-			gdb.notify["state"].disconnect (on_gdb_state_changed);
+			debugger.notify["state"].disconnect (on_gdb_state_changed);
 		}
 
 		public async void attach (uint64 target, BreakpointInvocationListener listener, Cancellable? cancellable)
@@ -61,7 +61,7 @@ namespace Frida.Barebone {
 
 			if (entry.listeners.size == 1) {
 				try {
-					entry.breakpoint = yield gdb.add_breakpoint (breakpoint_kind, address,
+					entry.breakpoint = yield debugger.add_breakpoint (breakpoint_kind, address,
 						machine.breakpoint_size_from_funcptr (target), cancellable);
 				} catch (GLib.Error e) {
 					breakpoint_entries.unset (address);
@@ -123,21 +123,21 @@ namespace Frida.Barebone {
 		}
 
 		private void on_gdb_state_changed (Object object, ParamSpec pspec) {
-			if (gdb.state != STOPPED)
+			if (debugger.state != STOPPED)
 				return;
 
-			GDB.Exception? exception = gdb.exception;
+			DebuggerException? exception = debugger.exception;
 			if (exception == null)
 				return;
 
-			GDB.Breakpoint? bp = exception.breakpoint;
+			DebuggerBreakpoint? bp = exception.breakpoint;
 			if (bp == null)
 				return;
 
 			handle_breakpoint_hit.begin (bp, exception.thread);
 		}
 
-		private async void handle_breakpoint_hit (GDB.Breakpoint bp, GDB.Thread thread) throws Error, IOError {
+		private async void handle_breakpoint_hit (DebuggerBreakpoint bp, DebuggerThread thread) throws Error, IOError {
 			uint64 address = bp.address;
 
 			BreakpointEntry? entry = breakpoint_entries[address];
@@ -153,7 +153,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async void handle_invocation (BreakpointEntry entry, GDB.Breakpoint bp, GDB.Thread thread) throws Error, IOError {
+		private async void handle_invocation (BreakpointEntry entry, DebuggerBreakpoint bp, DebuggerThread thread) throws Error, IOError {
 			unowned string tid = thread.id;
 			CallStack? call_stack = call_stacks[tid];
 			if (call_stack == null) {
@@ -178,7 +178,7 @@ namespace Frida.Barebone {
 				uint64 return_address = machine.address_from_funcptr (return_target);
 				if (!pending_returns.contains (return_address)) {
 					try {
-						yield gdb.add_breakpoint (breakpoint_kind, return_address,
+						yield debugger.add_breakpoint (breakpoint_kind, return_address,
 							machine.breakpoint_size_from_funcptr (return_target), io_cancellable);
 					} catch (GLib.Error e) {
 						can_trap_on_leave = false;
@@ -193,7 +193,7 @@ namespace Frida.Barebone {
 			yield continue_from_breakpoint (bp, thread);
 		}
 
-		private async void handle_return (CallStack call_stack, GDB.Breakpoint bp, GDB.Thread thread) throws Error, IOError {
+		private async void handle_return (CallStack call_stack, DebuggerBreakpoint bp, DebuggerThread thread) throws Error, IOError {
 			var frame = yield machine.load_call_frame (thread, 0, io_cancellable);
 
 			uint64 return_address = machine.address_from_funcptr (frame.return_address);
@@ -216,21 +216,21 @@ namespace Frida.Barebone {
 				yield continue_from_breakpoint (bp, thread);
 			} else {
 				yield bp.remove (io_cancellable);
-				yield gdb.continue (io_cancellable);
+				yield debugger.resume (io_cancellable);
 			}
 		}
 
-		private async void continue_from_breakpoint (GDB.Breakpoint bp, GDB.Thread thread) throws Error, IOError {
+		private async void continue_from_breakpoint (DebuggerBreakpoint bp, DebuggerThread thread) throws Error, IOError {
 			yield bp.disable (io_cancellable);
 			yield thread.step (io_cancellable);
 			yield bp.enable (io_cancellable);
-			yield gdb.continue (io_cancellable);
+			yield debugger.resume (io_cancellable);
 		}
 
 		private class BreakpointEntry {
 			public Gee.List<BreakpointInvocationListener> listeners = new Gee.ArrayList<BreakpointInvocationListener> ();
 			public bool has_call_listener = false;
-			public GDB.Breakpoint? breakpoint;
+			public DebuggerBreakpoint? breakpoint;
 		}
 
 		private class CallStack {
@@ -275,10 +275,10 @@ namespace Frida.Barebone {
 			}
 
 			private CallFrame frame;
-			private GDB.Thread thread;
+			private DebuggerThread thread;
 			private uint _depth;
 
-			public BreakpointInvocationContext (CallFrame frame, GDB.Thread thread, uint depth) {
+			public BreakpointInvocationContext (CallFrame frame, DebuggerThread thread, uint depth) {
 				this.frame = frame;
 				this.thread = thread;
 				this._depth = depth;

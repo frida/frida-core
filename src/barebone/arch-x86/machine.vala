@@ -1,7 +1,7 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class IA32Machine : Object, Machine {
-		public override GDB.Client gdb {
+		public override Debugger debugger {
 			get;
 			set;
 		}
@@ -25,10 +25,10 @@ namespace Frida.Barebone {
 
 		private X86PageTables page_tables;
 
-		public IA32Machine (GDB.Client gdb) {
-			Object (gdb: gdb);
+		public IA32Machine (Debugger debugger) {
+			Object (debugger: debugger);
 
-			page_tables = new X86PageTables (gdb);
+			page_tables = new X86PageTables (debugger);
 		}
 
 		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
@@ -43,10 +43,10 @@ namespace Frida.Barebone {
 		private const uint64 USER_PRIVILEGE = 3;
 
 		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
-			GDB.Exception? exception = gdb.exception;
+			DebuggerException? exception = debugger.exception;
 			if (exception == null)
 				throw new Error.INVALID_OPERATION ("Unable to query in current state");
-			GDB.Thread thread = exception.thread;
+			DebuggerThread thread = exception.thread;
 
 			var cs = yield thread.read_register ("cs", cancellable);
 
@@ -88,7 +88,7 @@ namespace Frida.Barebone {
 					// A range from a script can include memory that the guest paged out.
 					Bytes chunk;
 					try {
-						chunk = yield gdb.read_byte_array (cursor, chunk_size, cancellable);
+						chunk = yield debugger.read_byte_array (cursor, chunk_size, cancellable);
 					} catch (Error e) {
 						cursor += chunk_size;
 						continue;
@@ -137,11 +137,11 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
-			bool was_running = gdb.state != STOPPED;
+			bool was_running = debugger.state != STOPPED;
 			if (was_running)
-				yield gdb.stop (cancellable);
+				yield debugger.stop (cancellable);
 
-			GDB.Thread thread = gdb.exception.thread;
+			DebuggerThread thread = debugger.exception.thread;
 			Gee.Map<string, Variant> saved_regs = yield thread.read_registers (cancellable);
 
 			var regs = new Gee.HashMap<string, Variant> ();
@@ -155,11 +155,11 @@ namespace Frida.Barebone {
 			uint64 sp = saved_regs["esp"].get_uint64 () - ((1 + on_stack) * 4);
 			sp = (sp & ~15ULL) - 4;
 
-			var builder = gdb.make_buffer_builder ();
+			var builder = debugger.make_buffer_builder ();
 			builder.append_uint32 ((uint32) landing_zone);
 			for (uint i = in_registers; i != args.length; i++)
 				builder.append_uint32 ((uint32) args[i]);
-			yield gdb.write_byte_array (sp, builder.build (), cancellable);
+			yield debugger.write_byte_array (sp, builder.build (), cancellable);
 
 			for (uint i = 0; i != in_registers; i++)
 				regs[ARGUMENT_REGISTERS[i]] = args[i];
@@ -172,10 +172,10 @@ namespace Frida.Barebone {
 			// The position in the stack depends on the callee, which can remove the arguments.
 			uint64 first_landing_sp = sp + 4;
 			uint64 last_landing_sp = sp + ((1 + args.length) * 4);
-			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone, 1, cancellable);
-			GDB.Exception ex = null;
+			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, landing_zone, 1, cancellable);
+			DebuggerException ex = null;
 			while (true) {
-				ex = yield gdb.continue_until_exception (cancellable);
+				ex = yield debugger.continue_until_exception (cancellable);
 				if (ex.breakpoint != bp)
 					continue;
 				uint64 landed_sp = yield ex.thread.read_register ("esp", cancellable);
@@ -184,22 +184,22 @@ namespace Frida.Barebone {
 			}
 			yield bp.remove (cancellable);
 
-			GDB.Thread landed = ex.thread;
+			DebuggerThread landed = ex.thread;
 			uint64 retval = yield landed.read_register ("eax", cancellable);
 
 			yield landed.write_registers (saved_regs, cancellable);
 
 			if (was_running)
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 
 			return retval;
 		}
 
-		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
+		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
 			uint64 original_esp = regs["esp"].get_uint64 ();
-			var stack = yield gdb.read_buffer (original_esp, (1 + arity) * 4, cancellable);
+			var stack = yield debugger.read_buffer (original_esp, (1 + arity) * 4, cancellable);
 
 			return new IA32CallFrame (thread, regs, stack, original_esp);
 		}
@@ -213,7 +213,7 @@ namespace Frida.Barebone {
 				get { return regs; }
 			}
 
-			private GDB.Thread thread;
+			private DebuggerThread thread;
 
 			private Gee.Map<string, Variant> regs;
 
@@ -226,7 +226,7 @@ namespace Frida.Barebone {
 				MODIFIED
 			}
 
-			public IA32CallFrame (GDB.Thread thread, Gee.Map<string, Variant> regs, Buffer stack, uint64 original_esp) {
+			public IA32CallFrame (DebuggerThread thread, Gee.Map<string, Variant> regs, Buffer stack, uint64 original_esp) {
 				this.thread = thread;
 
 				this.regs = regs;
@@ -289,7 +289,7 @@ namespace Frida.Barebone {
 					yield thread.write_registers (regs, cancellable);
 
 				if (stack_state == MODIFIED)
-					yield thread.client.write_byte_array (original_esp, stack.bytes, cancellable);
+					yield thread.debugger.write_byte_array (original_esp, stack.bytes, cancellable);
 			}
 		}
 
@@ -303,7 +303,7 @@ namespace Frida.Barebone {
 
 		public async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator, Cancellable? cancellable)
 				throws Error, IOError {
-			return yield X86InlineHook.create (target, handler, IA32, allocator, gdb, cancellable);
+			return yield X86InlineHook.create (target, handler, IA32, allocator, debugger, cancellable);
 		}
 
 		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {

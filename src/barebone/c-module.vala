@@ -53,7 +53,7 @@ namespace Frida.Barebone {
 			});
 
 			if (console_log_trap != 0) {
-				var handler = new ConsoleLogHandler (machine.gdb);
+				var handler = new ConsoleLogHandler (machine.debugger);
 				handler.output.connect (on_console_output);
 				console_log_callback = yield new Callback (console_log_trap, handler, machine, cancellable);
 			}

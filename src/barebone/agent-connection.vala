@@ -104,9 +104,9 @@ namespace Frida.Barebone {
 
 			var transport_tag = yield resolve_transport (cancellable);
 
-			var gdb = machine.gdb;
-			byte_order = gdb.byte_order;
-			pointer_size = gdb.pointer_size;
+			var debugger = machine.debugger;
+			byte_order = debugger.byte_order;
+			pointer_size = debugger.pointer_size;
 
 			// Only a kernel shipped as an image carries its symbols in it; the rest name theirs
 			// elsewhere, and the layout is collected before this.
@@ -190,7 +190,7 @@ namespace Frida.Barebone {
 				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 
-			var raw_elf = gdb.make_buffer (new Bytes (elf.get_file_data ()));
+			var raw_elf = debugger.make_buffer (new Bytes (elf.get_file_data ()));
 			// Slots whose symbol is absent on this kernel are left zero; the agent's
 			// xnu.rs uses Option<fn> and falls back across per-kernel name variants.
 			elf.enumerate_symbols (s => {
@@ -535,7 +535,7 @@ namespace Frida.Barebone {
 			yield;
 			timeout.destroy ();
 
-			yield machine.gdb.stop (cancellable);
+			yield machine.debugger.stop (cancellable);
 
 			yield flavor.prepare (cancellable);
 
@@ -556,12 +556,12 @@ namespace Frida.Barebone {
 			if (left_flag == 0)
 				return;
 
-			var gdb = machine.gdb;
+			var debugger = machine.debugger;
 			for (uint attempt = 0; attempt != LEAVE_MAX_ATTEMPTS; attempt++) {
-				yield gdb.stop (cancellable);
-				var flag = gdb.make_buffer (yield gdb.read_byte_array (left_flag, 4, cancellable));
+				yield debugger.stop (cancellable);
+				var flag = debugger.make_buffer (yield debugger.read_byte_array (left_flag, 4, cancellable));
 				bool left = flag.read_uint32 (0) != 0;
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 				if (left) {
 					yield give_the_memory_back (cancellable);
 					return;
@@ -1049,13 +1049,13 @@ namespace Frida.Barebone {
 			if (fault_record == 0)
 				return null;
 
-			var gdb = machine.gdb;
+			var debugger = machine.debugger;
 			Buffer record;
 			try {
-				yield gdb.stop (cancellable);
-				record = gdb.make_buffer (yield gdb.read_byte_array (fault_record, FAULT_RECORD_SIZE,
+				yield debugger.stop (cancellable);
+				record = debugger.make_buffer (yield debugger.read_byte_array (fault_record, FAULT_RECORD_SIZE,
 					cancellable));
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 			} catch (GLib.Error e) {
 				return null;
 			}
@@ -1157,7 +1157,7 @@ namespace Frida.Barebone {
 					} else if (command_code == Command.REMAP_WRITABLE_PAGES ||
 							command_code == Command.MEMORY_PROTECT ||
 							command_code == Command.PATCH_CODE) {
-						bool was_running = yield halt_guest (machine.gdb, io_cancellable);
+						bool was_running = yield halt_guest (machine.debugger, io_cancellable);
 
 						Variant result;
 						try {
@@ -1173,7 +1173,7 @@ namespace Frida.Barebone {
 								: new Variant.boolean (false);
 						}
 
-						yield resume_guest (machine.gdb, was_running, io_cancellable);
+						yield resume_guest (machine.debugger, was_running, io_cancellable);
 
 						yield send_reply (request_id, result);
 					} else if (command_code == Command.REPLY) {

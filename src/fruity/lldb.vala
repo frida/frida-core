@@ -363,7 +363,7 @@ namespace Frida.LLDB {
 		}
 
 		protected override async void parse_stop (uint signum, GDB.Client.PropertyDictionary properties,
-				out GDB.Exception exception, out GDB.Breakpoint? breakpoint) throws Error, IOError {
+				out DebuggerException exception, out GDB.Breakpoint? breakpoint) throws Error, IOError {
 			var sig = (Signal) signum;
 
 			MachExceptionType metype = NONE;
@@ -731,7 +731,7 @@ namespace Frida.LLDB {
 		}
 	}
 
-	public sealed class Exception : GDB.Exception {
+	public sealed class Exception : DebuggerException {
 		public MachExceptionType metype {
 			get;
 			construct;
@@ -747,7 +747,7 @@ namespace Frida.LLDB {
 			construct;
 		}
 
-		public Exception (Signal signum, MachExceptionType metype, Gee.ArrayList<uint64?> medata, GDB.Breakpoint? breakpoint,
+		public Exception (Signal signum, MachExceptionType metype, Gee.ArrayList<uint64?> medata, DebuggerBreakpoint? breakpoint,
 				Thread thread, Gee.HashMap<string, uint64?> context) {
 			Object (
 				signum: signum,

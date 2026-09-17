@@ -1,6 +1,6 @@
 [CCode (gir_namespace = "FridaGDB", gir_version = "1.0")]
 namespace Frida.GDB {
-	public class Client : Object, AsyncInitable {
+	public class Client : Object, AsyncInitable, Debugger {
 		public signal void closed ();
 		public signal void console_output (Bytes bytes);
 
@@ -27,13 +27,13 @@ namespace Frida.GDB {
 			default = HOST;
 		}
 
-		public State state {
+		public DebuggerState state {
 			get {
 				return _state;
 			}
 		}
 
-		public Exception? exception {
+		public DebuggerException? exception {
 			get {
 				return _exception;
 			}
@@ -49,9 +49,9 @@ namespace Frida.GDB {
 		private OutputStream output;
 		private Cancellable io_cancellable = new Cancellable ();
 
-		private State _state = STOPPED;
-		private Exception? _exception;
-		private Exception? breakpoint_exception;
+		private DebuggerState _state = STOPPED;
+		private DebuggerException? _exception;
+		private DebuggerException? breakpoint_exception;
 		private Gee.List<StopObserverEntry> on_stop = new Gee.ArrayList<StopObserverEntry> ();
 		private size_t max_packet_size = 1024;
 		private AckMode ack_mode = SEND_ACKS;
@@ -88,17 +88,6 @@ namespace Frida.GDB {
 			(n) => { return int64_hash ((int64?) n); },
 			(a, b) => { return int64_equal ((int64?) a, (int64?) b); }
 		);
-
-		public enum State {
-			STOPPED,
-			RUNNING,
-			STOPPING,
-			CLOSED;
-
-			public string to_nick () {
-				return Marshal.enum_to_nick<State> (this);
-			}
-		}
 
 		private enum MessageHandling {
 			SEND_ACKS,
@@ -263,7 +252,7 @@ namespace Frida.GDB {
 		protected virtual async void enable_extensions (Cancellable? cancellable) throws Error, IOError {
 		}
 
-		private void change_state (State new_state, Exception? new_exception = null) {
+		private void change_state (DebuggerState new_state, DebuggerException? new_exception = null) {
 			bool state_differs = new_state != _state;
 			if (state_differs)
 				_state = new_state;
@@ -304,7 +293,7 @@ namespace Frida.GDB {
 			}
 		}
 
-		public async void continue (Cancellable? cancellable = null) throws Error, IOError {
+		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
 			check_stopped ();
 
 			var exception = breakpoint_exception;
@@ -343,13 +332,13 @@ namespace Frida.GDB {
 			write_bytes (command.build ());
 		}
 
-		public async Exception continue_until_exception (Cancellable? cancellable = null) throws Error, IOError {
+		public async DebuggerException continue_until_exception (Cancellable? cancellable = null) throws Error, IOError {
 			check_stopped ();
 
 			clear_current_exception ();
 
 			if (breakpoint_exception != null)
-				yield continue (cancellable);
+				yield resume (cancellable);
 
 			if (_exception != null)
 				return _exception;
@@ -373,7 +362,7 @@ namespace Frida.GDB {
 
 			try {
 				if (state == STOPPED)
-					yield continue (cancellable);
+					yield resume (cancellable);
 
 				if (state != STOPPED) {
 					waiting = true;
@@ -653,7 +642,8 @@ namespace Frida.GDB {
 			return make_buffer (bytes);
 		}
 
-		public async Breakpoint add_breakpoint (Breakpoint.Kind kind, uint64 address, size_t size, Cancellable? cancellable = null)
+		public async DebuggerBreakpoint add_breakpoint (BreakpointKind kind, uint64 address, size_t size,
+				Cancellable? cancellable = null)
 				throws Error, IOError {
 			check_stopped ();
 
@@ -675,6 +665,17 @@ namespace Frida.GDB {
 			var exception = breakpoint_exception;
 			if (exception != null && exception.breakpoint == breakpoint)
 				breakpoint_exception = null;
+		}
+
+		public async void set_physical_memory_mode (bool enabled, Cancellable? cancellable = null)
+				throws Error, IOError {
+			string val = enabled ? "1" : "0";
+			if ("qemu-phy-mem-mode" in supported_features)
+				yield execute_simple ("Qqemu.PhyMemMode:" + val, cancellable);
+			else if ("vf-phy-mem-mode" in supported_features)
+				yield execute_simple ("Qvf.PhyMemMode:" + val, cancellable);
+			else
+				throw new Error.NOT_SUPPORTED ("Unsupported GDB remote stub; please file a bug");
 		}
 
 		public async string run_remote_command (string command, Cancellable? cancellable = null) throws Error, IOError {
@@ -991,7 +992,7 @@ namespace Frida.GDB {
 			return reg;
 		}
 
-		internal bool has_register (string name) {
+		public bool has_register (string name) {
 			return register_by_name.has_key (name);
 		}
 
@@ -1284,7 +1285,7 @@ namespace Frida.GDB {
 			unowned string rest = (string) ((char *) data + 2);
 			var properties = PropertyDictionary.parse (rest);
 
-			Exception exception;
+			DebuggerException exception;
 			Breakpoint? breakpoint;
 			yield parse_stop (signum, properties, out exception, out breakpoint);
 
@@ -1294,7 +1295,7 @@ namespace Frida.GDB {
 				observer.func ();
 		}
 
-		protected virtual async void parse_stop (uint signum, PropertyDictionary properties, out Exception exception,
+		protected virtual async void parse_stop (uint signum, PropertyDictionary properties, out DebuggerException exception,
 				out Breakpoint? breakpoint) throws Error, IOError {
 			string thread_id;
 			if (properties.has ("thread")) {
@@ -1335,7 +1336,7 @@ namespace Frida.GDB {
 				breakpoint = null;
 			}
 
-			exception = new Exception (signum, breakpoint, thread);
+			exception = new DebuggerException (signum, breakpoint, thread);
 		}
 
 		private void handle_output (string hex_bytes) throws Error {
@@ -1904,24 +1905,7 @@ namespace Frida.GDB {
 		}
 	}
 
-	public enum TargetArch {
-		UNKNOWN,
-		IA32,
-		X64,
-		ARM,
-		ARM64,
-		MIPS;
-
-		public static TargetArch from_nick (string nick) throws Error {
-			return Marshal.enum_from_nick<TargetArch> (nick);
-		}
-
-		public string to_nick () {
-			return Marshal.enum_to_nick<TargetArch> (this);
-		}
-	}
-
-	public class Thread : Object {
+	public class Thread : Object, DebuggerThread {
 		public string id {
 			get;
 			construct;
@@ -1935,6 +1919,12 @@ namespace Frida.GDB {
 		public weak Client client {
 			get;
 			construct;
+		}
+
+		public Debugger debugger {
+			get {
+				return client;
+			}
 		}
 
 		public Thread (string id, string? name, Client client) {
@@ -2110,39 +2100,10 @@ namespace Frida.GDB {
 		}
 	}
 
-	public class Exception : Object {
-		public uint signum {
-			get;
-			construct;
-		}
-
-		public Breakpoint? breakpoint {
-			get;
-			construct;
-		}
-
-		public Thread thread {
-			get;
-			construct;
-		}
-
-		public Exception (uint signum, Breakpoint? breakpoint, Thread thread) {
-			Object (
-				signum: signum,
-				breakpoint: breakpoint,
-				thread: thread
-			);
-		}
-
-		public virtual string to_string () {
-			return "signum=%u".printf (signum);
-		}
-	}
-
-	public sealed class Breakpoint : Object {
+	public sealed class Breakpoint : Object, DebuggerBreakpoint {
 		public signal void removed ();
 
-		public Kind kind {
+		public BreakpointKind kind {
 			get;
 			construct;
 		}
@@ -2162,22 +2123,6 @@ namespace Frida.GDB {
 			construct;
 		}
 
-		public enum Kind {
-			SOFT,
-			HARD,
-			WRITE,
-			READ,
-			ACCESS;
-
-			public static Kind from_nick (string nick) throws Error {
-				return Marshal.enum_from_nick<Kind> (nick);
-			}
-
-			public string to_nick () {
-				return Marshal.enum_to_nick<Kind> (this);
-			}
-		}
-
 		private enum State {
 			DISABLED,
 			ENABLED
@@ -2185,7 +2130,7 @@ namespace Frida.GDB {
 
 		private State state = DISABLED;
 
-		public Breakpoint (Kind kind, uint64 address, size_t size, Client client) {
+		public Breakpoint (BreakpointKind kind, uint64 address, size_t size, Client client) {
 			Object (
 				kind: kind,
 				address: address,

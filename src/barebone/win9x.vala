@@ -96,12 +96,12 @@ namespace Frida.Barebone {
 
 			Bytes raw;
 			try {
-				raw = yield machine.gdb.read_byte_array (address, DDB_SIZE, cancellable);
+				raw = yield machine.debugger.read_byte_array (address, DDB_SIZE, cancellable);
 			} catch (Error e) {
 				break;
 			}
 
-			Buffer buf = machine.gdb.make_buffer (raw);
+			Buffer buf = machine.debugger.make_buffer (raw);
 			DeviceDescriptorBlock? ddb = DeviceDescriptorBlock.parse_linked (buf, address);
 			if (ddb == null)
 				break;
@@ -132,11 +132,11 @@ namespace Frida.Barebone {
 	// machine would walk the full address space, which costs more than the sweep.
 	private static async Gee.List<Gum.MemoryRange?> find_resident_runs (Machine machine, uint64 base_va,
 			uint64 span, Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		Buffer entries;
 		try {
-			entries = gdb.make_buffer (yield gdb.read_byte_array (
+			entries = debugger.make_buffer (yield debugger.read_byte_array (
 				PAGE_TABLES_BASE + (base_va >> 22) * PAGE_SIZE, PAGE_SIZE, cancellable));
 		} catch (Error e) {
 			return yield collect_runs_from_machine (machine, base_va, span, cancellable);
@@ -182,7 +182,7 @@ namespace Frida.Barebone {
 			uint64 size, Cancellable? cancellable) throws Error, IOError {
 		var candidates = new Gee.ArrayList<DeviceDescriptorBlock> ();
 
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 		for (uint64 offset = 0; offset < size; offset += SCAN_CHUNK_SIZE) {
 			uint64 chunk_start = base_va + offset;
 			uint64 remaining = size - offset;
@@ -191,12 +191,12 @@ namespace Frida.Barebone {
 
 			Bytes chunk;
 			try {
-				chunk = yield gdb.read_byte_array (chunk_start, readable_size, cancellable);
+				chunk = yield debugger.read_byte_array (chunk_start, readable_size, cancellable);
 			} catch (Error e) {
 				continue;
 			}
 
-			Buffer buf = gdb.make_buffer (chunk);
+			Buffer buf = debugger.make_buffer (chunk);
 			for (size_t pos = 0; pos < claimed_size && pos + DDB_SIZE <= readable_size; pos += 4) {
 				DeviceDescriptorBlock? ddb = DeviceDescriptorBlock.parse (buf, pos, chunk_start + pos);
 				if (ddb != null)
@@ -222,15 +222,15 @@ namespace Frida.Barebone {
 		if (loader == null || loader.service_count <= GET_DEVICE_LIST_ORDINAL)
 			return images;
 
-		GDB.Client gdb = machine.gdb;
-		uint64 getter = gdb.make_buffer (yield gdb.read_byte_array (
+		Debugger debugger = machine.debugger;
+		uint64 getter = debugger.make_buffer (yield debugger.read_byte_array (
 			loader.service_table + GET_DEVICE_LIST_ORDINAL * 4, 4, cancellable)).read_uint32 (0);
 
-		Buffer code = gdb.make_buffer (yield gdb.read_byte_array (getter, 5, cancellable));
+		Buffer code = debugger.make_buffer (yield debugger.read_byte_array (getter, 5, cancellable));
 		if (code.read_uint8 (0) != LOAD_EAX_ABSOLUTE)
 			return images;
 
-		uint64 head = gdb.make_buffer (yield gdb.read_byte_array (code.read_uint32 (1), 4, cancellable))
+		uint64 head = debugger.make_buffer (yield debugger.read_byte_array (code.read_uint32 (1), 4, cancellable))
 			.read_uint32 (0);
 
 		uint64 record = head;
@@ -238,13 +238,13 @@ namespace Frida.Barebone {
 		while (is_arena_address (record) && !visited.contains (record)) {
 			visited.add (record);
 
-			Buffer r = gdb.make_buffer (yield gdb.read_byte_array (record, LOADER_RECORD_SIZE, cancellable));
+			Buffer r = debugger.make_buffer (yield debugger.read_byte_array (record, LOADER_RECORD_SIZE, cancellable));
 			uint64 ddb_address = r.read_uint32 (LOADER_DDB_OFFSET);
 			uint objects = r.read_uint8 (LOADER_OBJECT_COUNT_OFFSET);
 			uint64 table = r.read_uint32 (LOADER_OBJECT_TABLE_OFFSET);
 
 			if (objects != 0 && is_arena_address (table)) {
-				Buffer entries = gdb.make_buffer (yield gdb.read_byte_array (table,
+				Buffer entries = debugger.make_buffer (yield debugger.read_byte_array (table,
 					objects * LOADER_OBJECT_SIZE, cancellable));
 				for (uint i = 0; i != objects; i++) {
 					uint64 object_base = entries.read_uint32 (i * LOADER_OBJECT_SIZE);
@@ -312,18 +312,18 @@ namespace Frida.Barebone {
 	// first instruction loads the obfuscator.
 	private static async uint64 find_process_id_obfuscator (Machine machine, uint64 kernel32,
 			Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		uint64 getter = yield find_export (machine, kernel32, "GetCurrentProcessId", cancellable);
 		if (getter == 0)
 			return 0;
 
-		Buffer code = gdb.make_buffer (yield gdb.read_byte_array (getter, 12, cancellable));
+		Buffer code = debugger.make_buffer (yield debugger.read_byte_array (getter, 12, cancellable));
 		if (code.read_uint8 (0) != LOAD_EAX_ABSOLUTE || code.read_uint8 (7) != CALL_RELATIVE)
 			return 0;
 		uint64 helper = getter + 12 + code.read_uint32 (8);
 
-		Buffer body = gdb.make_buffer (yield gdb.read_byte_array (helper, 5, cancellable));
+		Buffer body = debugger.make_buffer (yield debugger.read_byte_array (helper, 5, cancellable));
 		if (body.read_uint8 (0) != LOAD_EAX_ABSOLUTE)
 			return 0;
 
@@ -334,13 +334,13 @@ namespace Frida.Barebone {
 	// at MODREF+0x10, which is the one instruction pair worth recognising.
 	private static async uint64 find_module_table (Machine machine, uint64 kernel32, Cancellable? cancellable)
 			throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		uint64 thunk = yield find_export (machine, kernel32, "GetModuleFileNameA", cancellable);
 		if (thunk == 0)
 			return 0;
 
-		Buffer prologue = gdb.make_buffer (yield gdb.read_byte_array (thunk, 0x40, cancellable));
+		Buffer prologue = debugger.make_buffer (yield debugger.read_byte_array (thunk, 0x40, cancellable));
 		uint64 body = 0;
 		for (size_t i = 0; i != 0x40 - 5; i++) {
 			if (prologue.read_uint8 (i) == JUMP_RELATIVE) {
@@ -351,7 +351,7 @@ namespace Frida.Barebone {
 		if (body == 0)
 			return 0;
 
-		Buffer code = gdb.make_buffer (yield gdb.read_byte_array (body, 0x100, cancellable));
+		Buffer code = debugger.make_buffer (yield debugger.read_byte_array (body, 0x100, cancellable));
 		for (size_t i = 0; i != 0x100 - INDEX_MODULE_TABLE.length - 4; i++) {
 			bool matched = true;
 			for (size_t j = 0; j != INDEX_MODULE_TABLE.length; j++) {
@@ -379,8 +379,8 @@ namespace Frida.Barebone {
 
 	private static async Gee.List<uint64?> read_service_table (Machine machine, DeviceDescriptorBlock ddb,
 			Cancellable? cancellable) throws Error, IOError {
-		Bytes raw = yield machine.gdb.read_byte_array (ddb.service_table, ddb.service_count * 4, cancellable);
-		Buffer buf = machine.gdb.make_buffer (raw);
+		Bytes raw = yield machine.debugger.read_byte_array (ddb.service_table, ddb.service_count * 4, cancellable);
+		Buffer buf = machine.debugger.make_buffer (raw);
 
 		var addresses = new Gee.ArrayList<uint64?> ();
 		for (uint i = 0; i != ddb.service_count; i++)
@@ -440,11 +440,11 @@ namespace Frida.Barebone {
 		public async bool is_credible (Machine machine, Cancellable? cancellable) throws Error, IOError {
 			Bytes first_entry;
 			try {
-				first_entry = yield machine.gdb.read_byte_array (service_table, 4, cancellable);
+				first_entry = yield machine.debugger.read_byte_array (service_table, 4, cancellable);
 			} catch (Error e) {
 				return false;
 			}
-			return is_arena_address (machine.gdb.make_buffer (first_entry).read_uint32 (0));
+			return is_arena_address (machine.debugger.make_buffer (first_entry).read_uint32 (0));
 		}
 
 		private static string? parse_name (Buffer buf, size_t offset) {

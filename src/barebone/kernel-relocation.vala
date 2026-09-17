@@ -35,31 +35,31 @@ namespace Frida.Barebone {
 
 		public static async KernelRelocation compute (Machine machine, Bytes kernelcache_blob,
 				uint64 loaded_kext_summaries, Cancellable? cancellable) throws Error, IOError {
-			var gdb = machine.gdb;
-			Buffer image = gdb.make_buffer (kernelcache_blob);
+			var debugger = machine.debugger;
+			Buffer image = debugger.make_buffer (kernelcache_blob);
 			Gee.List<FilesetEntry> static_entries = parse_fileset_entries (image);
 
 			Gee.List<SegmentInfo> static_segments = parse_segments (image, 0);
 			uint64 preferred_base = static_segments[0].vmaddr;
 
 			uint64 collection_header = yield find_collection_header (machine, cancellable);
-			Buffer collection = yield read_mach_header (gdb, collection_header, cancellable);
+			Buffer collection = yield read_mach_header (debugger, collection_header, cancellable);
 			var runtime_segments = parse_segments (collection, 0);
 			var header_locator = new KernelRelocation ();
 			pair_segments (header_locator, static_segments, runtime_segments);
 
 			var reloc = new KernelRelocation ();
 			FilesetEntry kernel = find_entry (static_entries, "com.apple.kernel");
-			yield add_fileset_entry (reloc, gdb, image, kernel, header_locator.translate (kernel.vmaddr), cancellable);
+			yield add_fileset_entry (reloc, debugger, image, kernel, header_locator.translate (kernel.vmaddr), cancellable);
 			reloc.reference_base = reloc.translate (kernel.vmaddr);
 
 			if (loaded_kext_summaries != 0) {
-				var runtime_headers = yield read_loaded_kext_headers (gdb, reloc,
+				var runtime_headers = yield read_loaded_kext_headers (debugger, reloc,
 					preferred_base + loaded_kext_summaries, cancellable);
 				foreach (var entry in static_entries) {
 					uint64? runtime_header = runtime_headers[entry.name];
 					if (runtime_header != null)
-						yield add_fileset_entry (reloc, gdb, image, entry, runtime_header, cancellable);
+						yield add_fileset_entry (reloc, debugger, image, entry, runtime_header, cancellable);
 				}
 			}
 
@@ -87,9 +87,9 @@ namespace Frida.Barebone {
 			throw new Error.NOT_SUPPORTED ("Kernelcache is missing the %s fileset entry", name);
 		}
 
-		private static async void add_fileset_entry (KernelRelocation reloc, GDB.Client gdb, Buffer image,
+		private static async void add_fileset_entry (KernelRelocation reloc, Debugger debugger, Buffer image,
 				FilesetEntry entry, uint64 runtime_header, Cancellable? cancellable) throws Error, IOError {
-			Buffer runtime_image = yield read_mach_header (gdb, runtime_header, cancellable);
+			Buffer runtime_image = yield read_mach_header (debugger, runtime_header, cancellable);
 			var static_segments = parse_segments (image, (size_t) entry.fileoff);
 			var runtime_segments = parse_segments (runtime_image, 0);
 			pair_segments (reloc, static_segments, runtime_segments);
@@ -110,15 +110,15 @@ namespace Frida.Barebone {
 		 * loaded kext's bundle id with the runtime address of its mach-header, giving us a reliable
 		 * name -> runtime-header map from which to translate that kext's independently scattered segments.
 		 */
-		private static async Gee.Map<string, uint64?> read_loaded_kext_headers (GDB.Client gdb,
+		private static async Gee.Map<string, uint64?> read_loaded_kext_headers (Debugger debugger,
 				KernelRelocation reloc, uint64 loaded_kext_summaries, Cancellable? cancellable) throws Error, IOError {
-			uint64 list = (yield gdb.read_buffer (reloc.translate (loaded_kext_summaries), 8, cancellable))
+			uint64 list = (yield debugger.read_buffer (reloc.translate (loaded_kext_summaries), 8, cancellable))
 				.read_uint64 (0);
-			uint32 count = (yield gdb.read_buffer (list, 16, cancellable)).read_uint32 (8);
+			uint32 count = (yield debugger.read_buffer (list, 16, cancellable)).read_uint32 (8);
 
 			var result = new Gee.HashMap<string, uint64?> ();
 			for (uint32 i = 0; i != count; i++) {
-				Buffer summary = yield gdb.read_buffer (list + SUMMARY_HEADER_SIZE + (uint64) i * SUMMARY_SIZE,
+				Buffer summary = yield debugger.read_buffer (list + SUMMARY_HEADER_SIZE + (uint64) i * SUMMARY_SIZE,
 					(size_t) SUMMARY_SIZE, cancellable);
 				result[read_lc_string (summary, 0)] = summary.read_uint64 (SUMMARY_LOAD_ADDRESS);
 			}
@@ -138,10 +138,10 @@ namespace Frida.Barebone {
 			return (uint32) (translate (static_address) - reference_base);
 		}
 
-		private static async Buffer read_mach_header (GDB.Client gdb, uint64 address, Cancellable? cancellable)
+		private static async Buffer read_mach_header (Debugger debugger, uint64 address, Cancellable? cancellable)
 				throws Error, IOError {
-			Buffer head = yield gdb.read_buffer (address, 32, cancellable);
-			return yield gdb.read_buffer (address, 32 + head.read_uint32 (20), cancellable);
+			Buffer head = yield debugger.read_buffer (address, 32, cancellable);
+			return yield debugger.read_buffer (address, 32 + head.read_uint32 (20), cancellable);
 		}
 
 		/**
@@ -152,9 +152,9 @@ namespace Frida.Barebone {
 		 */
 		private static async uint64 find_collection_header (Machine machine, Cancellable? cancellable)
 				throws Error, IOError {
-			var gdb = machine.gdb;
+			var debugger = machine.debugger;
 
-			uint64 vbar = yield gdb.exception.thread.read_register ("vbar_el1", cancellable);
+			uint64 vbar = yield debugger.exception.thread.read_register ("vbar_el1", cancellable);
 
 			var range_bases = new Gee.ArrayList<uint64?> ();
 			var range_sizes = new Gee.ArrayList<uint64?> ();
@@ -180,7 +180,7 @@ namespace Frida.Barebone {
 
 		private static async uint64 find_header_in (Machine machine, uint64 base_va, uint64 size,
 				size_t page_size, Cancellable? cancellable) throws Error, IOError {
-			var gdb = machine.gdb;
+			var debugger = machine.debugger;
 
 			for (uint64 offset = 0; offset + 16 <= size; offset += CHUNK_SIZE) {
 				size_t chunk = (size_t) uint64.min (CHUNK_SIZE, size - offset);
@@ -192,7 +192,7 @@ namespace Frida.Barebone {
 					continue;
 				}
 
-				Buffer pages = gdb.make_buffer (taken);
+				Buffer pages = debugger.make_buffer (taken);
 				for (size_t at = 0; at + 16 <= chunk; at += page_size) {
 					if (pages.read_uint32 (at) == MH_MAGIC_64 && pages.read_uint32 (at + 4) == CPU_TYPE_ARM64
 							&& pages.read_uint32 (at + 12) == MH_FILESET)

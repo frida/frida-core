@@ -19,7 +19,7 @@ namespace Frida.Barebone {
 
 		var pages = new Gee.HashMap<uint64?, Bytes> (Numeric.uint64_hash, Numeric.uint64_equal);
 		foreach (uint64 process in processes)
-			pages[process] = yield machine.gdb.read_byte_array (process, (size_t) PROCESS_HEAD_SIZE, cancellable);
+			pages[process] = yield machine.debugger.read_byte_array (process, (size_t) PROCESS_HEAD_SIZE, cancellable);
 
 		uint64? number_offset = where_the_number_is (processes, pages);
 		if (number_offset == null)

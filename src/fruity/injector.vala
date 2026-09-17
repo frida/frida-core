@@ -35,7 +35,7 @@ namespace Frida.Fruity.Injector {
 				}, cancellable);
 				yield lldb.continue_specific_threads (gadget_threads, cancellable);
 			} else {
-				yield lldb.continue (cancellable);
+				yield lldb.resume (cancellable);
 			}
 		}
 	}
@@ -897,8 +897,8 @@ namespace Frida.Fruity.Injector {
 
 			uint64? notify_objc_init = dyld_symbols["__ZN5dyld412RuntimeState14notifyObjCInitEPKNS_6LoaderE"];
 			uint64 initializer = (notify_objc_init != null) ? notify_objc_init : libdyld_initialize;
-			GDB.Breakpoint init_breakpoint = yield lldb.add_breakpoint (SOFT, initializer, 4, cancellable);
-			GDB.Breakpoint? restart_breakpoint = null;
+			DebuggerBreakpoint init_breakpoint = yield lldb.add_breakpoint (SOFT, initializer, 4, cancellable);
+			DebuggerBreakpoint? restart_breakpoint = null;
 
 			uint64? restart_with_dyld_in_cache = null;
 			foreach (var e in dyld_symbols.entries) {
@@ -912,7 +912,7 @@ namespace Frida.Fruity.Injector {
 
 			var exception = (LLDB.Exception) yield lldb.continue_until_exception (cancellable);
 
-			GDB.Breakpoint? hit_breakpoint = exception.breakpoint;
+			DebuggerBreakpoint? hit_breakpoint = exception.breakpoint;
 			if (hit_breakpoint == null)
 				throw new Error.NOT_SUPPORTED ("Unexpected exception");
 
@@ -969,7 +969,7 @@ namespace Frida.Fruity.Injector {
 					frame_above = yield lldb.read_pointer (frame_above, cancellable);
 			} while (!falls_within_dyld);
 
-			GDB.Breakpoint caller_breakpoint = yield lldb.add_breakpoint (SOFT, libsystem_initializer_caller, 4, cancellable);
+			DebuggerBreakpoint caller_breakpoint = yield lldb.add_breakpoint (SOFT, libsystem_initializer_caller, 4, cancellable);
 
 			exception = (LLDB.Exception) yield lldb.continue_until_exception (cancellable);
 
@@ -983,7 +983,7 @@ namespace Frida.Fruity.Injector {
 
 		private async void ensure_libsystem_initialized_for_dyld_v3_and_below (Gee.Map<string, uint64?> dyld_symbols,
 				Cancellable? cancellable) throws GLib.Error {
-			GDB.Breakpoint? modern_breakpoint = null;
+			DebuggerBreakpoint? modern_breakpoint = null;
 			uint64 launch_with_closure = 0;
 
 			const string[] launch_with_closure_names = {
@@ -1004,11 +1004,11 @@ namespace Frida.Fruity.Injector {
 
 			uint64 initialize_main_executable = resolve_dyld_symbol ("__ZN4dyld24initializeMainExecutableEv",
 				"initializeMainExecutable", dyld_symbols);
-			GDB.Breakpoint legacy_breakpoint = yield lldb.add_breakpoint (SOFT, initialize_main_executable, 4, cancellable);
+			DebuggerBreakpoint legacy_breakpoint = yield lldb.add_breakpoint (SOFT, initialize_main_executable, 4, cancellable);
 
 			var exception = yield lldb.continue_until_exception (cancellable);
 
-			GDB.Breakpoint? hit_breakpoint = exception.breakpoint;
+			DebuggerBreakpoint? hit_breakpoint = exception.breakpoint;
 			if (hit_breakpoint == null)
 				throw new Error.NOT_SUPPORTED ("Unexpected exception");
 

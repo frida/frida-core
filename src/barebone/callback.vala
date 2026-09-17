@@ -4,8 +4,8 @@ namespace Frida.Barebone {
 		private uint64 code;
 		private CallbackHandler handler;
 		private Machine machine;
-		private GDB.Client gdb;
-		private GDB.Breakpoint breakpoint;
+		private Debugger debugger;
+		private DebuggerBreakpoint breakpoint;
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -14,16 +14,16 @@ namespace Frida.Barebone {
 			this.code = code;
 			this.handler = handler;
 			this.machine = machine;
-			this.gdb = machine.gdb;
+			this.debugger = machine.debugger;
 
-			gdb.notify["state"].connect (on_gdb_state_changed);
+			debugger.notify["state"].connect (on_gdb_state_changed);
 
-			breakpoint = yield gdb.add_breakpoint (SOFT, machine.address_from_funcptr (code),
+			breakpoint = yield debugger.add_breakpoint (SOFT, machine.address_from_funcptr (code),
 				machine.breakpoint_size_from_funcptr (code), cancellable);
 		}
 
 		~Callback () {
-			gdb.notify["state"].disconnect (on_gdb_state_changed);
+			debugger.notify["state"].disconnect (on_gdb_state_changed);
 		}
 
 		public async void destroy (Cancellable? cancellable) throws Error, IOError {
@@ -31,10 +31,10 @@ namespace Frida.Barebone {
 		}
 
 		private void on_gdb_state_changed (Object object, ParamSpec pspec) {
-			if (gdb.state != STOPPED)
+			if (debugger.state != STOPPED)
 				return;
 
-			GDB.Exception? exception = gdb.exception;
+			DebuggerException? exception = debugger.exception;
 			if (exception == null)
 				return;
 
@@ -44,7 +44,7 @@ namespace Frida.Barebone {
 			handle_invocation.begin (exception.thread);
 		}
 
-		private async void handle_invocation (GDB.Thread thread) throws Error, IOError {
+		private async void handle_invocation (DebuggerThread thread) throws Error, IOError {
 			uint arity = handler.arity;
 
 			var frame = yield machine.load_call_frame (thread, arity, io_cancellable);
@@ -59,7 +59,7 @@ namespace Frida.Barebone {
 			frame.force_return ();
 			yield frame.commit (io_cancellable);
 
-			yield gdb.continue (io_cancellable);
+			yield debugger.resume (io_cancellable);
 		}
 	}
 

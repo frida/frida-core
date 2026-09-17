@@ -7,7 +7,7 @@ namespace Frida.Barebone {
 	}
 
 	public interface Machine : Object {
-		public abstract GDB.Client gdb {
+		public abstract Debugger debugger {
 			get;
 			set;
 		}
@@ -24,11 +24,11 @@ namespace Frida.Barebone {
 
 		public virtual async Bytes read_virtual (uint64 va, size_t size, Cancellable? cancellable)
 				throws Error, IOError {
-			return yield gdb.read_byte_array (va, size, cancellable);
+			return yield debugger.read_byte_array (va, size, cancellable);
 		}
 
 		public virtual async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Error, IOError {
-			yield gdb.write_byte_array (va, new Bytes (data), cancellable);
+			yield debugger.write_byte_array (va, new Bytes (data), cancellable);
 		}
 
 		public abstract async uint query_exception_level (Cancellable? cancellable) throws Error, IOError;
@@ -41,14 +41,14 @@ namespace Frida.Barebone {
 				if (el == level)
 					return;
 
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 
 				var source = new TimeoutSource (10);
 				source.set_callback (enter_exception_level.callback);
 				source.attach (MainContext.get_thread_default ());
 				yield;
 
-				yield gdb.stop (cancellable);
+				yield debugger.stop (cancellable);
 			} while ((uint) (timer.elapsed () * 1000.0) < timeout);
 
 			throw new Error.TIMED_OUT ("Timed out while trying to get target to exception level %u", level);
@@ -91,7 +91,7 @@ namespace Frida.Barebone {
 			// second set covers the tables that the linker made, thus apply only that set.
 			bool position_independent = elf.etype == Gum.ElfType.DYN;
 
-			var relocated_buf = gdb.make_buffer (new Bytes (raw_elf[(size_t) file_start:(size_t) file_end].get_data ()));
+			var relocated_buf = debugger.make_buffer (new Bytes (raw_elf[(size_t) file_start:(size_t) file_end].get_data ()));
 			Error? pending_error = null;
 			elf.enumerate_relocations (r => {
 				unowned string parent_section = (r.parent != null) ? r.parent.name : "";
@@ -115,7 +115,7 @@ namespace Frida.Barebone {
 				throw pending_error;
 
 			Bytes relocated_bytes = relocated_buf.bytes;
-			Bytes relocated_image = gdb.make_buffer_builder ()
+			Bytes relocated_image = debugger.make_buffer_builder ()
 				.append_bytes (relocated_bytes)
 				.skip ((size_t) (elf.mapped_size - relocated_bytes.get_size ()))
 				.build ();
@@ -137,7 +137,7 @@ namespace Frida.Barebone {
 
 		public abstract async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable)
+		public abstract async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable)
 			throws Error, IOError;
 
 		public abstract uint64 address_from_funcptr (uint64 ptr);
@@ -235,46 +235,39 @@ namespace Frida.Barebone {
 	// arrives while the next command is pending, and that command consumes it instead — leaving
 	// its caller with an empty response and the stub still in the old mode. Vala rejects a yield
 	// inside a finally block, so callers hold on to any failure across the restore.
-	internal static async bool halt_guest (GDB.Client gdb, Cancellable? cancellable) throws Error, IOError {
-		bool was_running = gdb.state != STOPPED;
+	internal static async bool halt_guest (Debugger debugger, Cancellable? cancellable) throws Error, IOError {
+		bool was_running = debugger.state != STOPPED;
 		if (was_running)
-			yield gdb.stop (cancellable);
+			yield debugger.stop (cancellable);
 
 		return was_running;
 	}
 
-	internal static async void resume_guest (GDB.Client gdb, bool was_running, Cancellable? cancellable)
+	internal static async void resume_guest (Debugger debugger, bool was_running, Cancellable? cancellable)
 			throws Error, IOError {
 		if (was_running)
-			yield gdb.continue (cancellable);
+			yield debugger.resume (cancellable);
 	}
 
-	internal static async bool enter_physical_addressing (GDB.Client gdb, Cancellable? cancellable)
+	internal static async bool enter_physical_addressing (Debugger debugger, Cancellable? cancellable)
 			throws Error, IOError {
-		bool was_running = yield halt_guest (gdb, cancellable);
+		bool was_running = yield halt_guest (debugger, cancellable);
 
-		yield set_addressing_mode (gdb, PHYSICAL, cancellable);
+		yield set_addressing_mode (debugger, PHYSICAL, cancellable);
 
 		return was_running;
 	}
 
-	internal static async void leave_physical_addressing (GDB.Client gdb, bool was_running, Cancellable? cancellable)
+	internal static async void leave_physical_addressing (Debugger debugger, bool was_running, Cancellable? cancellable)
 			throws Error, IOError {
-		yield set_addressing_mode (gdb, VIRTUAL, cancellable);
+		yield set_addressing_mode (debugger, VIRTUAL, cancellable);
 
-		yield resume_guest (gdb, was_running, cancellable);
+		yield resume_guest (debugger, was_running, cancellable);
 	}
 
-	internal static async void set_addressing_mode (GDB.Client gdb, AddressingMode mode, Cancellable? cancellable)
+	internal static async void set_addressing_mode (Debugger debugger, AddressingMode mode, Cancellable? cancellable)
 			throws Error, IOError {
-		Gee.Set<string> features = gdb.features;
-		string enabled = (mode == PHYSICAL) ? "1" : "0";
-		if ("qemu-phy-mem-mode" in features)
-			yield gdb.execute_simple ("Qqemu.PhyMemMode:" + enabled, cancellable);
-		else if ("vf-phy-mem-mode" in features)
-			yield gdb.execute_simple ("Qvf.PhyMemMode:" + enabled, cancellable);
-		else
-			throw new Error.NOT_SUPPORTED ("Unsupported GDB remote stub; please file a bug");
+		yield debugger.set_physical_memory_mode (mode == PHYSICAL, cancellable);
 	}
 
 	internal static void throw_if_failed (GLib.Error? failure) throws Error, IOError {

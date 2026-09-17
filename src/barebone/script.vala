@@ -12,7 +12,7 @@ namespace Frida {
 			construct;
 		}
 
-		private GDB.Client gdb;
+		private Debugger debugger;
 
 		private QuickJS.Runtime rt;
 		private QuickJS.Context ctx;
@@ -63,7 +63,7 @@ namespace Frida {
 		private static QuickJS.ClassID gdb_thread_class;
 
 		private static QuickJS.ClassID gdb_breakpoint_class;
-		private Gee.Map<GDB.Breakpoint, QuickJS.Value?> gdb_breakpoints = new Gee.HashMap<GDB.Breakpoint, QuickJS.Value?> ();
+		private Gee.Map<DebuggerBreakpoint, QuickJS.Value?> gdb_breakpoints = new Gee.HashMap<DebuggerBreakpoint, QuickJS.Value?> ();
 
 		private QuickJS.Value global = QuickJS.Undefined;
 		private QuickJS.Value runtime_obj = QuickJS.Undefined;
@@ -107,7 +107,7 @@ namespace Frida {
 		}
 
 		construct {
-			gdb = services.machine.gdb;
+			debugger = services.machine.debugger;
 
 			rt = QuickJS.Runtime.make ();
 			rt.set_opaque (this);
@@ -162,9 +162,9 @@ namespace Frida {
 			global.set_property_str (ctx, "Memory", memory_obj);
 
 			var process_obj = ctx.make_object ();
-			process_obj.set_property_str (ctx, "arch", ctx.make_string (gdb.arch.to_nick ()));
+			process_obj.set_property_str (ctx, "arch", ctx.make_string (debugger.arch.to_nick ()));
 			process_obj.set_property_str (ctx, "pageSize", ctx.make_uint32 ((uint32) services.allocator.page_size));
-			process_obj.set_property_str (ctx, "pointerSize", ctx.make_uint32 (gdb.pointer_size));
+			process_obj.set_property_str (ctx, "pointerSize", ctx.make_uint32 (debugger.pointer_size));
 			add_cfunc (process_obj, "enumerateRanges", on_process_enumerate_ranges, 1);
 			global.set_property_str (ctx, "Process", process_obj);
 
@@ -267,7 +267,7 @@ namespace Frida {
 			add_cfunc (gdb_obj, "runRemoteCommand", on_gdb_run_remote_command, 1);
 			add_cfunc (gdb_obj, "execute", on_gdb_execute, 1);
 			add_cfunc (gdb_obj, "query", on_gdb_query, 1);
-			global.set_property_str (ctx, "$gdb", gdb_obj);
+			global.set_property_str (ctx, "$debugger", gdb_obj);
 
 			QuickJS.ClassDef th;
 			th.class_name = "GDBThread";
@@ -461,9 +461,9 @@ namespace Frida {
 		}
 
 		private void add_program (string source, string name) throws Error {
-			unowned string package_marker = "📦\n";
-			unowned string delimiter_marker = "\n✄\n";
-			unowned string alias_marker = "↻ ";
+			unowned string package_marker = "ðŸ“¦\n";
+			unowned string delimiter_marker = "\nâœ„\n";
+			unowned string alias_marker = "â†» ";
 
 			if (source.has_prefix (package_marker)) {
 				rt.set_module_loader_func (normalize_module_name, load_module);
@@ -1122,10 +1122,10 @@ namespace Frida {
 				size_t alignment = (size % page_size) == 0 ? page_size : 16;
 				var allocation = yield allocator.allocate (size, alignment, io_cancellable);
 
-				Bytes zeroes = gdb.make_buffer_builder ()
+				Bytes zeroes = debugger.make_buffer_builder ()
 					.skip (size)
 					.build ();
-				yield gdb.write_byte_array (allocation.virtual_address, zeroes, io_cancellable);
+				yield debugger.write_byte_array (allocation.virtual_address, zeroes, io_cancellable);
 
 				promise.resolve (allocation);
 			} catch (GLib.Error e) {
@@ -1472,7 +1472,7 @@ namespace Frida {
 				return QuickJS.Exception;
 
 			try {
-				script->services.interceptor.breakpoint_kind = GDB.Breakpoint.Kind.from_nick (kind);
+				script->services.interceptor.breakpoint_kind = BreakpointKind.from_nick (kind);
 			} catch (Error e) {
 				script->throw_js_error (error_message_to_js (e.message));
 				return QuickJS.Exception;
@@ -2020,13 +2020,13 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_get_state (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
 
-			return ctx.make_string (script->gdb.state.to_nick ());
+			return ctx.make_string (script->debugger.state.to_nick ());
 		}
 
 		private static QuickJS.Value on_gdb_get_exception (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
 
-			GDB.Exception? exception = script->gdb.exception;
+			DebuggerException? exception = script->debugger.exception;
 			if (exception == null)
 				return QuickJS.Null;
 
@@ -2040,21 +2040,21 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_continue (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
 
-			var promise = new Promise<GDB.Client> ();
+			var promise = new Promise<Debugger> ();
 			script->do_gdb_continue.begin (promise);
 
-			GDB.Client? client = script->process_events_until_ready (promise);
+			Debugger? client = script->process_events_until_ready (promise);
 			if (client == null)
 				return QuickJS.Exception;
 
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_continue (Promise<GDB.Client> promise) {
+		private async void do_gdb_continue (Promise<Debugger> promise) {
 			try {
-				yield gdb.continue (io_cancellable);
+				yield debugger.resume (io_cancellable);
 
-				promise.resolve (gdb);
+				promise.resolve (debugger);
 			} catch (GLib.Error e) {
 				promise.reject (e);
 			}
@@ -2063,21 +2063,21 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_stop (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
 
-			var promise = new Promise<GDB.Client> ();
+			var promise = new Promise<Debugger> ();
 			script->do_gdb_stop.begin (promise);
 
-			GDB.Client? client = script->process_events_until_ready (promise);
+			Debugger? client = script->process_events_until_ready (promise);
 			if (client == null)
 				return QuickJS.Exception;
 
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_stop (Promise<GDB.Client> promise) {
+		private async void do_gdb_stop (Promise<Debugger> promise) {
 			try {
-				yield gdb.stop (io_cancellable);
+				yield debugger.stop (io_cancellable);
 
-				promise.resolve (gdb);
+				promise.resolve (debugger);
 			} catch (GLib.Error e) {
 				promise.reject (e);
 			}
@@ -2087,7 +2087,7 @@ namespace Frida {
 			BareboneScript * script = ctx.get_opaque ();
 
 			try {
-				script->gdb.restart ();
+				script->debugger.restart ();
 			} catch (Error e) {
 				script->throw_js_error (error_message_to_js (e.message));
 				return QuickJS.Exception;
@@ -2098,7 +2098,7 @@ namespace Frida {
 
 		private static QuickJS.Value on_gdb_read_pointer (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			return script->do_gdb_read (ctx, this_val, argv, script->gdb.pointer_size, script->parse_raw_pointer);
+			return script->do_gdb_read (ctx, this_val, argv, script->debugger.pointer_size, script->parse_raw_pointer);
 		}
 
 		private static QuickJS.Value on_gdb_write_pointer (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
@@ -2451,7 +2451,7 @@ namespace Frida {
 			if (bytes == null)
 				return QuickJS.Exception;
 
-			return parse (gdb.make_buffer (bytes));
+			return parse (debugger.make_buffer (bytes));
 		}
 
 		private delegate QuickJS.Value GdbReadResultParseFunc (Buffer buffer);
@@ -2462,7 +2462,7 @@ namespace Frida {
 			if (!unparse_uint64 (argv[0], out address))
 				return QuickJS.Exception;
 
-			BufferBuilder? builder = unparse (argv[1], gdb.make_buffer_builder ());
+			BufferBuilder? builder = unparse (argv[1], debugger.make_buffer_builder ());
 			if (builder == null)
 				return QuickJS.Exception;
 			Bytes bytes = builder.build ();
@@ -2483,7 +2483,7 @@ namespace Frida {
 
 		private async void do_read_memory (uint64 address, uint size, Promise<Bytes> promise) {
 			try {
-				Bytes bytes = yield gdb.read_byte_array (address, size, io_cancellable);
+				Bytes bytes = yield debugger.read_byte_array (address, size, io_cancellable);
 
 				promise.resolve (bytes);
 			} catch (GLib.Error e) {
@@ -2492,16 +2492,16 @@ namespace Frida {
 		}
 
 		private bool write_memory (uint64 address, Bytes bytes) {
-			var promise = new Promise<GDB.Client> ();
+			var promise = new Promise<Debugger> ();
 			do_write_memory.begin (address, bytes, promise);
-			return process_events_until_ready<GDB.Client> (promise) != null;
+			return process_events_until_ready<Debugger> (promise) != null;
 		}
 
-		private async void do_write_memory (uint64 address, Bytes bytes, Promise<GDB.Client> promise) {
+		private async void do_write_memory (uint64 address, Bytes bytes, Promise<Debugger> promise) {
 			try {
-				yield gdb.write_byte_array (address, bytes, io_cancellable);
+				yield debugger.write_byte_array (address, bytes, io_cancellable);
 
-				promise.resolve (gdb);
+				promise.resolve (debugger);
 			} catch (GLib.Error e) {
 				promise.reject (e);
 			}
@@ -2510,8 +2510,8 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_add_breakpoint (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
 
-			GDB.Breakpoint.Kind kind;
-			if (!script->unparse_enum<GDB.Breakpoint.Kind> (argv[0], out kind))
+			BreakpointKind kind;
+			if (!script->unparse_enum<BreakpointKind> (argv[0], out kind))
 				return QuickJS.Exception;
 
 			uint64 address;
@@ -2522,20 +2522,20 @@ namespace Frida {
 			if (!script->unparse_uint (argv[2], out size))
 				return QuickJS.Exception;
 
-			var promise = new Promise<GDB.Breakpoint> ();
+			var promise = new Promise<DebuggerBreakpoint> ();
 			script->do_gdb_add_breakpoint.begin (kind, address, size, promise);
 
-			GDB.Breakpoint? bp = script->process_events_until_ready (promise);
+			DebuggerBreakpoint? bp = script->process_events_until_ready (promise);
 			if (bp == null)
 				return QuickJS.Exception;
 
 			return script->wrap_gdb_breakpoint (bp);
 		}
 
-		private async void do_gdb_add_breakpoint (GDB.Breakpoint.Kind kind, uint64 address, uint size,
-				Promise<GDB.Breakpoint> promise) {
+		private async void do_gdb_add_breakpoint (BreakpointKind kind, uint64 address, uint size,
+				Promise<DebuggerBreakpoint> promise) {
 			try {
-				GDB.Breakpoint bp = yield gdb.add_breakpoint (kind, address, size, io_cancellable);
+				DebuggerBreakpoint bp = yield debugger.add_breakpoint (kind, address, size, io_cancellable);
 
 				promise.resolve (bp);
 			} catch (GLib.Error e) {
@@ -2562,7 +2562,7 @@ namespace Frida {
 
 		private async void do_gdb_run_remote_command (string command, Promise<string> promise) {
 			try {
-				string result = yield gdb.run_remote_command (command, io_cancellable);
+				string result = yield debugger.run_remote_command (command, io_cancellable);
 
 				promise.resolve (result);
 			} catch (GLib.Error e) {
@@ -2577,21 +2577,28 @@ namespace Frida {
 			if (!script->unparse_string (argv[0], out command))
 				return QuickJS.Exception;
 
-			var promise = new Promise<GDB.Client> ();
+			var promise = new Promise<Debugger> ();
 			script->do_gdb_execute.begin (command, promise);
 
-			GDB.Client? result = script->process_events_until_ready (promise);
+			Debugger? result = script->process_events_until_ready (promise);
 			if (result == null)
 				return QuickJS.Exception;
 
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_execute (string command, Promise<GDB.Client> promise) {
-			try {
-				yield gdb.execute_simple (command, io_cancellable);
+		private GDB.Client gdb_client () throws Error {
+			var client = debugger as GDB.Client;
+			if (client == null)
+				throw new Error.NOT_SUPPORTED ("Raw packets are specific to the GDB remote protocol");
+			return client;
+		}
 
-				promise.resolve (gdb);
+		private async void do_gdb_execute (string command, Promise<Debugger> promise) {
+			try {
+				yield gdb_client ().execute_simple (command, io_cancellable);
+
+				promise.resolve (debugger);
 			} catch (GLib.Error e) {
 				promise.reject (e);
 			}
@@ -2616,7 +2623,7 @@ namespace Frida {
 
 		private async void do_gdb_query (string request, Promise<GDB.Client.Packet> promise) {
 			try {
-				GDB.Client.Packet packet = yield gdb.query_simple (request, io_cancellable);
+				GDB.Client.Packet packet = yield gdb_client ().query_simple (request, io_cancellable);
 
 				promise.resolve (packet);
 			} catch (GLib.Error e) {
@@ -2624,24 +2631,24 @@ namespace Frida {
 			}
 		}
 
-		private QuickJS.Value wrap_gdb_thread (GDB.Thread thread) {
+		private QuickJS.Value wrap_gdb_thread (DebuggerThread thread) {
 			var wrapper = ctx.make_object_class (gdb_thread_class);
 			wrapper.set_opaque (thread.ref ());
 			return wrapper;
 		}
 
 		private static void on_gdb_thread_finalize (QuickJS.Runtime rt, QuickJS.Value val) {
-			GDB.Thread * thread = val.get_opaque (gdb_thread_class);
+			DebuggerThread * thread = val.get_opaque (gdb_thread_class);
 			thread->unref ();
 		}
 
 		private static QuickJS.Value on_gdb_thread_get_id (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
-			GDB.Thread * thread = this_val.get_opaque (gdb_thread_class);
+			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 			return ctx.make_string (thread->id);
 		}
 
 		private static QuickJS.Value on_gdb_thread_get_name (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
-			GDB.Thread * thread = this_val.get_opaque (gdb_thread_class);
+			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 			unowned string? name = thread->name;
 			if (name == null)
 				return QuickJS.Null;
@@ -2650,19 +2657,19 @@ namespace Frida {
 
 		private static QuickJS.Value on_gdb_thread_step (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Thread * thread = this_val.get_opaque (gdb_thread_class);
+			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 
-			var promise = new Promise<GDB.Thread> ();
+			var promise = new Promise<DebuggerThread> ();
 			script->do_gdb_thread_step.begin (thread, promise);
 
-			GDB.Thread? result = script->process_events_until_ready (promise);
+			DebuggerThread? result = script->process_events_until_ready (promise);
 			if (result == null)
 				return QuickJS.Exception;
 
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_thread_step (GDB.Thread thread, Promise<GDB.Thread> promise) {
+		private async void do_gdb_thread_step (DebuggerThread thread, Promise<DebuggerThread> promise) {
 			try {
 				yield thread.step (io_cancellable);
 
@@ -2675,7 +2682,7 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_thread_step_and_continue (QuickJS.Context ctx, QuickJS.Value this_val,
 				QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Thread * thread = this_val.get_opaque (gdb_thread_class);
+			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 
 			try {
 				thread->step_and_continue ();
@@ -2690,7 +2697,7 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_thread_read_registers (QuickJS.Context ctx, QuickJS.Value this_val,
 				QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Thread * thread = this_val.get_opaque (gdb_thread_class);
+			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 
 			var promise = new Promise<Gee.Map<string, Variant>> ();
 			script->do_gdb_thread_read_registers.begin (thread, promise);
@@ -2702,7 +2709,7 @@ namespace Frida {
 			return script->make_cpu_context (regs);
 		}
 
-		private async void do_gdb_thread_read_registers (GDB.Thread thread, Promise<Gee.Map<string, Variant>> promise) {
+		private async void do_gdb_thread_read_registers (DebuggerThread thread, Promise<Gee.Map<string, Variant>> promise) {
 			try {
 				Gee.Map<string, Variant> regs = yield thread.read_registers (io_cancellable);
 
@@ -2715,7 +2722,7 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_thread_read_register (QuickJS.Context ctx, QuickJS.Value this_val,
 				QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Thread * thread = this_val.get_opaque (gdb_thread_class);
+			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 
 			string name;
 			if (!script->unparse_string (argv[0], out name))
@@ -2731,7 +2738,7 @@ namespace Frida {
 			return script->make_native_pointer (val);
 		}
 
-		private async void do_gdb_thread_read_register (GDB.Thread thread, string name, Promise<uint64?> promise) {
+		private async void do_gdb_thread_read_register (DebuggerThread thread, string name, Promise<uint64?> promise) {
 			try {
 				uint64 val = yield thread.read_register (name, io_cancellable);
 
@@ -2744,7 +2751,7 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_thread_write_register (QuickJS.Context ctx, QuickJS.Value this_val,
 				QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Thread * thread = this_val.get_opaque (gdb_thread_class);
+			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 
 			string name;
 			if (!script->unparse_string (argv[0], out name))
@@ -2754,17 +2761,17 @@ namespace Frida {
 			if (!script->unparse_uint64 (argv[1], out val))
 				return QuickJS.Exception;
 
-			var promise = new Promise<GDB.Thread> ();
+			var promise = new Promise<DebuggerThread> ();
 			script->do_gdb_thread_write_register.begin (thread, name, val, promise);
 
-			GDB.Thread? result = script->process_events_until_ready (promise);
+			DebuggerThread? result = script->process_events_until_ready (promise);
 			if (result == null)
 				return QuickJS.Exception;
 
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_thread_write_register (GDB.Thread thread, string name, uint64 val, Promise<GDB.Thread> promise) {
+		private async void do_gdb_thread_write_register (DebuggerThread thread, string name, uint64 val, Promise<DebuggerThread> promise) {
 			try {
 				yield thread.write_register (name, val, io_cancellable);
 
@@ -2774,13 +2781,13 @@ namespace Frida {
 			}
 		}
 
-		private QuickJS.Value wrap_gdb_breakpoint_nullable (GDB.Breakpoint? bp) {
+		private QuickJS.Value wrap_gdb_breakpoint_nullable (DebuggerBreakpoint? bp) {
 			if (bp == null)
 				return QuickJS.Null;
 			return wrap_gdb_breakpoint (bp);
 		}
 
-		private QuickJS.Value wrap_gdb_breakpoint (GDB.Breakpoint bp) {
+		private QuickJS.Value wrap_gdb_breakpoint (DebuggerBreakpoint bp) {
 			QuickJS.Value? existing_wrapper = gdb_breakpoints[bp];
 			if (existing_wrapper != null)
 				return ctx.dup_value (existing_wrapper);
@@ -2793,45 +2800,45 @@ namespace Frida {
 		}
 
 		private static void on_gdb_breakpoint_finalize (QuickJS.Runtime rt, QuickJS.Value val) {
-			GDB.Breakpoint * bp = val.get_opaque (gdb_breakpoint_class);
+			DebuggerBreakpoint * bp = val.get_opaque (gdb_breakpoint_class);
 			bp->unref ();
 		}
 
 		private static QuickJS.Value on_gdb_breakpoint_get_kind (QuickJS.Context ctx, QuickJS.Value this_val,
 				QuickJS.Value[] argv) {
-			GDB.Breakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
+			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 			return ctx.make_string (bp->kind.to_nick ());
 		}
 
 		private static QuickJS.Value on_gdb_breakpoint_get_address (QuickJS.Context ctx, QuickJS.Value this_val,
 				QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Breakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
+			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 			return script->make_native_pointer (bp->address);
 		}
 
 		private static QuickJS.Value on_gdb_breakpoint_get_size (QuickJS.Context ctx, QuickJS.Value this_val,
 				QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Breakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
+			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 			return script->ctx.make_uint32 ((uint32) bp->size);
 		}
 
 		private static QuickJS.Value on_gdb_breakpoint_enable (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Breakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
+			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 
-			var promise = new Promise<GDB.Breakpoint> ();
+			var promise = new Promise<DebuggerBreakpoint> ();
 			script->do_gdb_breakpoint_enable.begin (bp, promise);
 
-			GDB.Breakpoint? result = script->process_events_until_ready (promise);
+			DebuggerBreakpoint? result = script->process_events_until_ready (promise);
 			if (result == null)
 				return QuickJS.Exception;
 
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_breakpoint_enable (GDB.Breakpoint bp, Promise<GDB.Breakpoint> promise) {
+		private async void do_gdb_breakpoint_enable (DebuggerBreakpoint bp, Promise<DebuggerBreakpoint> promise) {
 			try {
 				yield bp.enable (io_cancellable);
 
@@ -2843,19 +2850,19 @@ namespace Frida {
 
 		private static QuickJS.Value on_gdb_breakpoint_disable (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Breakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
+			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 
-			var promise = new Promise<GDB.Breakpoint> ();
+			var promise = new Promise<DebuggerBreakpoint> ();
 			script->do_gdb_breakpoint_disable.begin (bp, promise);
 
-			GDB.Breakpoint? result = script->process_events_until_ready (promise);
+			DebuggerBreakpoint? result = script->process_events_until_ready (promise);
 			if (result == null)
 				return QuickJS.Exception;
 
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_breakpoint_disable (GDB.Breakpoint bp, Promise<GDB.Breakpoint> promise) {
+		private async void do_gdb_breakpoint_disable (DebuggerBreakpoint bp, Promise<DebuggerBreakpoint> promise) {
 			try {
 				yield bp.disable (io_cancellable);
 
@@ -2867,19 +2874,19 @@ namespace Frida {
 
 		private static QuickJS.Value on_gdb_breakpoint_remove (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
-			GDB.Breakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
+			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 
-			var promise = new Promise<GDB.Breakpoint> ();
+			var promise = new Promise<DebuggerBreakpoint> ();
 			script->do_gdb_breakpoint_remove.begin (bp, promise);
 
-			GDB.Breakpoint? result = script->process_events_until_ready (promise);
+			DebuggerBreakpoint? result = script->process_events_until_ready (promise);
 			if (result == null)
 				return QuickJS.Exception;
 
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_breakpoint_remove (GDB.Breakpoint bp, Promise<GDB.Breakpoint> promise) {
+		private async void do_gdb_breakpoint_remove (DebuggerBreakpoint bp, Promise<DebuggerBreakpoint> promise) {
 			try {
 				yield bp.remove (io_cancellable);
 

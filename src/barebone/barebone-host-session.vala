@@ -125,30 +125,30 @@ namespace Frida {
 			}
 #endif
 
-			GDB.Client gdb;
+			Debugger debugger;
 			switch (config.connection.flavor) {
 				case BareboneStubFlavor.VZ:
-					gdb = yield Barebone.VzStubClient.open (stream, cancellable);
+					debugger = yield Barebone.VzStubClient.open (stream, cancellable);
 					break;
 				case BareboneStubFlavor.PARALLELS:
-					gdb = yield Barebone.ParallelsStubClient.open (stream, cancellable);
+					debugger = yield Barebone.ParallelsStubClient.open (stream, cancellable);
 					break;
 				default:
-					gdb = yield GDB.Client.open (stream, cancellable);
+					debugger = yield GDB.Client.open (stream, cancellable);
 					break;
 			}
 
 			try {
-				host_session = yield establish (config, gdb, (owned) connecting, cancellable);
+				host_session = yield establish (config, debugger, (owned) connecting, cancellable);
 			} catch (GLib.Error e) {
-				if (gdb.state == STOPPED) {
+				if (debugger.state == STOPPED) {
 					try {
-						yield gdb.continue (cancellable);
+						yield debugger.resume (cancellable);
 					} catch (GLib.Error ee) {
 					}
 				}
 				try {
-					yield gdb.close (cancellable);
+					yield debugger.close (cancellable);
 				} catch (IOError ee) {
 				}
 				throw_api_error (e);
@@ -158,36 +158,36 @@ namespace Frida {
 			return host_session;
 		}
 
-		private async BareboneHostSession establish (BareboneConfig config, GDB.Client gdb, owned ConnectingFunc connecting,
+		private async BareboneHostSession establish (BareboneConfig config, Debugger debugger, owned ConnectingFunc connecting,
 				Cancellable? cancellable) throws Error, IOError {
 			// The arm64 MMU system registers (TTBR1_EL1/TCR_EL1) are exposed by some stubs and not
 			// others (the Android emulator's does not); detect it from the advertised register set,
 			// which selects host page-table walking versus the kernel's set_memory_* helpers.
-			bool mmu_registers_available = gdb.arch != GDB.TargetArch.ARM64
-				|| (gdb.has_register ("ttbr1_el1") && gdb.has_register ("tcr_el1"));
+			bool mmu_registers_available = debugger.arch != TargetArch.ARM64
+				|| (debugger.has_register ("ttbr1_el1") && debugger.has_register ("tcr_el1"));
 
 			Barebone.Machine machine;
-			switch (gdb.arch) {
+			switch (debugger.arch) {
 				case IA32:
-					machine = new Barebone.IA32Machine (gdb);
+					machine = new Barebone.IA32Machine (debugger);
 					break;
 				case X64:
-					machine = new Barebone.X64Machine (gdb) {
+					machine = new Barebone.X64Machine (debugger) {
 						calling_convention = (config.kernel == WINNT)
 							? Barebone.CallingConvention.MICROSOFT
 							: Barebone.CallingConvention.SYSTEM_V,
 					};
 					break;
 				case ARM:
-					machine = new Barebone.ArmMachine (gdb);
+					machine = new Barebone.ArmMachine (debugger);
 					break;
 				case ARM64:
-					machine = new Barebone.Arm64Machine (gdb) {
+					machine = new Barebone.Arm64Machine (debugger) {
 						mmu_registers_available = mmu_registers_available,
 					};
 					break;
 				default:
-					machine = new Barebone.UnknownMachine (gdb);
+					machine = new Barebone.UnknownMachine (debugger);
 					break;
 			}
 
@@ -545,14 +545,14 @@ namespace Frida {
 				yield connection.close (cancellable);
 
 			if (services != null) {
-				var gdb = services.machine.gdb;
-				if (gdb.state == STOPPED) {
+				var debugger = services.machine.debugger;
+				if (debugger.state == STOPPED) {
 					try {
-						yield gdb.continue (cancellable);
+						yield debugger.resume (cancellable);
 					} catch (GLib.Error e) {
 					}
 				}
-				yield gdb.close (cancellable);
+				yield debugger.close (cancellable);
 			}
 		}
 

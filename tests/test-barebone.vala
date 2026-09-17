@@ -4392,10 +4392,10 @@ FAIL: %s
 		try {
 			var client = new SocketClient ();
 			var connection = yield client.connect_to_host_async ("127.0.0.1", (uint16) uint.parse (port), null);
-			var gdb = yield GDB.Client.open (connection, null);
-			assert_true (gdb.pointer_size == 8);
+			var debugger = yield GDB.Client.open (connection, null);
+			assert_true (debugger.pointer_size == 8);
 
-			var machine = new Barebone.X64Machine (gdb);
+			var machine = new Barebone.X64Machine (debugger);
 			var layout = yield Barebone.collect_winnt_layout (machine, null);
 
 			Barebone.ModuleInfo? kernel = null;
@@ -4420,7 +4420,7 @@ FAIL: %s
 			assert_true (named);
 			assert_true (wide);
 
-			yield gdb.close (null);
+			yield debugger.close (null);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -4439,11 +4439,11 @@ FAIL: %s
 		try {
 			var client = new SocketClient ();
 			var connection = yield client.connect_to_host_async ("127.0.0.1", (uint16) uint.parse (port), null);
-			var gdb = yield Barebone.ParallelsStubClient.open (connection, null);
-			assert_true (gdb.arch == GDB.TargetArch.ARM64);
-			assert_true (gdb.pointer_size == 8);
+			var debugger = yield Barebone.ParallelsStubClient.open (connection, null);
+			assert_true (debugger.arch == Frida.TargetArch.ARM64);
+			assert_true (debugger.pointer_size == 8);
 
-			var machine = new Barebone.Arm64Machine (gdb);
+			var machine = new Barebone.Arm64Machine (debugger);
 			var layout = yield Barebone.collect_winnt_layout (machine, null);
 
 			Barebone.ModuleInfo? kernel = null;
@@ -4467,7 +4467,7 @@ FAIL: %s
 			assert_true (named);
 			assert_true (process_list);
 
-			yield gdb.close (null);
+			yield debugger.close (null);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -6898,7 +6898,7 @@ FAIL: %s
 	 * machine's "physical" reads land on the page tables we planted.
 	 */
 	private class FakeTarget : Object {
-		public GDB.Client? client {
+		public Debugger? client {
 			get;
 			private set;
 		}
@@ -7343,7 +7343,7 @@ FAIL: %s
 	 * own answers against QEMU's view of the very same tables.
 	 */
 	private class QemuGuest : Object {
-		public GDB.Client client {
+		public Debugger client {
 			get;
 			private set;
 		}
@@ -7378,7 +7378,7 @@ FAIL: %s
 			Subprocess process;
 			try {
 				process = new Subprocess (SubprocessFlags.STDOUT_PIPE,
-					"python3", script_path (), "boot-" + arch.to_nick (), "--gdb-port",
+					"python3", script_path (), "boot-" + arch.to_nick (), "--debugger-port",
 					port.to_string (), "--memory", MEMORY_SIZE_IN_MB.to_string ());
 			} catch (GLib.Error e) {
 				return null;

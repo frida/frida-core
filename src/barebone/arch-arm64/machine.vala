@@ -1,7 +1,7 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class Arm64Machine : Object, Machine {
-		public override GDB.Client gdb {
+		public override Debugger debugger {
 			get;
 			set;
 		}
@@ -69,12 +69,12 @@ namespace Frida.Barebone {
 		private const uint64 AP1_BIT = 1ULL << 7;
 		private const uint64 AP0_BIT = 1ULL << 6;
 
-		public Arm64Machine (GDB.Client gdb) {
-			Object (gdb: gdb);
+		public Arm64Machine (Debugger debugger) {
+			Object (debugger: debugger);
 		}
 
 		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
-			if ("parallels" in gdb.features)
+			if ("parallels" in debugger.features)
 				return SMALLEST_GRANULE;
 
 			if (!mmu_registers_available)
@@ -86,10 +86,10 @@ namespace Frida.Barebone {
 		}
 
 		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
-			GDB.Exception? exception = gdb.exception;
+			DebuggerException? exception = debugger.exception;
 			if (exception == null)
 				throw new Error.INVALID_OPERATION ("Unable to query in current state");
-			GDB.Thread thread = exception.thread;
+			DebuggerThread thread = exception.thread;
 
 			var cpsr = yield thread.read_register ("cpsr", cancellable);
 
@@ -98,7 +98,7 @@ namespace Frida.Barebone {
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
 				throws Error, IOError {
-			Gee.List<RangeDetails> ranges = ("corellium" in gdb.features)
+			Gee.List<RangeDetails> ranges = ("corellium" in debugger.features)
 				? yield collect_ranges_using_corellium (cancellable)
 				: yield collect_ranges_using_mmu (cancellable);
 			foreach (RangeDetails r in coalesce_ranges (ranges)) {
@@ -114,14 +114,14 @@ namespace Frida.Barebone {
 
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
-			bool was_running = yield enter_physical_addressing (gdb, cancellable);
+			bool was_running = yield enter_physical_addressing (debugger, cancellable);
 			GLib.Error? failure = null;
 			try {
 				yield collect_ranges_in_table (p.tt1, p.first_level, p.upper_bits, p, result, cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield leave_physical_addressing (gdb, was_running, cancellable);
+			yield leave_physical_addressing (debugger, was_running, cancellable);
 			throw_if_failed (failure);
 
 			return result;
@@ -157,7 +157,7 @@ namespace Frida.Barebone {
 		private async Gee.List<RangeDetails> collect_ranges_using_corellium (Cancellable? cancellable) throws Error, IOError {
 			var result = new Gee.ArrayList<RangeDetails> ();
 
-			string pt = yield gdb.run_remote_command ("pt", cancellable);
+			string pt = yield debugger.run_remote_command ("pt", cancellable);
 			foreach (string line in pt.split ("\n")) {
 				string[] tokens = line.split (" -> ");
 				if (tokens.length != 2)
@@ -265,7 +265,7 @@ namespace Frida.Barebone {
 			if (!p.sprr_enabled && !code_template_known)
 				page_prot |= Gum.PageProtection.EXECUTE;
 
-			var builder = gdb.make_buffer_builder ();
+			var builder = debugger.make_buffer_builder ();
 			for (uint i = 0; i != num_available_slots; i++) {
 				uint64 base_descriptor = physical_addresses[(int) i] | 0x403ULL;
 				uint64 new_descriptor = apply_protection_bits (base_descriptor, page_prot, p);
@@ -277,7 +277,7 @@ namespace Frida.Barebone {
 			yield write_physical_buffer (first_available_slot, new_descriptors, cancellable);
 
 			size_t size = num_pages * p.granule;
-			return new DescriptorAllocation (first_available_va, size, first_available_slot, old_descriptors, gdb);
+			return new DescriptorAllocation (first_available_va, size, first_available_slot, old_descriptors, debugger);
 		}
 
 		// The VZ kernel GDB stub does not expose the SPRR registers, so we cannot read the
@@ -289,7 +289,7 @@ namespace Frida.Barebone {
 			code_template_descriptor = yield read_level3_descriptor (code_va, cancellable);
 			code_template_known = true;
 
-			uint64 stack_va = yield gdb.exception.thread.read_register ("sp", cancellable);
+			uint64 stack_va = yield debugger.exception.thread.read_register ("sp", cancellable);
 			data_template_descriptor = yield read_level3_descriptor (stack_va, cancellable);
 			data_template_known = true;
 		}
@@ -304,7 +304,7 @@ namespace Frida.Barebone {
 		public override async Bytes read_virtual (uint64 va, size_t size, Cancellable? cancellable)
 				throws Error, IOError {
 			if (physical_memory == null)
-				return yield gdb.read_byte_array (va, size, cancellable);
+				return yield debugger.read_byte_array (va, size, cancellable);
 
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 			var taken = new ByteArray ();
@@ -324,7 +324,7 @@ namespace Frida.Barebone {
 
 		public override async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			if (physical_memory == null) {
-				yield gdb.write_byte_array (va, new Bytes (data), cancellable);
+				yield debugger.write_byte_array (va, new Bytes (data), cancellable);
 				return;
 			}
 
@@ -341,8 +341,8 @@ namespace Frida.Barebone {
 
 		private async Buffer read_physical_buffer (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
 			if (physical_memory != null && physical_memory.contains (pa))
-				return gdb.make_buffer (new Bytes (physical_memory.read (pa, size)));
-			return yield gdb.read_buffer (pa, size, cancellable);
+				return debugger.make_buffer (new Bytes (physical_memory.read (pa, size)));
+			return yield debugger.read_buffer (pa, size, cancellable);
 		}
 
 		private async void write_physical_buffer (uint64 pa, Bytes data, Cancellable? cancellable) throws Error, IOError {
@@ -350,7 +350,7 @@ namespace Frida.Barebone {
 				physical_memory.write (pa, data.get_data ());
 				return;
 			}
-			yield gdb.write_byte_array (pa, data, cancellable);
+			yield debugger.write_byte_array (pa, data, cancellable);
 		}
 
 		public async uint8[] read_physical (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
@@ -364,27 +364,27 @@ namespace Frida.Barebone {
 				physical_memory.write (pa, data);
 				return;
 			}
-			bool was_running = yield enter_physical_addressing (gdb, cancellable);
+			bool was_running = yield enter_physical_addressing (debugger, cancellable);
 			GLib.Error? failure = null;
 			try {
-				yield gdb.write_byte_array (pa, new Bytes (data), cancellable);
+				yield debugger.write_byte_array (pa, new Bytes (data), cancellable);
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield leave_physical_addressing (gdb, was_running, cancellable);
+			yield leave_physical_addressing (debugger, was_running, cancellable);
 			throw_if_failed (failure);
 		}
 
 		public async uint8[] read_physical_via_stub (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
-			bool was_running = yield enter_physical_addressing (gdb, cancellable);
+			bool was_running = yield enter_physical_addressing (debugger, cancellable);
 			uint8[]? data = null;
 			GLib.Error? failure = null;
 			try {
-				data = (yield gdb.read_byte_array (pa, size, cancellable)).get_data ();
+				data = (yield debugger.read_byte_array (pa, size, cancellable)).get_data ();
 			} catch (GLib.Error e) {
 				failure = e;
 			}
-			yield leave_physical_addressing (gdb, was_running, cancellable);
+			yield leave_physical_addressing (debugger, was_running, cancellable);
 			throw_if_failed (failure);
 
 			return data;
@@ -530,7 +530,7 @@ namespace Frida.Barebone {
 			uint64 block_pa = block.raw & INT48_MASK & ~(block.size - 1);
 			uint64 leaf_kind = (sub_level == 3) ? 0x3 : 0x1;
 
-			var builder = gdb.make_buffer_builder ();
+			var builder = debugger.make_buffer_builder ();
 			for (uint i = 0; i != sub_count; i++) {
 				uint64 sub_pa = block_pa + ((uint64) i * sub_size);
 				uint64 descriptor = (sub_pa & OUTPUT_ADDRESS_MASK) | (block.raw & ATTRIBUTE_MASK) | leaf_kind;
@@ -538,7 +538,7 @@ namespace Frida.Barebone {
 			}
 			yield write_physical_buffer (table_pa, builder.build (), cancellable);
 
-			var slot = gdb.make_buffer_builder ();
+			var slot = debugger.make_buffer_builder ();
 			slot.append_uint64 ((table_pa & OUTPUT_ADDRESS_MASK) | 0x3);
 			yield write_physical_buffer (block.slot_pa, slot.build (), cancellable);
 		}
@@ -657,7 +657,7 @@ namespace Frida.Barebone {
 			if (physical_memory != null)
 				return false;
 
-			return yield enter_physical_addressing (gdb, cancellable);
+			return yield enter_physical_addressing (debugger, cancellable);
 		}
 
 		private async void end_physical_addressing (bool was_running, Cancellable? cancellable)
@@ -665,12 +665,12 @@ namespace Frida.Barebone {
 			if (physical_memory != null)
 				return;
 
-			yield leave_physical_addressing (gdb, was_running, cancellable);
+			yield leave_physical_addressing (debugger, was_running, cancellable);
 		}
 
 		private async MMUParameters load_mmu_parameters (Cancellable? cancellable) throws Error, IOError {
 			if (cached_mmu_parameters == null)
-				cached_mmu_parameters = yield MMUParameters.load (gdb, cancellable);
+				cached_mmu_parameters = yield MMUParameters.load (debugger, cancellable);
 			return cached_mmu_parameters;
 		}
 
@@ -866,7 +866,7 @@ namespace Frida.Barebone {
 
 			vm_size = round_size_up (vm_size, 16);
 			size_t data_offset = vm_size;
-			var builder = gdb.make_buffer_builder ();
+			var builder = debugger.make_buffer_builder ();
 			size_t data_size;
 			append_memory_scanner_data (builder, ranges, pattern, max_matches, out data_size);
 			vm_size += data_size;
@@ -876,11 +876,11 @@ namespace Frida.Barebone {
 			if (vm_size % page_size != 0)
 				num_pages++;
 
-			bool was_running = gdb.state != STOPPED;
+			bool was_running = debugger.state != STOPPED;
 			if (was_running)
-				yield gdb.stop (cancellable);
+				yield debugger.stop (cancellable);
 
-			GDB.Thread thread = gdb.exception.thread;
+			DebuggerThread thread = debugger.exception.thread;
 			Gee.Map<string, Variant> saved_regs = yield thread.read_registers (cancellable);
 
 			uint64 old_sp = saved_regs["sp"].get_uint64 ();
@@ -923,11 +923,11 @@ namespace Frida.Barebone {
 			uint64 data_va = module_va + data_offset;
 
 			Bytes scanner_module = relocate (scanner, raw_scanner, module_va);
-			Bytes original_memory = yield gdb.read_byte_array (module_va, vm_size, cancellable);
-			yield gdb.write_byte_array (module_va, scanner_module, cancellable);
+			Bytes original_memory = yield debugger.read_byte_array (module_va, vm_size, cancellable);
+			yield debugger.write_byte_array (module_va, scanner_module, cancellable);
 
 			Bytes data = builder.build (data_va);
-			yield gdb.write_byte_array (data_va, data, cancellable);
+			yield debugger.write_byte_array (data_va, data, cancellable);
 
 			var regs = new Gee.HashMap<string, Variant> ();
 			regs.set_all (saved_regs);
@@ -946,27 +946,27 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
-			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, landing_zone_va, 4, cancellable);
-			GDB.Exception ex = yield gdb.continue_until_exception (cancellable);
+			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, landing_zone_va, 4, cancellable);
+			DebuggerException ex = yield debugger.continue_until_exception (cancellable);
 			if (ex.breakpoint != bp)
 				throw new Error.NOT_SUPPORTED ("Breakpoint did not trigger; please file a bug");
 			yield bp.remove (cancellable);
 
 			var num_matches = (uint) yield thread.read_register ("x0", cancellable);
 			var matches = new Gee.ArrayList<uint64?> ();
-			var pointer_size = gdb.pointer_size;
-			var raw_matches = yield gdb.read_buffer (builder.address_of ("matches"), num_matches * pointer_size, cancellable);
+			var pointer_size = debugger.pointer_size;
+			var raw_matches = yield debugger.read_buffer (builder.address_of ("matches"), num_matches * pointer_size, cancellable);
 			for (uint i = 0; i != num_matches; i++) {
 				uint64 address = raw_matches.read_pointer (i * pointer_size);
 				matches.add (address);
 			}
 
-			yield gdb.write_byte_array (module_va, original_memory, cancellable);
+			yield debugger.write_byte_array (module_va, original_memory, cancellable);
 			yield module_allocation.deallocate (cancellable);
 			yield thread.write_registers (saved_regs, cancellable);
 
 			if (was_running)
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 
 			return matches;
 		}
@@ -994,11 +994,11 @@ namespace Frida.Barebone {
 			if (args.length > 8)
 				throw new Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
 
-			bool was_running = gdb.state != STOPPED;
+			bool was_running = debugger.state != STOPPED;
 			if (was_running)
-				yield gdb.stop (cancellable);
+				yield debugger.stop (cancellable);
 
-			GDB.Thread thread = gdb.exception.thread;
+			DebuggerThread thread = debugger.exception.thread;
 			Gee.Map<string, Variant> saved_regs = yield thread.read_registers (cancellable);
 
 			var regs = new Gee.HashMap<string, Variant> ();
@@ -1023,23 +1023,23 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
-			GDB.Thread landed = yield run_until_pc (landing_zone, cancellable);
+			DebuggerThread landed = yield run_until_pc (landing_zone, cancellable);
 			uint64 retval = yield landed.read_register ("x0", cancellable);
 
 			yield restore_registers (thread, landed, saved_regs, cancellable);
 
 			if (was_running)
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 
 			return retval;
 		}
 
 		public async void execute (uint64 start, uint64 end, Cancellable? cancellable) throws Error, IOError {
-			bool was_running = gdb.state != STOPPED;
+			bool was_running = debugger.state != STOPPED;
 			if (was_running)
-				yield gdb.stop (cancellable);
+				yield debugger.stop (cancellable);
 
-			GDB.Thread thread = gdb.exception.thread;
+			DebuggerThread thread = debugger.exception.thread;
 			Gee.Map<string, Variant> saved_regs = yield thread.read_registers (cancellable);
 
 			var regs = new Gee.HashMap<string, Variant> ();
@@ -1049,23 +1049,23 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
-			GDB.Thread landed = yield run_until_pc (end, cancellable);
+			DebuggerThread landed = yield run_until_pc (end, cancellable);
 
 			yield restore_registers (thread, landed, saved_regs, cancellable);
 
 			if (was_running)
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 		}
 
 		// Runs the guest until a thread stops at the given address, and returns it. The callee may
 		// reschedule onto another core, and the stub identifies threads by core; nothing else reaches
 		// these addresses (a cold landing zone, or the scheduler with a predicate), so whichever
 		// thread stops there is ours.
-		public async GDB.Thread run_until_pc (uint64 address, Cancellable? cancellable) throws Error, IOError {
-			GDB.Breakpoint bp = yield gdb.add_breakpoint (SOFT, address, 4, cancellable);
-			GDB.Exception ex = null;
+		public async DebuggerThread run_until_pc (uint64 address, Cancellable? cancellable) throws Error, IOError {
+			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
+			DebuggerException ex = null;
 			do {
-				ex = yield gdb.continue_until_exception (cancellable);
+				ex = yield debugger.continue_until_exception (cancellable);
 			} while (ex.breakpoint != bp);
 			yield bp.remove (cancellable);
 			return ex.thread;
@@ -1074,7 +1074,7 @@ namespace Frida.Barebone {
 		// A core that the run migrated to keeps its own platform register, which on some kernels
 		// points at that core's per-processor data. Handing it the register of the core we began
 		// on would make every later access reach the wrong processor.
-		private async void restore_registers (GDB.Thread origin, GDB.Thread landed,
+		private async void restore_registers (DebuggerThread origin, DebuggerThread landed,
 				Gee.Map<string, Variant> saved, Cancellable? cancellable) throws Error, IOError {
 			var restored = saved;
 			if (landed.id != origin.id) {
@@ -1086,13 +1086,13 @@ namespace Frida.Barebone {
 			yield landed.write_registers (restored, cancellable);
 		}
 
-		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
+		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
 			Buffer? stack = null;
 			uint64 original_sp = regs["sp"].get_uint64 ();
 			if (arity > NUM_ARGS_IN_REGS)
-				stack = yield gdb.read_buffer (original_sp, (arity - NUM_ARGS_IN_REGS) * 8, cancellable);
+				stack = yield debugger.read_buffer (original_sp, (arity - NUM_ARGS_IN_REGS) * 8, cancellable);
 
 			return new Arm64CallFrame (thread, regs, stack, original_sp);
 		}
@@ -1106,7 +1106,7 @@ namespace Frida.Barebone {
 				get { return regs; }
 			}
 
-			private GDB.Thread thread;
+			private DebuggerThread thread;
 
 			private Gee.Map<string, Variant> regs;
 
@@ -1119,7 +1119,7 @@ namespace Frida.Barebone {
 				MODIFIED
 			}
 
-			public Arm64CallFrame (GDB.Thread thread, Gee.Map<string, Variant> regs, Buffer? stack, uint64 original_sp) {
+			public Arm64CallFrame (DebuggerThread thread, Gee.Map<string, Variant> regs, Buffer? stack, uint64 original_sp) {
 				this.thread = thread;
 
 				this.regs = regs;
@@ -1194,7 +1194,7 @@ namespace Frida.Barebone {
 					yield thread.write_registers (regs, cancellable);
 
 				if (stack_state == MODIFIED)
-					yield thread.client.write_byte_array (original_sp, stack.bytes, cancellable);
+					yield thread.debugger.write_byte_array (original_sp, stack.bytes, cancellable);
 			}
 		}
 
@@ -1230,7 +1230,7 @@ namespace Frida.Barebone {
 
 			size_t redirect_size = aw.can_branch_directly_between (target, on_enter_trampoline) ? 4 : 16;
 
-			var old_target_code = yield gdb.read_byte_array (target, redirect_size, cancellable);
+			var old_target_code = yield debugger.read_byte_array (target, redirect_size, cancellable);
 
 			aw.put_label (on_invoke_label);
 			var rl = new Gum.Arm64Relocator (old_target_code.get_data (), aw);
@@ -1245,7 +1245,7 @@ namespace Frida.Barebone {
 			aw.flush ();
 			var trampoline_code = new Bytes (scratch_buf[:aw.offset ()]);
 
-			yield gdb.write_byte_array (code_va, trampoline_code, cancellable);
+			yield debugger.write_byte_array (code_va, trampoline_code, cancellable);
 
 			aw.reset (scratch_buf);
 			aw.pc = target;
@@ -1253,7 +1253,7 @@ namespace Frida.Barebone {
 			aw.flush ();
 			var new_target_code = new Bytes (scratch_buf[:aw.offset ()]);
 
-			return new Arm64InlineHook (target, old_target_code, new_target_code, allocation, gdb);
+			return new Arm64InlineHook (target, old_target_code, new_target_code, allocation, debugger);
 		}
 
 		private static void emit_prolog (Gum.Arm64Writer aw, uint64 target) {
@@ -1304,7 +1304,7 @@ namespace Frida.Barebone {
 			private Bytes old_target_code;
 			private Bytes new_target_code;
 			private Allocation allocation;
-			private GDB.Client gdb;
+			private Debugger debugger;
 
 			private enum State {
 				DISABLED,
@@ -1313,12 +1313,12 @@ namespace Frida.Barebone {
 			}
 
 			public Arm64InlineHook (uint64 target, Bytes old_target_code, Bytes new_target_code, Allocation allocation,
-					GDB.Client gdb) {
+					Debugger debugger) {
 				this.target = target;
 				this.old_target_code = old_target_code;
 				this.new_target_code = new_target_code;
 				this.allocation = allocation;
-				this.gdb = gdb;
+				this.debugger = debugger;
 			}
 
 			public async void destroy (Cancellable? cancellable) throws Error, IOError {
@@ -1326,16 +1326,16 @@ namespace Frida.Barebone {
 					return;
 
 				// TODO: Refactor.
-				bool was_running = gdb.state != STOPPED;
+				bool was_running = debugger.state != STOPPED;
 				if (was_running)
-					yield gdb.stop (cancellable);
+					yield debugger.stop (cancellable);
 
 				yield disable (cancellable);
 				yield allocation.deallocate (cancellable);
 				state = DESTROYED;
 
 				if (was_running)
-					yield gdb.continue (cancellable);
+					yield debugger.resume (cancellable);
 			}
 
 			public async void enable (Cancellable? cancellable) throws Error, IOError {
@@ -1343,14 +1343,14 @@ namespace Frida.Barebone {
 					return;
 				if (state != DISABLED)
 					throw new Error.INVALID_OPERATION ("Invalid operation");
-				yield gdb.write_byte_array (target, new_target_code, cancellable);
+				yield debugger.write_byte_array (target, new_target_code, cancellable);
 				state = ENABLED;
 			}
 
 			public async void disable (Cancellable? cancellable) throws Error, IOError {
 				if (state != ENABLED)
 					return;
-				yield gdb.write_byte_array (target, old_target_code, cancellable);
+				yield debugger.write_byte_array (target, old_target_code, cancellable);
 				state = DISABLED;
 			}
 		}
@@ -1365,11 +1365,11 @@ namespace Frida.Barebone {
 			public bool sprr_enabled;
 			public uint64 sprr_perm;
 
-			public static async MMUParameters load (GDB.Client gdb, Cancellable? cancellable) throws Error, IOError {
-				GDB.Exception? exception = gdb.exception;
+			public static async MMUParameters load (Debugger debugger, Cancellable? cancellable) throws Error, IOError {
+				DebuggerException? exception = debugger.exception;
 				if (exception == null)
 					throw new Error.INVALID_OPERATION ("Unable to query in current state");
-				GDB.Thread thread = exception.thread;
+				DebuggerThread thread = exception.thread;
 
 				MMURegisters regs = yield MMURegisters.read (thread, cancellable);
 
@@ -1408,10 +1408,10 @@ namespace Frida.Barebone {
 			public uint64 sprr_config;
 			public uint64 sprr_perm;
 
-			public static async MMURegisters read (GDB.Thread thread, Cancellable? cancellable) throws Error, IOError {
+			public static async MMURegisters read (DebuggerThread thread, Cancellable? cancellable) throws Error, IOError {
 				var regs = new MMURegisters ();
 
-				GDB.Client client = thread.client;
+				Debugger client = thread.debugger;
 				if ("corellium" in client.features) {
 					string system_regs = yield client.run_remote_command ("sr", cancellable);
 					foreach (string line in system_regs.split ("\n")) {
@@ -1562,15 +1562,15 @@ namespace Frida.Barebone {
 			private size_t _size;
 			private uint64 first_slot;
 			private Bytes? old_descriptors;
-			private GDB.Client gdb;
+			private Debugger debugger;
 
 			public DescriptorAllocation (uint64 base_va, size_t size, uint64 first_slot, Bytes old_descriptors,
-					GDB.Client gdb) {
+					Debugger debugger) {
 				this.base_va = base_va;
 				this._size = size;
 				this.first_slot = first_slot;
 				this.old_descriptors = old_descriptors;
-				this.gdb = gdb;
+				this.debugger = debugger;
 			}
 
 			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
@@ -1578,14 +1578,14 @@ namespace Frida.Barebone {
 					throw new Error.INVALID_OPERATION ("Already deallocated");
 				Bytes d = old_descriptors;
 				old_descriptors = null;
-				bool was_running = yield enter_physical_addressing (gdb, cancellable);
+				bool was_running = yield enter_physical_addressing (debugger, cancellable);
 				GLib.Error? failure = null;
 				try {
-					yield gdb.write_byte_array (first_slot, d, cancellable);
+					yield debugger.write_byte_array (first_slot, d, cancellable);
 				} catch (GLib.Error e) {
 					failure = e;
 				}
-				yield leave_physical_addressing (gdb, was_running, cancellable);
+				yield leave_physical_addressing (debugger, was_running, cancellable);
 				throw_if_failed (failure);
 			}
 		}

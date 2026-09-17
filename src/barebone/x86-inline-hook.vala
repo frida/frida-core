@@ -5,7 +5,7 @@ namespace Frida.Barebone {
 		private Bytes old_target_code;
 		private Bytes new_target_code;
 		private Allocation allocation;
-		private GDB.Client gdb;
+		private Debugger debugger;
 		private State state = DISABLED;
 
 		private enum State {
@@ -20,7 +20,7 @@ namespace Frida.Barebone {
 		private const size_t MAX_INSTRUCTION_SIZE = 15;
 
 		public static async InlineHook create (uint64 target, uint64 handler, Gum.CpuType cpu, Allocator allocator,
-				GDB.Client gdb, Cancellable? cancellable) throws Error, IOError {
+				Debugger debugger, Cancellable? cancellable) throws Error, IOError {
 			Allocation allocation = yield allocator.allocate (allocator.page_size, allocator.page_size, cancellable);
 			uint64 code_va = allocation.virtual_address;
 
@@ -40,7 +40,7 @@ namespace Frida.Barebone {
 				? DIRECT_REDIRECT_SIZE
 				: INDIRECT_REDIRECT_SIZE;
 
-			Bytes displaced = yield gdb.read_byte_array (target, redirect_size + MAX_INSTRUCTION_SIZE, cancellable);
+			Bytes displaced = yield debugger.read_byte_array (target, redirect_size + MAX_INSTRUCTION_SIZE, cancellable);
 
 			var rl = new Gum.X86Relocator (displaced.get_data (), cw);
 			rl.input_pc = target;
@@ -54,7 +54,7 @@ namespace Frida.Barebone {
 			cw.flush ();
 
 			var trampoline_code = new Bytes (scratch[:cw.offset ()]);
-			yield gdb.write_byte_array (code_va, trampoline_code, cancellable);
+			yield debugger.write_byte_array (code_va, trampoline_code, cancellable);
 
 			cw.reset (scratch);
 			cw.set_target_cpu (cpu);
@@ -65,7 +65,7 @@ namespace Frida.Barebone {
 
 			var old_target_code = new Bytes (displaced.get_data ()[:new_target_code.get_size ()]);
 
-			return new X86InlineHook (target, old_target_code, new_target_code, allocation, gdb);
+			return new X86InlineHook (target, old_target_code, new_target_code, allocation, debugger);
 		}
 
 		private static void emit_prolog (Gum.X86Writer cw, uint64 target) {
@@ -82,28 +82,28 @@ namespace Frida.Barebone {
 		}
 
 		public X86InlineHook (uint64 target, Bytes old_target_code, Bytes new_target_code, Allocation allocation,
-				GDB.Client gdb) {
+				Debugger debugger) {
 			this.target = target;
 			this.old_target_code = old_target_code;
 			this.new_target_code = new_target_code;
 			this.allocation = allocation;
-			this.gdb = gdb;
+			this.debugger = debugger;
 		}
 
 		public async void destroy (Cancellable? cancellable) throws Error, IOError {
 			if (state == DESTROYED)
 				return;
 
-			bool was_running = gdb.state != STOPPED;
+			bool was_running = debugger.state != STOPPED;
 			if (was_running)
-				yield gdb.stop (cancellable);
+				yield debugger.stop (cancellable);
 
 			yield disable (cancellable);
 			yield allocation.deallocate (cancellable);
 			state = DESTROYED;
 
 			if (was_running)
-				yield gdb.continue (cancellable);
+				yield debugger.resume (cancellable);
 		}
 
 		public async void enable (Cancellable? cancellable) throws Error, IOError {
@@ -111,14 +111,14 @@ namespace Frida.Barebone {
 				return;
 			if (state != DISABLED)
 				throw new Error.INVALID_OPERATION ("Invalid operation");
-			yield gdb.write_byte_array (target, new_target_code, cancellable);
+			yield debugger.write_byte_array (target, new_target_code, cancellable);
 			state = ENABLED;
 		}
 
 		public async void disable (Cancellable? cancellable) throws Error, IOError {
 			if (state != ENABLED)
 				return;
-			yield gdb.write_byte_array (target, old_target_code, cancellable);
+			yield debugger.write_byte_array (target, old_target_code, cancellable);
 			state = DISABLED;
 		}
 	}

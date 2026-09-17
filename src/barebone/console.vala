@@ -7,10 +7,10 @@ namespace Frida.Barebone {
 			get { return 2; }
 		}
 
-		private GDB.Client gdb;
+		private Debugger debugger;
 
-		public ConsoleLogHandler (GDB.Client gdb) {
-			this.gdb = gdb;
+		public ConsoleLogHandler (Debugger debugger) {
+			this.debugger = debugger;
 		}
 
 		public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
@@ -18,7 +18,7 @@ namespace Frida.Barebone {
 			var message = args[0];
 			var len = (long) args[1];
 
-			Bytes str_bytes = yield gdb.read_byte_array (message, len, cancellable);
+			Bytes str_bytes = yield debugger.read_byte_array (message, len, cancellable);
 			unowned uint8[] str_data = str_bytes.get_data ();
 			unowned string str_raw = (string) str_data;
 			string str = str_raw.substring (0, len);

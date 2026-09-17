@@ -16,11 +16,11 @@ namespace Frida.Barebone {
 			throws Error, IOError {
 		var exports = new Gee.ArrayList<Export> ();
 
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		Buffer headers;
 		try {
-			headers = gdb.make_buffer (yield gdb.read_byte_array (image, HEADERS_SIZE, cancellable));
+			headers = debugger.make_buffer (yield debugger.read_byte_array (image, HEADERS_SIZE, cancellable));
 		} catch (Error e) {
 			return exports;
 		}
@@ -49,8 +49,8 @@ namespace Frida.Barebone {
 		if (directory_rva == 0 || directory_size < DIRECTORY_SIZE || directory_size > MAX_DIRECTORY_SIZE)
 			return exports;
 
-		Buffer directory = gdb.make_buffer (
-			yield read_present_pages (gdb, image + directory_rva, directory_size, cancellable));
+		Buffer directory = debugger.make_buffer (
+			yield read_present_pages (debugger, image + directory_rva, directory_size, cancellable));
 		var window = new DirectoryWindow (directory, directory_rva, directory_size);
 
 		uint32 count = directory.read_uint32 (NAME_COUNT_OFFSET);
@@ -85,11 +85,11 @@ namespace Frida.Barebone {
 
 	public static async uint32 read_image_size (Machine machine, uint64 image, Cancellable? cancellable)
 			throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		Buffer headers;
 		try {
-			headers = gdb.make_buffer (yield gdb.read_byte_array (image, HEADERS_SIZE, cancellable));
+			headers = debugger.make_buffer (yield debugger.read_byte_array (image, HEADERS_SIZE, cancellable));
 		} catch (Error e) {
 			return 0;
 		}
@@ -104,7 +104,7 @@ namespace Frida.Barebone {
 
 	// Part of an image can be out of memory. Read one page at a time and let the absent pages
 	// read as zero, because no name or table entry has that value.
-	private static async Bytes read_present_pages (GDB.Client gdb, uint64 address, size_t size,
+	private static async Bytes read_present_pages (Debugger debugger, uint64 address, size_t size,
 			Cancellable? cancellable) throws Error, IOError {
 		var result = new uint8[size];
 
@@ -116,7 +116,7 @@ namespace Frida.Barebone {
 				PAGE_SIZE - (size_t) (cursor & (PAGE_SIZE - 1)));
 
 			try {
-				unowned uint8[] page = (yield gdb.read_byte_array (cursor, chunk, cancellable))
+				unowned uint8[] page = (yield debugger.read_byte_array (cursor, chunk, cancellable))
 					.get_data ();
 				Memory.copy ((uint8 *) result + offset, page, chunk);
 				present++;

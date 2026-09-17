@@ -5,7 +5,7 @@ namespace Frida.Barebone {
 		var modules = new Gee.ArrayList<ModuleInfo> ();
 		var symbols = new Gee.ArrayList<SymbolInfo> ();
 
-		Shape shape = Shape.of (machine.gdb);
+		Shape shape = Shape.of (machine.debugger);
 
 		Anchors anchors = yield find_anchors (machine, shape, cancellable);
 
@@ -85,11 +85,11 @@ namespace Frida.Barebone {
 
 	private static async uint64 find_kernel_image (Machine machine, Shape shape, Cancellable? cancellable)
 			throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		for (uint attempt = 0; attempt != MAX_CATCH_ATTEMPTS; attempt++) {
-			if (yield stopped_in_kernel_mode (gdb, cancellable)) {
-				uint64 region = yield gdb.exception.thread.read_register (KERNEL_PCR_REGISTER, cancellable);
+			if (yield stopped_in_kernel_mode (debugger, cancellable)) {
+				uint64 region = yield debugger.exception.thread.read_register (KERNEL_PCR_REGISTER, cancellable);
 				if (is_kernel_address (region, shape)) {
 					uint64 image = yield find_image_below_pointers (machine, region, shape, cancellable);
 					if (image != 0)
@@ -97,7 +97,7 @@ namespace Frida.Barebone {
 				}
 			}
 
-			yield catch_processor_again (gdb, cancellable);
+			yield catch_processor_again (debugger, cancellable);
 		}
 
 		throw new Error.NOT_SUPPORTED ("Unable to find the kernel image");
@@ -105,8 +105,8 @@ namespace Frida.Barebone {
 
 	private static async uint64 find_image_below_pointers (Machine machine, uint64 region, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
-		Buffer page = gdb.make_buffer (yield gdb.read_byte_array (region, PCR_SCAN_SIZE, cancellable));
+		Debugger debugger = machine.debugger;
+		Buffer page = debugger.make_buffer (yield debugger.read_byte_array (region, PCR_SCAN_SIZE, cancellable));
 
 		var visited = new Gee.HashSet<uint64?> ((n) => (uint) (*(uint64 *) n), (a, b) => *(uint64 *) a == *(uint64 *) b);
 		uint budget = MAX_IMAGE_PROBES;
@@ -139,19 +139,19 @@ namespace Frida.Barebone {
 
 	private static async uint64 find_process_list_head (Machine machine, uint64 kernel, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		uint64 holder = yield find_export (machine, kernel, INITIAL_PROCESS, cancellable);
 		if (!is_kernel_address (holder, shape))
 			return 0;
 
-		uint64 process = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (holder, shape.pointer_size,
+		uint64 process = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (holder, shape.pointer_size,
 			cancellable)), 0, shape);
 		if (!is_kernel_address (process, shape))
 			return 0;
 
 		uint32 image_size = yield read_image_size (machine, kernel, cancellable);
-		Buffer body = gdb.make_buffer (yield gdb.read_byte_array (process, PROCESS_SCAN_SIZE, cancellable));
+		Buffer body = debugger.make_buffer (yield debugger.read_byte_array (process, PROCESS_SCAN_SIZE, cancellable));
 
 		for (size_t offset = 0; offset != PROCESS_SCAN_SIZE - (2 * (size_t) shape.pointer_size);
 				offset += shape.pointer_size) {
@@ -172,10 +172,10 @@ namespace Frida.Barebone {
 		if (!is_kernel_address (forward, shape))
 			return false;
 
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 		Buffer neighbour;
 		try {
-			neighbour = gdb.make_buffer (yield gdb.read_byte_array (forward, 2 * shape.pointer_size,
+			neighbour = debugger.make_buffer (yield debugger.read_byte_array (forward, 2 * shape.pointer_size,
 				cancellable));
 		} catch (Error e) {
 			return false;
@@ -186,13 +186,13 @@ namespace Frida.Barebone {
 
 	private static async uint64 walk_to_image (Machine machine, uint64 node, uint64 image, uint32 image_size,
 			Shape shape, Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		uint64 entry = node;
 		for (uint step = 0; step != MAX_PROCESSES; step++) {
 			Buffer links;
 			try {
-				links = gdb.make_buffer (yield gdb.read_byte_array (entry, shape.pointer_size, cancellable));
+				links = debugger.make_buffer (yield debugger.read_byte_array (entry, shape.pointer_size, cancellable));
 			} catch (Error e) {
 				return 0;
 			}
@@ -213,17 +213,17 @@ namespace Frida.Barebone {
 	// gives the kernel and its module list, which is sufficient to find the other data.
 	private static async uint64 find_version_block (Machine machine, Shape shape, Cancellable? cancellable)
 			throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		uint64 pcr_base = yield find_processor_control_region (machine, shape, cancellable);
 
-		Buffer pcr = gdb.make_buffer (yield gdb.read_byte_array (pcr_base,
+		Buffer pcr = debugger.make_buffer (yield debugger.read_byte_array (pcr_base,
 			shape.version_block + shape.pointer_size, cancellable));
 		uint64 version_block = read_pointer (pcr, shape.version_block, shape);
 		if (!is_kernel_address (version_block, shape))
 			throw new Error.NOT_SUPPORTED ("Unable to find the kernel debugger version block");
 
-		Buffer v = gdb.make_buffer (yield gdb.read_byte_array (version_block, VERSION_BLOCK_SIZE, cancellable));
+		Buffer v = debugger.make_buffer (yield debugger.read_byte_array (version_block, VERSION_BLOCK_SIZE, cancellable));
 		if (v.read_uint16 (MACHINE_TYPE_OFFSET) != shape.machine_type)
 			throw new Error.NOT_SUPPORTED ("Kernel is not the architecture the stub reports");
 
@@ -235,7 +235,7 @@ namespace Frida.Barebone {
 	// thread, because the processor exchanges the two values.
 	private static async uint64 find_processor_control_region (Machine machine, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
 		if (shape.pointer_size == 4) {
 			if (yield points_at_itself (machine, PCR_BASE, shape, cancellable))
@@ -244,7 +244,7 @@ namespace Frida.Barebone {
 		}
 
 		for (uint attempt = 0; attempt != MAX_CATCH_ATTEMPTS; attempt++) {
-			GDB.Thread thread = gdb.exception.thread;
+			DebuggerThread thread = debugger.exception.thread;
 			foreach (string name in new string[] { "gs_base", "k_gs_base" }) {
 				uint64 candidate;
 				try {
@@ -256,23 +256,23 @@ namespace Frida.Barebone {
 					return candidate;
 			}
 
-			yield catch_processor_again (gdb, cancellable);
+			yield catch_processor_again (debugger, cancellable);
 		}
 
 		throw new Error.NOT_SUPPORTED ("Unable to find the processor control region");
 	}
 
 	// You can read only the value that GS holds now. Thus continue the guest and try again.
-	private static async void catch_processor_again (GDB.Client gdb, Cancellable? cancellable)
+	private static async void catch_processor_again (Debugger debugger, Cancellable? cancellable)
 			throws Error, IOError {
-		yield gdb.continue (cancellable);
+		yield debugger.resume (cancellable);
 
 		var source = new TimeoutSource (CATCH_INTERVAL_MS);
 		source.set_callback (catch_processor_again.callback);
 		source.attach (MainContext.get_thread_default ());
 		yield;
 
-		yield gdb.stop (cancellable);
+		yield debugger.stop (cancellable);
 	}
 
 	private const uint MAX_CATCH_ATTEMPTS = 20;
@@ -284,10 +284,10 @@ namespace Frida.Barebone {
 		if (!is_kernel_address (candidate, shape))
 			return false;
 
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 		Buffer head;
 		try {
-			head = gdb.make_buffer (yield gdb.read_byte_array (candidate + shape.self,
+			head = debugger.make_buffer (yield debugger.read_byte_array (candidate + shape.self,
 				shape.pointer_size, cancellable));
 		} catch (Error e) {
 			return false;
@@ -300,9 +300,9 @@ namespace Frida.Barebone {
 	// the pointers in it.
 	private static async uint64 read_loaded_module_list (Machine machine, uint64 version_block, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
-		uint64 list = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (
+		uint64 list = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (
 			version_block + LOADED_MODULE_LIST_OFFSET, shape.pointer_size, cancellable)), 0, shape);
 		if (!is_kernel_address (list, shape))
 			throw new Error.NOT_SUPPORTED ("Unable to find the loaded module list");
@@ -313,19 +313,19 @@ namespace Frida.Barebone {
 	// The kernel gives the addresses that a debugger needs here, and no module exports them.
 	private static async uint64 read_process_list_head (Machine machine, uint64 version_block, Shape shape,
 			Cancellable? cancellable) throws Error, IOError {
-		GDB.Client gdb = machine.gdb;
+		Debugger debugger = machine.debugger;
 
-		uint64 data_list = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (
+		uint64 data_list = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (
 			version_block + DEBUGGER_DATA_LIST_OFFSET, shape.pointer_size, cancellable)), 0, shape);
 		if (!is_kernel_address (data_list, shape))
 			return 0;
 
-		uint64 block = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (data_list, shape.pointer_size,
+		uint64 block = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (data_list, shape.pointer_size,
 			cancellable)), 0, shape);
 		if (!is_kernel_address (block, shape))
 			return 0;
 
-		uint64 head = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (
+		uint64 head = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (
 			block + PROCESS_LIST_HEAD_OFFSET, shape.pointer_size, cancellable)), 0, shape);
 		if (!is_kernel_address (head, shape))
 			return 0;
@@ -337,14 +337,14 @@ namespace Frida.Barebone {
 			Cancellable? cancellable) throws Error, IOError {
 		var modules = new Gee.ArrayList<LoadedModule> ();
 
-		GDB.Client gdb = machine.gdb;
-		uint64 entry = read_pointer (gdb.make_buffer (yield gdb.read_byte_array (head, shape.pointer_size,
+		Debugger debugger = machine.debugger;
+		uint64 entry = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (head, shape.pointer_size,
 			cancellable)), 0, shape);
 		var visited = new Gee.HashSet<uint64?> ((n) => (uint) (*(uint64 *) n), (a, b) => *(uint64 *) a == *(uint64 *) b);
 		while (entry != head && is_kernel_address (entry, shape) && !visited.contains (entry)) {
 			visited.add (entry);
 
-			Buffer e = gdb.make_buffer (yield gdb.read_byte_array (entry, shape.table_entry_size, cancellable));
+			Buffer e = debugger.make_buffer (yield debugger.read_byte_array (entry, shape.table_entry_size, cancellable));
 
 			uint64 base_address = read_pointer (e, shape.dll_base, shape);
 			if (is_kernel_address (base_address, shape)) {
@@ -393,7 +393,7 @@ namespace Frida.Barebone {
 		if (length == 0 || length > MAX_NAME_SIZE || !is_kernel_address (buffer, shape))
 			return "";
 
-		Bytes raw = yield machine.gdb.read_byte_array (buffer, length, cancellable);
+		Bytes raw = yield machine.debugger.read_byte_array (buffer, length, cancellable);
 		try {
 			return convert ((string) raw.get_data (), length, "UTF-8", "UTF-16LE");
 		} catch (ConvertError e) {
@@ -401,11 +401,11 @@ namespace Frida.Barebone {
 		}
 	}
 
-	internal static async bool stopped_in_kernel_mode (GDB.Client gdb, Cancellable? cancellable)
+	internal static async bool stopped_in_kernel_mode (Debugger debugger, Cancellable? cancellable)
 			throws Error, IOError {
-		GDB.Thread thread = gdb.exception.thread;
+		DebuggerThread thread = debugger.exception.thread;
 
-		if (gdb.arch == GDB.TargetArch.ARM64) {
+		if (debugger.arch == TargetArch.ARM64) {
 			uint64 state = yield thread.read_register ("cpsr", cancellable);
 			return ((state >> EXCEPTION_LEVEL_SHIFT) & EXCEPTION_LEVEL_MASK) == KERNEL_EXCEPTION_LEVEL;
 		}
@@ -435,9 +435,9 @@ namespace Frida.Barebone {
 		public size_t base_name;
 		public size_t name_buffer;
 
-		public static Shape of (GDB.Client gdb) {
-			Shape shape = for_pointer_size (gdb.pointer_size);
-			if (gdb.arch == GDB.TargetArch.ARM64)
+		public static Shape of (Debugger debugger) {
+			Shape shape = for_pointer_size (debugger.pointer_size);
+			if (debugger.arch == TargetArch.ARM64)
 				shape.machine_type = IMAGE_FILE_MACHINE_ARM64;
 			return shape;
 		}

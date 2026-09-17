@@ -1,7 +1,7 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class UnknownMachine : Object, Machine {
-		public GDB.Client gdb {
+		public Debugger debugger {
 			get;
 			set;
 		}
@@ -14,8 +14,8 @@ namespace Frida.Barebone {
 			get { return "none"; }
 		}
 
-		public UnknownMachine (GDB.Client gdb) {
-			Object (gdb: gdb);
+		public UnknownMachine (Debugger debugger) {
+			Object (debugger: debugger);
 		}
 
 		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
@@ -53,7 +53,7 @@ namespace Frida.Barebone {
 			throw_not_supported ();
 		}
 
-		public async CallFrame load_call_frame (GDB.Thread thread, uint arity, Cancellable? cancellable)
+		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable)
 				throws Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
@@ -69,7 +69,7 @@ namespace Frida.Barebone {
 				get { return regs; }
 			}
 
-			private GDB.Thread thread;
+			private DebuggerThread thread;
 
 			private Gee.Map<string, Variant> regs;
 
@@ -78,7 +78,7 @@ namespace Frida.Barebone {
 				MODIFIED
 			}
 
-			public UnknownCallFrame (GDB.Thread thread, Gee.Map<string, Variant> regs) {
+			public UnknownCallFrame (DebuggerThread thread, Gee.Map<string, Variant> regs) {
 				this.thread = thread;
 
 				this.regs = regs;

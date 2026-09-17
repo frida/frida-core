@@ -78,12 +78,12 @@ namespace Frida.Barebone {
 		if (machine is ArmMachine)
 			return linked_base;
 
-		GDB.Client gdb = machine.gdb;
-		var thread = gdb.exception.thread;
+		Debugger debugger = machine.debugger;
+		var thread = debugger.exception.thread;
 		var registers = yield thread.read_registers (cancellable);
 
 		if (machine is IA32Machine || machine is X64Machine)
-			return yield find_relocated_kernel (gdb, registers, linked_base, symbols, cancellable);
+			return yield find_relocated_kernel (debugger, registers, linked_base, symbols, cancellable);
 
 		uint64 pc = registers["pc"].get_uint64 ();
 
@@ -96,7 +96,7 @@ namespace Frida.Barebone {
 			// A kernel that was not slid at all -- no VA randomization, as the emulator boots it --
 			// carries its banner at the linked address, so confirm that before hunting, since the
 			// hijacked pc may be off in a module the sweep below would never reach back from.
-			if (yield banner_present_at (gdb, banner, cancellable))
+			if (yield banner_present_at (debugger, banner, cancellable))
 				return linked_base;
 
 			uint64 banner_offset = banner - linked_base;
@@ -105,7 +105,7 @@ namespace Frida.Barebone {
 			uint64 highest = (pc + KERNEL_ALIGNMENT) & ~(KERNEL_ALIGNMENT - 1);
 
 			for (uint64 landing = lowest; landing <= highest; landing += KERNEL_ALIGNMENT) {
-				if (yield banner_present_at (gdb, landing + banner_offset, cancellable))
+				if (yield banner_present_at (debugger, landing + banner_offset, cancellable))
 					return landing;
 			}
 		}
@@ -116,7 +116,7 @@ namespace Frida.Barebone {
 			// Most of what is walked past is not mapped at all, and saying so is how the
 			// guest declines to be read.
 			try {
-				var header = yield gdb.read_byte_array (candidate + IMAGE_MAGIC_OFFSET,
+				var header = yield debugger.read_byte_array (candidate + IMAGE_MAGIC_OFFSET,
 					IMAGE_MAGIC.length, cancellable);
 				if (Memory.cmp (header.get_data (), IMAGE_MAGIC.data, IMAGE_MAGIC.length) == 0)
 					return candidate;
@@ -129,7 +129,7 @@ namespace Frida.Barebone {
 		throw new Error.NOT_SUPPORTED ("Unable to find the running kernel; is the guest in kernel mode?");
 	}
 
-	private static async uint64 find_relocated_kernel (GDB.Client gdb, Gee.Map<string, Variant> registers,
+	private static async uint64 find_relocated_kernel (Debugger debugger, Gee.Map<string, Variant> registers,
 			uint64 linked_base, Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
 		uint64 pc = registers.has_key ("rip")
 			? registers["rip"].get_uint64 ()
@@ -147,7 +147,7 @@ namespace Frida.Barebone {
 
 		for (uint64 landing = lowest; landing <= highest; landing += KERNEL_ALIGNMENT) {
 			try {
-				var head = yield gdb.read_byte_array (landing + banner_offset, KERNEL_BANNER.length, cancellable);
+				var head = yield debugger.read_byte_array (landing + banner_offset, KERNEL_BANNER.length, cancellable);
 				if (Memory.cmp (head.get_data (), KERNEL_BANNER.data, KERNEL_BANNER.length) == 0)
 					return landing;
 			} catch (Error e) {
@@ -155,17 +155,17 @@ namespace Frida.Barebone {
 		}
 
 		for (uint64 landing = KERNEL_TEXT_MIN; landing < KERNEL_TEXT_MAX; landing += KERNEL_ALIGNMENT) {
-			if (yield banner_present_at (gdb, landing + banner_offset, cancellable))
+			if (yield banner_present_at (debugger, landing + banner_offset, cancellable))
 				return landing;
 		}
 
 		throw new Error.NOT_SUPPORTED ("Unable to find the relocated kernel; is the guest in kernel mode?");
 	}
 
-	private static async bool banner_present_at (GDB.Client gdb, uint64 address, Cancellable? cancellable)
+	private static async bool banner_present_at (Debugger debugger, uint64 address, Cancellable? cancellable)
 			throws Error, IOError {
 		try {
-			var head = yield gdb.read_byte_array (address, KERNEL_BANNER.length, cancellable);
+			var head = yield debugger.read_byte_array (address, KERNEL_BANNER.length, cancellable);
 			return Memory.cmp (head.get_data (), KERNEL_BANNER.data, KERNEL_BANNER.length) == 0;
 		} catch (Error e) {
 			return false;

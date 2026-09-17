@@ -36,7 +36,7 @@ namespace Frida.Barebone {
 			yield halt (cancellable, HALT_TIMEOUT_MSEC);
 		}
 
-		private static GDB.TargetArch arch_from_cpu_type (uint cpu_type) {
+		private static TargetArch arch_from_cpu_type (uint cpu_type) {
 			switch (cpu_type) {
 				case 0x00000007:	return IA32;
 				case 0x01000007:	return X64;
