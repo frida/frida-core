@@ -38,6 +38,8 @@ namespace Frida.Barebone {
 			default = SYSTEM_V;
 		}
 
+		public uint64 call_landing_zone = 0;
+
 		internal unowned string[] arg_reg_names {
 			get {
 				return (calling_convention == MICROSOFT) ? ARG_REG_NAMES_MS : ARG_REG_NAMES_SYSV;
@@ -151,7 +153,7 @@ namespace Frida.Barebone {
 			var regs = new Gee.HashMap<string, Variant> ();
 			regs.set_all (saved_regs);
 
-			uint64 landing_zone = saved_regs["rip"].get_uint64 ();
+			uint64 landing_zone = (call_landing_zone != 0) ? call_landing_zone : saved_regs["rip"].get_uint64 ();
 
 			uint64 sp = saved_regs["rsp"].get_uint64 () - reserved_below_sp - 8;
 			sp = (sp & ~15ULL) - 8;

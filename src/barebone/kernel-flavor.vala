@@ -347,6 +347,9 @@ namespace Frida.Barebone {
 			var arm = machine as ArmMachine;
 			if (bug_check != null && arm != null)
 				arm.call_landing_zone = bug_check.offset;
+			var x64 = machine as X64Machine;
+			if (bug_check != null && x64 != null)
+				x64.call_landing_zone = bug_check.offset;
 
 			yield run_until_yield_point (cancellable);
 		}
