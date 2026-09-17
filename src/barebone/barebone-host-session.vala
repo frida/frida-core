@@ -133,6 +133,9 @@ namespace Frida {
 				case BareboneStubFlavor.PARALLELS:
 					debugger = yield Barebone.ParallelsStubClient.open (stream, cancellable);
 					break;
+				case BareboneStubFlavor.VIRTUALBOX:
+					debugger = yield Barebone.VirtualBoxStubClient.open (stream, cancellable);
+					break;
 				default:
 					debugger = yield GDB.Client.open (stream, cancellable);
 					break;

@@ -2503,6 +2503,7 @@ namespace Frida {
 				case "vz":			return BareboneStubFlavor.VZ;
 				case "parallels":		return BareboneStubFlavor.PARALLELS;
 				case "android-emulator":	return BareboneStubFlavor.ANDROID_EMULATOR;
+				case "virtualbox":		return BareboneStubFlavor.VIRTUALBOX;
 				default:			return BareboneStubFlavor.GDB_REMOTE;
 			}
 		}
@@ -2515,13 +2516,16 @@ namespace Frida {
 	 * generic client cannot handle, and reads guest physical memory from the local process at
 	 * pid. PARALLELS drives the debug server of Parallels Desktop. ANDROID_EMULATOR speaks the
 	 * generic dialect over host/port but its gdbstub is unusable until instrumented, so it too
-	 * requires the local process at pid.
+	 * requires the local process at pid. VIRTUALBOX drives the stub built into VirtualBox, which
+	 * answers one request at a time and thus cannot be spoken to in the pipelined manner the
+	 * generic client uses.
 	 */
 	public enum BareboneStubFlavor {
 		GDB_REMOTE,
 		VZ,
 		PARALLELS,
-		ANDROID_EMULATOR
+		ANDROID_EMULATOR,
+		VIRTUALBOX
 	}
 
 	public abstract class BareboneAllocatorConfig : Object {

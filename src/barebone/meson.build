@@ -27,6 +27,7 @@ backend_sources += files(
   'x86-inline-hook.vala',
   'vz-stub.vala',
   'parallels-stub.vala',
+  'virtualbox-stub.vala',
   'arch-x86' / 'machine.vala',
   'arch-x86_64' / 'machine.vala',
   'arch-arm' / 'machine.vala',
