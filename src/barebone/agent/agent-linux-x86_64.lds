@@ -23,6 +23,7 @@ SECTIONS {
     _kernel_write = .; . += 8;
     ___kmalloc_noprof = .; . += 8;
     _kmalloc = .; . += 8;
+    ___kmalloc = .; . += 8;
     _kfree = .; . += 8;
     _execmem_alloc = .; . += 8;
     _set_memory_rw = .; . += 8;
@@ -48,6 +49,7 @@ SECTIONS {
     _schedule = .; . += 8;
     _ktime_get_mono_fast_ns = .; . += 8;
     _ktime_get_real_ts64 = .; . += 8;
+    _getnstimeofday64 = .; . += 8;
     _send_sig = .; . += 8;
     _free_irq = .; . += 8;
     _request_threaded_irq = .; . += 8;
@@ -100,6 +102,15 @@ SECTIONS {
     _call_usermodehelper_exec = .; . += 8;
     __copy_from_user = .; . += 8;
     _access_process_vm = .; . += 8;
+    _fget_task = .; . += 8;
+    _init_net = .; . += 8;
+    _sock_create_kern = .; . += 8;
+    _kernel_connect = .; . += 8;
+    _kernel_sendmsg = .; . += 8;
+    _kernel_recvmsg = .; . += 8;
+    _sock_release = .; . += 8;
+    _sock_def_readable = .; . += 8;
+    _of_irq_parse_and_map_pci = .; . += 8;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very
      same pages; everything below it each copy needs its own of. */
