@@ -2,6 +2,7 @@ namespace Frida {
 	private sealed class EmulatorInstrumentation : Object {
 		private DeviceManager manager;
 		private Script script;
+		private GDB.Client? client;
 
 		private EmulatorInstrumentation (DeviceManager manager, Script script) {
 			this.manager = manager;
@@ -45,6 +46,45 @@ namespace Frida {
 					} catch (IOError e) {
 					}
 				}
+			}
+		}
+
+		public void adopt_breakpoints (GDB.Client client) {
+			this.client = client;
+
+			client.breakpoints_provided_externally = true;
+			client.breakpoints_changed.connect (on_breakpoints_changed);
+			script.message.connect (on_message);
+		}
+
+		private void on_breakpoints_changed (uint64[] addresses) {
+			var builder = new Json.Builder ();
+			builder.begin_object ();
+			builder.set_member_name ("type");
+			builder.add_string_value ("breakpoints");
+			builder.set_member_name ("addresses");
+			builder.begin_array ();
+			foreach (uint64 address in addresses)
+				builder.add_string_value (("0x%" + uint64.FORMAT_MODIFIER + "x").printf (address));
+			builder.end_array ();
+			builder.end_object ();
+			script.post (Json.to_string (builder.get_root (), false));
+		}
+
+		private void on_message (string json, Bytes? data) {
+			try {
+				var root = Json.from_string (json).get_object ();
+				if (!root.has_member ("payload"))
+					return;
+				var payload = root.get_object_member ("payload");
+				if (payload.get_string_member ("type") != "breakpoint")
+					return;
+
+				uint64 address = uint64.parse (payload.get_string_member ("address").substring (2), 16);
+				uint vp = (uint) payload.get_int_member ("vp");
+				uint64 stack = uint64.parse (payload.get_string_member ("rsp").substring (2), 16);
+				client.report_breakpoint_hit.begin (address, vp, stack, null);
+			} catch (GLib.Error e) {
 			}
 		}
 

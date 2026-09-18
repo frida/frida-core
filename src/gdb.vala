@@ -56,6 +56,11 @@ namespace Frida.GDB {
 		private size_t max_packet_size = 1024;
 		private AckMode ack_mode = SEND_ACKS;
 		internal bool bulk_registers = true;
+		internal bool breakpoints_provided_externally = false;
+		public signal void breakpoints_changed (uint64[] addresses);
+		private uint64? trapped_address;
+		private string? trapped_thread;
+		private uint64 trapped_stack_pointer;
 
 		protected virtual bool pipelining_supported {
 			get {
@@ -651,16 +656,49 @@ namespace Frida.GDB {
 				kind = HARD;
 
 			var breakpoint = new Breakpoint (kind, address, size, this);
-			yield breakpoint.enable (cancellable);
 			breakpoints[address] = breakpoint;
+			notify_breakpoints_changed ();
+
+			try {
+				yield breakpoint.enable (cancellable);
+			} catch (GLib.Error e) {
+				breakpoints.unset (address);
+				notify_breakpoints_changed ();
+				throw_api_error (e);
+			}
 
 			breakpoint.removed.connect (on_breakpoint_removed);
 
 			return breakpoint;
 		}
 
+		public async void report_breakpoint_hit (uint64 address, uint vp_index, uint64 stack_pointer,
+				Cancellable? cancellable = null) throws Error, IOError {
+			if (!breakpoints.has_key (address))
+				return;
+
+			trapped_address = address;
+			trapped_thread = "%02x".printf (vp_index + 1);
+			trapped_stack_pointer = stack_pointer;
+
+			if (state != STOPPED)
+				yield stop (cancellable);
+		}
+
+		internal void notify_breakpoints_changed () {
+			if (!breakpoints_provided_externally)
+				return;
+
+			var addresses = new uint64[breakpoints.size];
+			uint i = 0;
+			foreach (uint64 address in breakpoints.keys)
+				addresses[i++] = address;
+			breakpoints_changed (addresses);
+		}
+
 		private void on_breakpoint_removed (Breakpoint breakpoint) {
 			breakpoints.unset (breakpoint.address);
+			notify_breakpoints_changed ();
 
 			var exception = breakpoint_exception;
 			if (exception != null && exception.breakpoint == breakpoint)
@@ -1314,7 +1352,7 @@ namespace Frida.GDB {
 			if (payload.length > 0)
 				name = Protocol.parse_hex_encoded_utf8_string (payload);
 
-			Thread thread = new Thread (thread_id, name, this);
+			var thread = new Thread (thread_id, name, this);
 
 			if (signum == UnixSignal.SIGTRAP) {
 				string pc_reg_name;
@@ -1332,6 +1370,12 @@ namespace Frida.GDB {
 				uint64 pc = yield thread.read_register (pc_reg_name, io_cancellable);
 
 				breakpoint = breakpoints[pc];
+			} else if (trapped_address != null) {
+				thread = new Thread (trapped_thread, null, this);
+				uint64 observed = yield thread.read_register ("rsp", io_cancellable);
+				breakpoint = breakpoints[trapped_address];
+				trapped_address = null;
+				trapped_thread = null;
 			} else {
 				breakpoint = null;
 			}
@@ -2143,14 +2187,16 @@ namespace Frida.GDB {
 			if (state != DISABLED)
 				throw new Error.INVALID_OPERATION ("Already enabled");
 
-			var command = client.make_packet_builder_sized (16)
-				.append ("Z%u,".printf (kind))
-				.append_address (address)
-				.append_c (',')
-				.append_size (size)
-				.build ();
+			if (!client.breakpoints_provided_externally) {
+				var command = client.make_packet_builder_sized (16)
+					.append ("Z%u,".printf (kind))
+					.append_address (address)
+					.append_c (',')
+					.append_size (size)
+					.build ();
 
-			yield client.execute (command, cancellable);
+				yield client.execute (command, cancellable);
+			}
 
 			state = ENABLED;
 		}
@@ -2159,17 +2205,20 @@ namespace Frida.GDB {
 			if (state != ENABLED)
 				throw new Error.INVALID_OPERATION ("Already disabled");
 
-			var command = client.make_packet_builder_sized (16)
-				.append ("z%u,".printf (kind))
-				.append_address (address)
-				.append_c (',')
-				.append_size (size)
-				.build ();
+			if (!client.breakpoints_provided_externally) {
+				var command = client.make_packet_builder_sized (16)
+					.append ("z%u,".printf (kind))
+					.append_address (address)
+					.append_c (',')
+					.append_size (size)
+					.build ();
 
-			yield client.execute (command, cancellable);
+				yield client.execute (command, cancellable);
+			}
 
 			state = DISABLED;
 		}
+
 
 		public async void remove (Cancellable? cancellable = null) throws Error, IOError {
 			if (state == ENABLED)

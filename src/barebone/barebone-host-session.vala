@@ -151,6 +151,12 @@ namespace Frida {
 					break;
 			}
 
+			if (emulator_instrumentation != null) {
+				var client = debugger as GDB.Client;
+				if (client != null)
+					emulator_instrumentation.adopt_breakpoints (client);
+			}
+
 			try {
 				host_session = yield establish (config, debugger, (owned) connecting, cancellable);
 			} catch (GLib.Error e) {
