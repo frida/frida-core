@@ -652,7 +652,7 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
-		1. 优先检查环境变量（例如 FRIDA_GADGET_CONFIG），支持直接通过环境变量传入 JSON 配置字符串
+		//1. 优先检查环境变量（例如 FRIDA_GADGET_CONFIG），支持直接通过环境变量传入 JSON 配置字符串
 		unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
 		if (env_config != null && env_config != "") {
 			try {
