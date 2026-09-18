@@ -652,15 +652,43 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
+unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+    unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
+
+    // 1. 如果检测到注入脚本环境变量，且未指定 FRIDA_GADGET_CONFIG，自动构建 ScriptInteraction 模式
+    if ((env_config == null || env_config == "") && env_script != null && env_script != "") {
+        var cfg = new Config ();
+        var interaction = new ScriptInteraction ();
+        interaction.path = "env";
+        cfg.interaction = interaction;
+        return cfg;
+    }
+
+    // 2. 优先检查环境变量 FRIDA_GADGET_CONFIG
+    if (env_config != null && env_config != "") {
+        try {
+            return (Config) Json.gobject_from_data (typeof (Config), env_config);
+        } catch (GLib.Error e) {
+            throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
+        }
+    }
+
+
+
+
+
+
+
+
 		// 1. 优先检查环境变量（例如 FRIDA_GADGET_CONFIG），支持直接通过环境变量传入 JSON 配置字符串
-		unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
-		if (env_config != null && env_config != "") {
-			try {
-				return (Config) Json.gobject_from_data (typeof (Config), env_config);
-			} catch (GLib.Error e) {
-				throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
-			}
-		}
+		//unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
+		//if (env_config != null && env_config != "") {
+		//	try {
+		//		return (Config) Json.gobject_from_data (typeof (Config), env_config);
+		//	} catch (GLib.Error e) {
+		//		throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
+		//	}
+	//	}
 
 		unowned string? gadget_path = location.path;
 		if (gadget_path == null)
@@ -1337,32 +1365,28 @@ private async void load () throws Error {
 
     try {
         var path = this.path;
-
-        Bytes contents = null;
-        // 优先检查环境变量中的 JS 代码
         unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
 
+        ScriptEngine.ScriptInstance instance;
+        var options = new ScriptOptions ();
+        options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
+
+        // 如果环境变量存在直接使用字符串创建脚本
         if (env_script != null && env_script != "") {
-            // 分配 env_script.length + 1 字节，Vala 保证新数组末尾为 \0 填充
-            var data = new uint8[env_script.length + 1];
-            Memory.copy (data, env_script, env_script.length);
-            contents = new Bytes.take ((owned) data);
+            instance = yield engine.create_script (env_script, null, options);
         } else {
+            Bytes contents;
             try {
                 load_asset_bytes (path, out contents);
             } catch (FileError e) {
                 throw new Error.INVALID_ARGUMENT ("%s", e.message);
             }
+
+            if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+                instance = yield engine.create_script (null, contents, options);
+            else
+                instance = yield engine.create_script ((string) contents.get_data (), null, options);
         }
-
-        var options = new ScriptOptions ();
-        options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
-
-        ScriptEngine.ScriptInstance instance;
-        if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
-            instance = yield engine.create_script (null, contents, options);
-        else
-            instance = yield engine.create_script ((string) contents.get_data (), null, options);
 
         if (id.handle != 0)
             yield engine.destroy_script (id);
