@@ -1276,6 +1276,11 @@ unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT
 
 		public async void start () throws Error {
 			engine.message_from_script.connect (on_message);
+// 如果是环境变量模式，不建立文件监听，直接加载
+    if (path == "env") {
+        yield try_reload ();
+        return;
+    }
 
 			if (on_change == ChangeBehavior.RELOAD) {
 				try {
