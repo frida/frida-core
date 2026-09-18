@@ -971,8 +971,8 @@ namespace Frida.Gadget {
 		private static string resolve_script_path (Config config, Location location) {
 			var raw_path = ((ScriptInteraction) config.interaction).path;
 			// 如果 path 设为 "env"，则直接返回虚拟标识符 "env"，无需拼接绝对路径
-			//if (raw_path == "env")
-				//return "env";
+			if (raw_path == "env")
+				return "env";
 			if (!Path.is_absolute (raw_path)) {
 				string? documents_dir = Environment.detect_documents_dir ();
 				if (documents_dir != null) {
@@ -1249,10 +1249,10 @@ namespace Frida.Gadget {
 		public async void start () throws Error {
 			engine.message_from_script.connect (on_message);
 // 如果是环境变量模式，不建立文件监听，直接加载
-    //if (path == "env") {
-    //    yield try_reload ();
-     //   return;
-   // }
+    if (path == "env") {
+        yield try_reload ();
+        return;
+    }
 
 			if (on_change == ChangeBehavior.RELOAD) {
 				try {
@@ -1304,38 +1304,81 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private async void load () throws Error {
-			load_in_progress = true;
 
-			try {
-				var path = this.path;
 
-			Bytes contents;
-				try {
-					load_asset_bytes (path, out contents);
-				} catch (FileError e) {
-					throw new Error.INVALID_ARGUMENT ("%s", e.message);
-				}
+private async void load () throws Error {
+    load_in_progress = true;
 
-				var options = new ScriptOptions ();
-				options.name = Path.get_basename (path).split (".", 2)[0];
+    try {
+        var path = this.path;
+        Bytes contents;
 
-				ScriptEngine.ScriptInstance instance;
-				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
-					instance = yield engine.create_script (null, contents, options);
-				else
-					instance = yield engine.create_script ((string) contents.get_data (), null, options);
+        // 如果路径为 "env"，直接从环境变量读取脚本内容，避开磁盘 IO
+        if (path == "env") {
+            unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+            if (env_script == null || env_script == "") {
+                throw new Error.INVALID_ARGUMENT ("LUOYE_INJECT_SCRIPT environment variable is empty");
+            }
+            contents = new Bytes (env_script.data);
+        } else {
+            try {
+                load_asset_bytes (path, out contents);
+            } catch (FileError e) {
+                throw new Error.INVALID_ARGUMENT ("%s", e.message);
+            }
+        }
 
-				if (id.handle != 0)
-				yield engine.destroy_script (id);
-				id = instance.script_id;
+        var options = new ScriptOptions ();
+        options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
 
-				yield engine.load_script (id);
-				yield call_init ();
-			} finally {
-				load_in_progress = false;
-		}
-		}
+        ScriptEngine.ScriptInstance instance;
+        if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+            instance = yield engine.create_script (null, contents, options);
+        else
+            instance = yield engine.create_script ((string) contents.get_data (), null, options);
+
+        if (id.handle != 0)
+            yield engine.destroy_script (id);
+        id = instance.script_id;
+
+        yield engine.load_script (id);
+        yield call_init ();
+    } finally {
+        load_in_progress = false;
+    }
+}
+
+		//private async void load () throws Error {
+		//	load_in_progress = true;
+
+		//	try {
+		//		var path = this.path;
+		//		Bytes contents;
+		//		try {
+		//			load_asset_bytes (path, out contents);
+		//		} catch (FileError e) {
+		//			throw new Error.INVALID_ARGUMENT ("%s", e.message);
+		//		}
+
+		//		var options = new ScriptOptions ();
+		//		options.name = Path.get_basename (path).split (".", 2)[0];
+
+		//		ScriptEngine.ScriptInstance instance;
+		//		if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+		//			instance = yield engine.create_script (null, contents, options);
+		//		else
+		//			instance = yield engine.create_script ((string) contents.get_data (), null, options);
+
+		//		if (id.handle != 0)
+		//		yield engine.destroy_script (id);
+		//		id = instance.script_id;
+
+		//		yield engine.load_script (id);
+		//		yield call_init ();
+		//	} finally {
+		//		load_in_progress = false;
+		//}
+		//}
 
 
 		private async void call_init () {
