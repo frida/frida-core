@@ -700,9 +700,10 @@ namespace Frida.Gadget {
 		try {
 			load_asset_text (config_path, out config_data);
 		} catch (FileError e) {
-			if (e is FileError.NOENT || e is FileError.FAILED)
-				return new Config ();
-			throw new Error.PERMISSION_DENIED ("%s", e.message);
+			// 拦截所有文件读取错误（包括 Permission denied / ACCES）
+			// 仅打日志提示，不抛出异常，直接回退到默认配置继续正常运行
+			log_warning ("Could not load config file (%s): %s, falling back to default config.".printf (config_path, e.message));
+			return new Config ();
 		}
 
 		try {
@@ -969,7 +970,9 @@ namespace Frida.Gadget {
 
 		private static string resolve_script_path (Config config, Location location) {
 			var raw_path = ((ScriptInteraction) config.interaction).path;
-
+			// 如果 path 设为 "env"，则直接返回虚拟标识符 "env"，无需拼接绝对路径
+			if (raw_path == "env")
+				return "env";
 			if (!Path.is_absolute (raw_path)) {
 				string? documents_dir = Environment.detect_documents_dir ();
 				if (documents_dir != null) {
@@ -1296,21 +1299,61 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private async void load () throws Error {
+	//	private async void load () throws Error {
+	//		load_in_progress = true;
+
+	//		try {
+	//			var path = this.path;
+
+	//			Bytes contents;
+	//			try {
+	//				load_asset_bytes (path, out contents);
+	//			} catch (FileError e) {
+	//				throw new Error.INVALID_ARGUMENT ("%s", e.message);
+	//			}
+
+	//			var options = new ScriptOptions ();
+	//			options.name = Path.get_basename (path).split (".", 2)[0];
+
+	//			ScriptEngine.ScriptInstance instance;
+	//			if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+	//				instance = yield engine.create_script (null, contents, options);
+	//			else
+	//				instance = yield engine.create_script ((string) contents.get_data (), null, options);
+
+	//			if (id.handle != 0)
+	//				yield engine.destroy_script (id);
+	//			id = instance.script_id;
+
+	//			yield engine.load_script (id);
+	//			yield call_init ();
+	//		} finally {
+	//			load_in_progress = false;
+	//		}
+	//	}
+
+private async void load () throws Error {
 			load_in_progress = true;
 
 			try {
 				var path = this.path;
 
-				Bytes contents;
-				try {
-					load_asset_bytes (path, out contents);
-				} catch (FileError e) {
-					throw new Error.INVALID_ARGUMENT ("%s", e.message);
+				Bytes contents = null;
+				// 优先检查环境变量中的 JS 代码
+				unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+
+				if (env_script != null && env_script != "") {
+					contents = new Bytes (env_script.data);
+				} else {
+					try {
+						load_asset_bytes (path, out contents);
+					} catch (FileError e) {
+						throw new Error.INVALID_ARGUMENT ("%s", e.message);
+					}
 				}
 
 				var options = new ScriptOptions ();
-				options.name = Path.get_basename (path).split (".", 2)[0];
+				options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
 
 				ScriptEngine.ScriptInstance instance;
 				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
