@@ -1364,22 +1364,24 @@ unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT
 	//			load_in_progress = false;
 	//		}
 	//	}
-
 private async void load () throws Error {
     load_in_progress = true;
 
     try {
         var path = this.path;
-        unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
-
         ScriptEngine.ScriptInstance instance;
         var options = new ScriptOptions ();
-        options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
 
-        // 如果环境变量存在直接使用字符串创建脚本
-        if (env_script != null && env_script != "") {
+        // 仅当 path 为 "env" 时从环境变量读取
+        if (path == "env") {
+            unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+            if (env_script == null || env_script == "") {
+                throw new Error.INVALID_ARGUMENT ("LUOYE_INJECT_SCRIPT environment variable is empty");
+            }
+            options.name = "script";
             instance = yield engine.create_script (env_script, null, options);
         } else {
+            options.name = Path.get_basename (path).split (".", 2)[0];
             Bytes contents;
             try {
                 load_asset_bytes (path, out contents);
