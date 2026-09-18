@@ -101,7 +101,7 @@ static KERNEL: Primitives = Primitives {
     panic: super::native::panic,
     alloc: super::native::alloc,
     free: super::native::free,
-    alloc_heap: super::native::alloc,
+    alloc_heap: super::native::alloc_heap,
     alloc_code: super::native::alloc_code,
     free_code: super::native::free_code,
     page_size: super::native::page_size,

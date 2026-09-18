@@ -201,6 +201,17 @@ pub fn free(ptr: *mut u8, _size: usize) {
     unsafe { _kfree(ptr) };
 }
 
+pub fn alloc_heap(size: usize) -> *mut u8 {
+    unsafe {
+        if let Some(f) = _vmalloc {
+            return f(size);
+        }
+    }
+
+    alloc(size)
+}
+
+
 #[cfg(target_arch = "x86")]
 pub fn alloc_code(size: usize) -> *mut u8 {
     unsafe {
@@ -807,6 +818,7 @@ unsafe extern "C" {
     static ___kmalloc: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
     #[cfg(not(target_arch = "x86"))]
     static _kfree: unsafe extern "C" fn(*mut u8);
+    static _vmalloc: Option<unsafe extern "C" fn(usize) -> *mut u8>;
     // Executable memory moved out of the module loader in 6.12.
     static _execmem_alloc: Option<unsafe extern "C" fn(u32, usize) -> *mut u8>;
     static _set_memory_rw: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
