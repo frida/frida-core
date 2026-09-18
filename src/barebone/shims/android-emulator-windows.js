@@ -116,3 +116,158 @@ function describe(start, nameAddress) {
 function displacement(text) {
   return (text.indexOf('0x') === 0) ? parseInt(text.substring(2), 16) : parseInt(text, 10);
 }
+
+const WHP = Module.load('WinHvPlatform.dll');
+
+const PROP_EXTENDED_VM_EXITS = 1;
+const PROP_EXCEPTION_EXIT_BITMAP = 2;
+const EXTENDED_EXCEPTION_EXIT = 1 << 2;
+const DEBUG_VECTOR = 1;
+const EXIT_REASON_EXCEPTION = 0x1002;
+const EXIT_REASON_CANCELED = 0x2001;
+const VP_CONTEXT_RIP = 32;
+const REGISTER_RSP = 0x04;
+const REGISTER_DR0 = 0x21;
+const REGISTER_DR6 = 0x25;
+const REGISTER_DR7 = 0x26;
+const DR7_ALWAYS_SET = 0x400;
+const MAX_BREAKPOINTS = 4;
+const REPORT_INTERVAL_MS = 50;
+const ARM_INTERVAL_MS = 100;
+
+const setPartitionProperty = new NativeFunction(WHP.getExportByName('WHvSetPartitionProperty'),
+    'uint32', ['pointer', 'uint32', 'pointer', 'uint32']);
+const getPartitionProperty = new NativeFunction(WHP.getExportByName('WHvGetPartitionProperty'),
+    'uint32', ['pointer', 'uint32', 'pointer', 'uint32', 'pointer']);
+const setRegisters = new NativeFunction(WHP.getExportByName('WHvSetVirtualProcessorRegisters'),
+    'uint32', ['pointer', 'uint32', 'pointer', 'uint32', 'pointer']);
+const cancelRun = new NativeFunction(WHP.getExportByName('WHvCancelRunVirtualProcessor'),
+    'uint32', ['pointer', 'uint32', 'uint32']);
+const getRegisters = new NativeFunction(WHP.getExportByName('WHvGetVirtualProcessorRegisters'),
+    'uint32', ['pointer', 'uint32', 'pointer', 'uint32', 'pointer']);
+
+const programmed = new Map();
+const reported = new Map();
+const seen = new Set();
+
+let partition = null;
+let armed = false;
+let planted = [];
+let generation = 0;
+
+recv('breakpoints', onBreakpointsChanged);
+
+Interceptor.attach(WHP.getExportByName('WHvGetVirtualProcessorRegisters'), {
+  onEnter(args) {
+    partition = args[0];
+  }
+});
+
+Interceptor.attach(WHP.getExportByName('WHvRunVirtualProcessor'), {
+  onEnter(args) {
+    this.partition = args[0];
+    this.vpIndex = args[1].toUInt32();
+    this.exitContext = args[2];
+
+    partition = args[0];
+
+    seen.add(this.vpIndex);
+
+    if (programmed.get(this.vpIndex) !== generation) {
+      programmed.set(this.vpIndex, generation);
+      programDebugRegisters(this.partition, this.vpIndex);
+    }
+  },
+  onLeave() {
+    if (this.exitContext.readU32() !== EXIT_REASON_EXCEPTION)
+      return;
+
+    const rip = this.exitContext.add(VP_CONTEXT_RIP).readU64();
+    const which = readRegister(this.partition, this.vpIndex, REGISTER_DR6).and(0xf);
+    writeRegister(this.partition, this.vpIndex, REGISTER_DR6, uint64(0));
+    this.exitContext.writeU32(EXIT_REASON_CANCELED);
+
+    if (which.compare(0) === 0)
+      return;
+
+    const episode = this.vpIndex + ':' + rip.toString(16);
+    const now = Date.now();
+    if (now - (reported.get(episode) || 0) < REPORT_INTERVAL_MS)
+      return;
+    reported.set(episode, now);
+
+    send({
+      type: 'breakpoint',
+      address: '0x' + rip.toString(16),
+      rsp: '0x' + readRegister(this.partition, this.vpIndex, REGISTER_RSP).toString(16),
+      vp: this.vpIndex
+    });
+  }
+});
+
+setInterval(() => {
+  if (!armed && partition !== null)
+    armed = arm();
+}, ARM_INTERVAL_MS);
+
+function onBreakpointsChanged(message) {
+  planted = message.addresses.slice(0, MAX_BREAKPOINTS);
+  generation++;
+  programmed.clear();
+  reported.clear();
+
+  if (partition !== null) {
+    for (const vpIndex of seen)
+      cancelRun(partition, vpIndex, 0);
+  }
+
+  recv('breakpoints', onBreakpointsChanged);
+}
+
+function arm() {
+  const scratch = Memory.alloc(16);
+  const written = Memory.alloc(4);
+
+  getPartitionProperty(partition, PROP_EXTENDED_VM_EXITS, scratch, 8, written);
+  scratch.writeU64(scratch.readU64().or(EXTENDED_EXCEPTION_EXIT));
+  const extended = setPartitionProperty(partition, PROP_EXTENDED_VM_EXITS, scratch, 8);
+
+  scratch.writeU64(1 << DEBUG_VECTOR);
+  const bitmap = setPartitionProperty(partition, PROP_EXCEPTION_EXIT_BITMAP, scratch, 8);
+
+  return extended === 0 && bitmap === 0;
+}
+
+function programDebugRegisters(partition, vpIndex) {
+  let control = DR7_ALWAYS_SET;
+
+  for (let slot = 0; slot !== MAX_BREAKPOINTS; slot++) {
+    const address = (slot < planted.length) ? ptr(planted[slot]) : NULL;
+    writeRegister(partition, vpIndex, REGISTER_DR0 + slot, uint64(address.toString()));
+    if (slot < planted.length)
+      control |= 1 << (slot * 2);
+  }
+
+  writeRegister(partition, vpIndex, REGISTER_DR7, uint64(control));
+}
+
+function readRegister(partition, vpIndex, name) {
+  const names = Memory.alloc(4);
+  names.writeU32(name);
+
+  const values = Memory.alloc(16);
+  getRegisters(partition, vpIndex, names, 1, values);
+
+  return values.readU64();
+}
+
+function writeRegister(partition, vpIndex, name, value) {
+  const names = Memory.alloc(4);
+  names.writeU32(name);
+
+  const values = Memory.alloc(16);
+  values.writeU64(value);
+  values.add(8).writeU64(0);
+
+  return setRegisters(partition, vpIndex, names, 1, values);
+}
