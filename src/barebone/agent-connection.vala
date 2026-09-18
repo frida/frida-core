@@ -16,12 +16,10 @@ namespace Frida.Barebone {
 
 		private BareboneInjectedAgentConfig agent_config;
 		private string? hostlink_socket_path;
-		private BareboneVsockPipeTransportConfig? pipe_vsock_transport;
-#if !WINDOWS
-		private SocketService? pipe_vsock_service;
-#endif
-		private IOStream? pipe_vsock_stream;
-		private SourceFunc? pipe_vsock_accept_handler;
+		private bool pipe_listener_wanted;
+		private SocketService? pipe_service;
+		private IOStream? pipe_stream;
+		private SourceFunc? pipe_accept_handler;
 		private BareboneImageConfig? image_config;
 		private BareboneKernelKind kernel_kind;
 		private KernelRelocation? relocation;
@@ -103,6 +101,7 @@ namespace Frida.Barebone {
 		private const uint8 TRANSPORT_KIND_VIRTIO_PCI = 2;
 		private const uint8 TRANSPORT_KIND_SERIAL = 3;
 		private const uint8 TRANSPORT_KIND_PIPE_VSOCK = 4;
+		private const uint8 TRANSPORT_KIND_PIPE_GOLDFISH = 5;
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			progress ("Preparing the agent", 0.0);
@@ -382,10 +381,19 @@ namespace Frida.Barebone {
 			}
 			if (agent_config.transport is BareboneVsockPipeTransportConfig) {
 				var config = (BareboneVsockPipeTransportConfig) agent_config.transport;
-				pipe_vsock_transport = config;
-				yield open_pipe_vsock_listener (config.socket_path, cancellable);
+				pipe_listener_wanted = true;
+				yield open_pipe_listener (config.socket_path, cancellable);
 				return new Variant.tuple ({
 					new Variant.byte (TRANSPORT_KIND_PIPE_VSOCK),
+					new Variant.variant (new Variant.string (config.socket_path))
+				});
+			}
+			if (agent_config.transport is BareboneGoldfishPipeTransportConfig) {
+				var config = (BareboneGoldfishPipeTransportConfig) agent_config.transport;
+				pipe_listener_wanted = true;
+				yield open_pipe_listener (config.socket_path, cancellable);
+				return new Variant.tuple ({
+					new Variant.byte (TRANSPORT_KIND_PIPE_GOLDFISH),
 					new Variant.variant (new Variant.string (config.socket_path))
 				});
 			}
@@ -409,9 +417,8 @@ namespace Frida.Barebone {
 			listening = new Promise<bool> ();
 		}
 
-		private async void open_pipe_vsock_listener (string path, Cancellable? cancellable) throws Error, IOError {
-#if !WINDOWS
-			Posix.unlink (path);
+		private async void open_pipe_listener (string path, Cancellable? cancellable) throws Error, IOError {
+			FileUtils.unlink (path);
 			var service = new SocketService ();
 			try {
 				SocketAddress effective;
@@ -420,30 +427,27 @@ namespace Frida.Barebone {
 				throw new Error.TRANSPORT ("Unable to listen on %s: %s", path, e.message);
 			}
 			service.incoming.connect ((connection) => {
-				if (pipe_vsock_stream == null) {
-					pipe_vsock_stream = connection;
-					if (pipe_vsock_accept_handler != null) {
-						var handler = (owned) pipe_vsock_accept_handler;
-						pipe_vsock_accept_handler = null;
+				if (pipe_stream == null) {
+					pipe_stream = connection;
+					if (pipe_accept_handler != null) {
+						var handler = (owned) pipe_accept_handler;
+						pipe_accept_handler = null;
 						handler ();
 					}
 				}
 				return true;
 			});
 			service.start ();
-			pipe_vsock_service = service;
-#else
-			throw new Error.NOT_SUPPORTED ("Pipe-vsock transport is not available on this OS");
-#endif
+			pipe_service = service;
 		}
 
 		private async void establish_hostlink (Cancellable? cancellable) throws Error, IOError {
-			if (pipe_vsock_transport != null) {
-				while (pipe_vsock_stream == null) {
-					pipe_vsock_accept_handler = establish_hostlink.callback;
+			if (pipe_listener_wanted) {
+				while (pipe_stream == null) {
+					pipe_accept_handler = establish_hostlink.callback;
 					yield;
 				}
-				adopt_hostlink_streams (pipe_vsock_stream);
+				adopt_hostlink_streams (pipe_stream);
 				return;
 			}
 

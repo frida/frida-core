@@ -2864,6 +2864,9 @@ namespace Frida {
 					case "pipe-vsock":
 						t = typeof (BareboneVsockPipeTransportConfig);
 						break;
+					case "pipe-goldfish":
+						t = typeof (BareboneGoldfishPipeTransportConfig);
+						break;
 					default:
 						break;
 					}
@@ -3076,6 +3079,25 @@ namespace Frida {
 	 * which frida-core listens on. The qemu-side shim whitelists the path first.
 	 */
 	public sealed class BareboneVsockPipeTransportConfig : BareboneInjectingTransportConfig {
+		/** UNIX socket frida-core listens on and the agent names in its handshake. */
+		public string socket_path {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (socket_path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.socket_path' is missing");
+		}
+	}
+
+	/**
+	 * Hostlink over the Android emulator's QEMU pipe, which is how it carries adb:
+	 * the guest agent opens /dev/qemu_pipe and names the "pipe:unix:<path>" service,
+	 * and the emulator joins that stream to the UNIX socket at `socket_path`, which
+	 * frida-core listens on. The path has to be one the emulator was told to allow.
+	 */
+	public sealed class BareboneGoldfishPipeTransportConfig : BareboneInjectingTransportConfig {
 		/** UNIX socket frida-core listens on and the agent names in its handshake. */
 		public string socket_path {
 			get;

@@ -20,6 +20,7 @@ SECTIONS {
     _wake_up_process = .; . += 8;
     _fget = .; . += 8;
     _kernel_read = .; . += 8;
+    _filp_open = .; . += 8;
     _kernel_write = .; . += 8;
     ___kmalloc_noprof = .; . += 8;
     _kmalloc = .; . += 8;

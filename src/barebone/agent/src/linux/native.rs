@@ -76,6 +76,18 @@ pub fn wait_for_a_word(file: *mut c_void) -> bool {
     unsafe { _kernel_read(file, &mut byte, 1, &mut position) == 1 }
 }
 
+// kernel_read and kernel_write take the position by reference; the pair above
+// hands them a literal one because the file it reads is a counter.
+pub unsafe fn pipe_read(file: *mut c_void, into: *mut u8, count: usize, position: *mut i64) -> isize {
+    unsafe { _kernel_read(file, into, count, position) }
+}
+
+pub unsafe fn pipe_write(file: *mut c_void, from: *const u8, count: usize, position: *mut i64) -> isize {
+    let write: unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut i64) -> isize =
+        unsafe { core::mem::transmute(_kernel_write) };
+    unsafe { write(file, from, count, position) }
+}
+
 pub fn leave_a_word(file: *mut c_void) {
     let one: u64 = 1;
     unsafe { _kernel_write(file, &one as *const u64 as *const u8, 8, 0) };

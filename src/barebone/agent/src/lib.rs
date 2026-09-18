@@ -332,6 +332,11 @@ mod entrypoint_blob {
                     linux::hostlink_pipe_vsock::Hostlink::init(&path, Some(on_frame_from_host), wake_token)
                         .unwrap(),
                 ),
+                #[cfg(feature = "linux-injected")]
+                TransportConfig::PipeGoldfish { path } => Transport::PipeGoldfish(
+                    linux::hostlink_pipe_goldfish::Hostlink::init(&path, Some(on_frame_from_host), wake_token)
+                        .unwrap(),
+                ),
                 #[cfg(feature = "xnu-core")]
                 TransportConfig::Vsock { host_port } => Transport::Vsock(
                     hostlink_vsock::Hostlink::init(host_port, Some(on_frame_from_host), wake_token)
@@ -451,6 +456,19 @@ mod entrypoint_blob {
                     }
                     #[cfg(not(feature = "linux-injected"))]
                     { panic!("pipe-vsock is linux-injected's") }
+                }
+                5 => {
+                    #[cfg(feature = "linux-injected")]
+                    {
+                        let raw = g_variant_get_string(transport_cfg_inner, ptr::null_mut());
+                        let path = core::ffi::CStr::from_ptr(raw as *const core::ffi::c_char)
+                            .to_str()
+                            .unwrap_or("")
+                            .into();
+                        TransportConfig::PipeGoldfish { path }
+                    }
+                    #[cfg(not(feature = "linux-injected"))]
+                    { panic!("pipe-goldfish is linux-injected's") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -761,6 +779,8 @@ pub enum Transport {
     Vsock(hostlink_vsock::Hostlink),
     #[cfg(feature = "linux-injected")]
     PipeVsock(linux::hostlink_pipe_vsock::Hostlink),
+    #[cfg(feature = "linux-injected")]
+    PipeGoldfish(linux::hostlink_pipe_goldfish::Hostlink),
     #[cfg(any(feature = "linux", feature = "xnu-kext"))]
     CharDevice(hostlink_chardev::Hostlink),
 }
@@ -776,6 +796,8 @@ impl Transport {
             Transport::Vsock(h) => h.send(payload),
             #[cfg(feature = "linux-injected")]
             Transport::PipeVsock(h) => h.send(payload),
+            #[cfg(feature = "linux-injected")]
+            Transport::PipeGoldfish(h) => h.send(payload),
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(h) => h.send(payload),
         }
@@ -791,6 +813,8 @@ impl Transport {
             Transport::Vsock(_) => {}
             #[cfg(feature = "linux-injected")]
             Transport::PipeVsock(h) => h.shutdown(),
+            #[cfg(feature = "linux-injected")]
+            Transport::PipeGoldfish(h) => h.shutdown(),
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(_) => {}
         }
@@ -806,6 +830,8 @@ impl Transport {
             Transport::Vsock(h) => h.process(),
             #[cfg(feature = "linux-injected")]
             Transport::PipeVsock(h) => h.process(),
+            #[cfg(feature = "linux-injected")]
+            Transport::PipeGoldfish(h) => h.process(),
             #[cfg(any(feature = "linux", feature = "xnu-kext"))]
             Transport::CharDevice(h) => h.process(),
         }
@@ -843,6 +869,8 @@ pub enum TransportConfig {
     Vsock { host_port: u32 },
     #[cfg(feature = "linux-injected")]
     PipeVsock { path: alloc::string::String },
+    #[cfg(feature = "linux-injected")]
+    PipeGoldfish { path: alloc::string::String },
 }
 
 static mut TRANSPORT_DRIVER: *mut Transport = core::ptr::null_mut();
@@ -1240,6 +1268,11 @@ fn kernel_half_has_work() -> bool {
 
     #[cfg(feature = "linux-injected")]
     if linux::hostlink_pipe_vsock::a_turn_is_wanted() {
+        return true;
+    }
+
+    #[cfg(feature = "linux-injected")]
+    if linux::hostlink_pipe_goldfish::a_turn_is_wanted() {
         return true;
     }
 
