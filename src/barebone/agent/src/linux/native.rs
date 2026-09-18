@@ -587,7 +587,17 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
-    unsafe { _ioremap(phys_addr as usize, size as usize) }
+    unsafe {
+        if let Some(f) = _ioremap {
+            return f(phys_addr as usize, size as usize);
+        }
+
+        if let Some(f) = _ioremap_nocache {
+            return f(phys_addr as usize, size as usize);
+        }
+    }
+
+    core::ptr::null_mut()
 }
 
 #[cfg(not(any(target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
@@ -907,8 +917,9 @@ unsafe extern "C" {
     #[cfg(target_arch = "arm")]
     static _of_node_put: unsafe extern "C" fn(*mut c_void);
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    #[cfg(not(target_arch = "x86"))]
-    static _ioremap: unsafe extern "C" fn(usize, usize) -> *mut c_void;
+    static _ioremap: Option<unsafe extern "C" fn(usize, usize) -> *mut c_void>;
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    static _ioremap_nocache: Option<unsafe extern "C" fn(usize, usize) -> *mut c_void>;
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     static ___default_kernel_pte_mask: *const usize;
 }

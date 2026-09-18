@@ -61,6 +61,7 @@ SECTIONS {
     _register_die_notifier = .; . += 8;
     _unregister_die_notifier = .; . += 8;
     _ioremap = .; . += 8;
+    _ioremap_nocache = .; . += 8;
     ___default_kernel_pte_mask = .; . += 8;
     _init_task = .; . += 8;
     _tasklist_lock = .; . += 8;
