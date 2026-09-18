@@ -1333,44 +1333,47 @@ namespace Frida.Gadget {
 	//	}
 
 private async void load () throws Error {
-			load_in_progress = true;
+    load_in_progress = true;
 
-			try {
-				var path = this.path;
+    try {
+        var path = this.path;
 
-				Bytes contents = null;
-				// 优先检查环境变量中的 JS 代码
-				unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+        Bytes contents = null;
+        // 优先检查环境变量中的 JS 代码
+        unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
 
-				if (env_script != null && env_script != "") {
-					contents = new Bytes (env_script.data);
-				} else {
-					try {
-						load_asset_bytes (path, out contents);
-					} catch (FileError e) {
-						throw new Error.INVALID_ARGUMENT ("%s", e.message);
-					}
-				}
+        if (env_script != null && env_script != "") {
+            // 分配 env_script.length + 1 字节，Vala 保证新数组末尾为 \0 填充
+            var data = new uint8[env_script.length + 1];
+            Memory.copy (data, env_script, env_script.length);
+            contents = new Bytes.take ((owned) data);
+        } else {
+            try {
+                load_asset_bytes (path, out contents);
+            } catch (FileError e) {
+                throw new Error.INVALID_ARGUMENT ("%s", e.message);
+            }
+        }
 
-				var options = new ScriptOptions ();
-				options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
+        var options = new ScriptOptions ();
+        options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
 
-				ScriptEngine.ScriptInstance instance;
-				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
-					instance = yield engine.create_script (null, contents, options);
-				else
-					instance = yield engine.create_script ((string) contents.get_data (), null, options);
+        ScriptEngine.ScriptInstance instance;
+        if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+            instance = yield engine.create_script (null, contents, options);
+        else
+            instance = yield engine.create_script ((string) contents.get_data (), null, options);
 
-				if (id.handle != 0)
-					yield engine.destroy_script (id);
-				id = instance.script_id;
+        if (id.handle != 0)
+            yield engine.destroy_script (id);
+        id = instance.script_id;
 
-				yield engine.load_script (id);
-				yield call_init ();
-			} finally {
-				load_in_progress = false;
-			}
-		}
+        yield engine.load_script (id);
+        yield call_init ();
+    } finally {
+        load_in_progress = false;
+    }
+}
 
 		private async void call_init () {
 			var stage = new Json.Node.alloc ().init_string ((peek_state () == State.CREATED) ? "early" : "late");
