@@ -113,6 +113,8 @@ namespace Frida.Barebone {
 		private SymbolInfo? panic;
 		private Gee.Map<string, SymbolInfo> symbols;
 		private Allocation? current_probe_stub;
+		private Gee.Map<uint64?, Bytes> cfi_checks = new Gee.HashMap<uint64?, Bytes> (
+			Numeric.uint64_hash, Numeric.uint64_equal);
 
 		public LinuxKernelFlavor (Machine machine, uint64 kernel_base, Allocator allocator,
 				Gee.Map<string, SymbolInfo> symbols) throws Error {
@@ -177,6 +179,9 @@ namespace Frida.Barebone {
 			// kernel-API protection path does not use permission templates.
 			if (arm64 != null && arm64.mmu_registers_available)
 				yield arm64.learn_permission_templates (schedule_address, cancellable);
+
+			if (x64 != null)
+				yield relax_cfi_enforcement (cancellable);
 		}
 
 		// The task caught at schedule() has set itself for sleep; a call made in its context that
@@ -193,6 +198,17 @@ namespace Frida.Barebone {
 				return;
 
 			yield machine.invoke (wake_up_process, { current }, cancellable);
+		}
+
+		private async void relax_cfi_enforcement (Cancellable? cancellable) throws Error, IOError {
+			foreach (unowned string name in CFI_CHECK_ENTRY_POINTS) {
+				uint64 entry = symbol_address (name);
+				if (entry == 0)
+					continue;
+
+				cfi_checks[entry] = yield machine.read_virtual (entry, RETURN_TO_CALLER.length, cancellable);
+				yield machine.write_virtual (entry, RETURN_TO_CALLER, cancellable);
+			}
 		}
 
 		private async uint64 read_current_task (Cancellable? cancellable) throws Error, IOError {
@@ -352,6 +368,8 @@ namespace Frida.Barebone {
 			return (cpsr & IRQ_MASK_BIT) != 0;
 		}
 
+		private const uint8[] RETURN_TO_CALLER = { 0xc3 };
+		private const string[] CFI_CHECK_ENTRY_POINTS = { "__cfi_slowpath", "__cfi_slowpath_diag" };
 		private const uint8[] SPIN_IN_PLACE = { 0xeb, 0xfe };
 		private const uint PARK_MAX_ATTEMPTS = 200;
 		private const uint PARK_INTERVAL_MS = 10;
