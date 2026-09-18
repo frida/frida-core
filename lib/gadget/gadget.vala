@@ -652,43 +652,15 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
-unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
-    unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
-
-    // 1. 如果检测到注入脚本环境变量，且未指定 FRIDA_GADGET_CONFIG，自动构建 ScriptInteraction 模式
-    if ((env_config == null || env_config == "") && env_script != null && env_script != "") {
-        var cfg = new Config ();
-        var interaction = new ScriptInteraction ();
-        interaction.path = "env";
-        cfg.interaction = interaction;
-        return cfg;
-    }
-
-    // 2. 优先检查环境变量 FRIDA_GADGET_CONFIG
-    if (env_config != null && env_config != "") {
-        try {
-            return (Config) Json.gobject_from_data (typeof (Config), env_config);
-        } catch (GLib.Error e) {
-            throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
-        }
-    }
-
-
-
-
-
-
-
-
-		// 1. 优先检查环境变量（例如 FRIDA_GADGET_CONFIG），支持直接通过环境变量传入 JSON 配置字符串
-		//unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
-		//if (env_config != null && env_config != "") {
-		//	try {
-		//		return (Config) Json.gobject_from_data (typeof (Config), env_config);
-		//	} catch (GLib.Error e) {
-		//		throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
-		//	}
-	//	}
+		1. 优先检查环境变量（例如 FRIDA_GADGET_CONFIG），支持直接通过环境变量传入 JSON 配置字符串
+		unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
+		if (env_config != null && env_config != "") {
+			try {
+				return (Config) Json.gobject_from_data (typeof (Config), env_config);
+			} catch (GLib.Error e) {
+				throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
+			}
+	}
 
 		unowned string? gadget_path = location.path;
 		if (gadget_path == null)
@@ -999,8 +971,8 @@ unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT
 		private static string resolve_script_path (Config config, Location location) {
 			var raw_path = ((ScriptInteraction) config.interaction).path;
 			// 如果 path 设为 "env"，则直接返回虚拟标识符 "env"，无需拼接绝对路径
-			if (raw_path == "env")
-				return "env";
+			//if (raw_path == "env")
+				//return "env";
 			if (!Path.is_absolute (raw_path)) {
 				string? documents_dir = Environment.detect_documents_dir ();
 				if (documents_dir != null) {
@@ -1277,10 +1249,10 @@ unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT
 		public async void start () throws Error {
 			engine.message_from_script.connect (on_message);
 // 如果是环境变量模式，不建立文件监听，直接加载
-    if (path == "env") {
-        yield try_reload ();
-        return;
-    }
+    //if (path == "env") {
+    //    yield try_reload ();
+     //   return;
+   // }
 
 			if (on_change == ChangeBehavior.RELOAD) {
 				try {
@@ -1332,79 +1304,39 @@ unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT
 			}
 		}
 
-	//	private async void load () throws Error {
-	//		load_in_progress = true;
+		private async void load () throws Error {
+			load_in_progress = true;
 
-	//		try {
-	//			var path = this.path;
+			try {
+				var path = this.path;
 
-	//			Bytes contents;
-	//			try {
-	//				load_asset_bytes (path, out contents);
-	//			} catch (FileError e) {
-	//				throw new Error.INVALID_ARGUMENT ("%s", e.message);
-	//			}
+			Bytes contents;
+				try {
+					load_asset_bytes (path, out contents);
+				} catch (FileError e) {
+					throw new Error.INVALID_ARGUMENT ("%s", e.message);
+				}
 
-	//			var options = new ScriptOptions ();
-	//			options.name = Path.get_basename (path).split (".", 2)[0];
+				var options = new ScriptOptions ();
+				options.name = Path.get_basename (path).split (".", 2)[0];
 
-	//			ScriptEngine.ScriptInstance instance;
-	//			if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
-	//				instance = yield engine.create_script (null, contents, options);
-	//			else
-	//				instance = yield engine.create_script ((string) contents.get_data (), null, options);
+				ScriptEngine.ScriptInstance instance;
+				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+					instance = yield engine.create_script (null, contents, options);
+				else
+					instance = yield engine.create_script ((string) contents.get_data (), null, options);
 
-	//			if (id.handle != 0)
-	//				yield engine.destroy_script (id);
-	//			id = instance.script_id;
+				if (id.handle != 0)
+				yield engine.destroy_script (id);
+				id = instance.script_id;
 
-	//			yield engine.load_script (id);
-	//			yield call_init ();
-	//		} finally {
-	//			load_in_progress = false;
-	//		}
-	//	}
-private async void load () throws Error {
-    load_in_progress = true;
+				yield engine.load_script (id);
+				yield call_init ();
+			} finally {
+				load_in_progress = false;
+		}
+		}
 
-    try {
-        var path = this.path;
-        ScriptEngine.ScriptInstance instance;
-        var options = new ScriptOptions ();
-
-        // 仅当 path 为 "env" 时从环境变量读取
-        if (path == "env") {
-            unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
-            if (env_script == null || env_script == "") {
-                throw new Error.INVALID_ARGUMENT ("LUOYE_INJECT_SCRIPT environment variable is empty");
-            }
-            options.name = "script";
-            instance = yield engine.create_script (env_script, null, options);
-        } else {
-            options.name = Path.get_basename (path).split (".", 2)[0];
-            Bytes contents;
-            try {
-                load_asset_bytes (path, out contents);
-            } catch (FileError e) {
-                throw new Error.INVALID_ARGUMENT ("%s", e.message);
-            }
-
-            if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
-                instance = yield engine.create_script (null, contents, options);
-            else
-                instance = yield engine.create_script ((string) contents.get_data (), null, options);
-        }
-
-        if (id.handle != 0)
-            yield engine.destroy_script (id);
-        id = instance.script_id;
-
-        yield engine.load_script (id);
-        yield call_init ();
-    } finally {
-        load_in_progress = false;
-    }
-}
 
 		private async void call_init () {
 			var stage = new Json.Node.alloc ().init_string ((peek_state () == State.CREATED) ? "early" : "late");
