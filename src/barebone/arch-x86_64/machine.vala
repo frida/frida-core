@@ -39,6 +39,10 @@ namespace Frida.Barebone {
 		}
 
 		public uint64 call_landing_zone = 0;
+		public uint64 set_memory_ro = 0;
+		public uint64 set_memory_rw = 0;
+		public uint64 set_memory_x = 0;
+		public uint64 set_memory_nx = 0;
 
 		internal unowned string[] arg_reg_names {
 			get {
@@ -55,6 +59,8 @@ namespace Frida.Barebone {
 		private const string[] ARG_REG_NAMES_SYSV = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
 		private const string[] ARG_REG_NAMES_MS = { "rcx", "rdx", "r8", "r9" };
 		private const size_t RED_ZONE_SIZE = 128;
+		private const uint8[] SPIN_IN_PLACE = { 0xeb, 0xfe };
+		private const uint LANDING_POLL_INTERVAL_MS = 1;
 		private const size_t SHADOW_SPACE_SIZE = 32;
 
 		public X64Machine (Debugger debugger) {
@@ -98,7 +104,27 @@ namespace Frida.Barebone {
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
 				Cancellable? cancellable) throws Error, IOError {
+			if (set_memory_x != 0) {
+				yield set_pages_protection (virtual_address, size, prot, cancellable);
+				return;
+			}
+
 			yield page_tables.protect (virtual_address, size, prot, cancellable);
+		}
+
+		private async void set_pages_protection (uint64 virtual_address, size_t size, Gum.PageProtection prot,
+				Cancellable? cancellable) throws Error, IOError {
+			uint64 aligned = virtual_address & ~(uint64) 0xfff;
+			uint num_pages = (uint) (((virtual_address + size + 0xfff) & ~(uint64) 0xfff) - aligned) / 4096;
+
+			if ((prot & Gum.PageProtection.EXECUTE) != 0) {
+				yield invoke (set_memory_ro, { aligned, num_pages }, cancellable);
+				yield invoke (set_memory_x, { aligned, num_pages }, cancellable);
+			} else {
+				yield invoke ((prot & Gum.PageProtection.WRITE) != 0 ? set_memory_rw : set_memory_ro,
+					{ aligned, num_pages }, cancellable);
+				yield invoke (set_memory_nx, { aligned, num_pages }, cancellable);
+			}
 		}
 
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,

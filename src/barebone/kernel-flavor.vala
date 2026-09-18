@@ -142,6 +142,16 @@ namespace Frida.Barebone {
 			if (ia32 != null)
 				ia32.arguments_in_registers = LINUX_REGISTER_ARGUMENTS;
 
+			var x64 = machine as X64Machine;
+			if (x64 != null) {
+				if (panic != null)
+					x64.call_landing_zone = kernel_base + panic.offset;
+				x64.set_memory_ro = symbol_address ("set_memory_ro");
+				x64.set_memory_rw = symbol_address ("set_memory_rw");
+				x64.set_memory_x = symbol_address ("set_memory_x");
+				x64.set_memory_nx = symbol_address ("set_memory_nx");
+			}
+
 			if (arm64 != null && !arm64.mmu_registers_available) {
 				arm64.set_memory_ro = symbol_address ("set_memory_ro");
 				arm64.set_memory_rw = symbol_address ("set_memory_rw");
@@ -159,7 +169,7 @@ namespace Frida.Barebone {
 			// entering the scheduler is already marked for sleep and would be dequeued there and
 			// never resumed, so it is forced back to runnable first; the borrowed task then merely
 			// sees a spurious wakeup once released.
-			bool predates_execmem = arm64 != null && symbols["execmem_alloc"] == null;
+			bool predates_execmem = symbols["execmem_alloc"] == null;
 			if (predates_execmem)
 				yield keep_current_runnable (cancellable);
 
@@ -186,6 +196,23 @@ namespace Frida.Barebone {
 		}
 
 		private async uint64 read_current_task (Cancellable? cancellable) throws Error, IOError {
+			if (machine is X64Machine)
+				return yield read_per_cpu_current (cancellable);
+			return yield probe_current (cancellable);
+		}
+
+		private async uint64 read_per_cpu_current (Cancellable? cancellable) throws Error, IOError {
+			uint64 cpu = uint64.parse (machine.debugger.exception.thread.id, 16) - 1;
+			var slot = yield machine.read_virtual (symbol_address ("__per_cpu_offset") + cpu * 8, 8,
+				cancellable);
+			uint64 per_cpu_base = read_u64 (slot.get_data (), 0);
+
+			var task = yield machine.read_virtual (per_cpu_base + percpu_offset ("current_task"), 8,
+				cancellable);
+			return read_u64 (task.get_data (), 0);
+		}
+
+		private async uint64 probe_current (Cancellable? cancellable) throws Error, IOError {
 			current_probe_stub = yield allocator.allocate (8, 8, cancellable);
 			uint64 stub = current_probe_stub.virtual_address;
 			var code = new uint8[8];
@@ -208,6 +235,18 @@ namespace Frida.Barebone {
 			return (sym != null) ? kernel_base + sym.offset : 0;
 		}
 
+		private static uint64 read_u64 (uint8[] buffer, uint offset) {
+			uint64 value = 0;
+			for (uint i = 0; i != 8; i++)
+				value |= ((uint64) buffer[offset + i]) << (8 * i);
+			return value;
+		}
+
+		private uint64 percpu_offset (string name) {
+			var sym = symbols[name];
+			return (sym != null) ? sym.offset : 0;
+		}
+
 		public async void settle (Cancellable? cancellable) throws Error, IOError {
 			yield machine.debugger.resume (cancellable);
 		}
@@ -217,11 +256,16 @@ namespace Frida.Barebone {
 		// scheduler with interrupts masked, and injecting from the idle task deadlocks a sleeping
 		// callee (module_alloc, execmem_alloc), so those hits are skipped and a real task awaited.
 		private async void run_until_schedule (uint64 address, Cancellable? cancellable) throws Error, IOError {
-			Debugger debugger = machine.debugger;
-			var bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
-
 			SymbolInfo? system_state = symbols["system_state"];
 			uint64 system_state_address = (system_state != null) ? kernel_base + system_state.offset : 0;
+
+			if (machine is IA32Machine || machine is X64Machine) {
+				yield park_at (address, system_state_address, cancellable);
+				return;
+			}
+
+			Debugger debugger = machine.debugger;
+			var bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
 
 			DebuggerException? exception = null;
 			bool ready = false;
@@ -238,6 +282,53 @@ namespace Frida.Barebone {
 			yield bp.remove (cancellable);
 		}
 
+		private async void park_at (uint64 address, uint64 system_state_address, Cancellable? cancellable)
+				throws Error, IOError {
+			Debugger debugger = machine.debugger;
+			unowned string pc_name = (machine is X64Machine) ? "rip" : "eip";
+
+			var original = yield machine.read_virtual (address, SPIN_IN_PLACE.length, cancellable);
+			yield machine.write_virtual (address, SPIN_IN_PLACE, cancellable);
+
+			bool parked = false;
+			for (uint attempt = 0; attempt != PARK_MAX_ATTEMPTS && !parked; attempt++) {
+				yield debugger.resume (cancellable);
+				yield let_the_guest_run (PARK_INTERVAL_MS);
+				yield debugger.stop (cancellable);
+
+				var thread = debugger.exception.thread;
+				if ((yield thread.read_register (pc_name, cancellable)) != address)
+					continue;
+
+				bool masked = yield interrupts_masked (thread, cancellable);
+				if (!masked && (yield system_is_running (system_state_address, cancellable))) {
+					parked = true;
+					break;
+				}
+
+				yield machine.write_virtual (address, original.get_data (), cancellable);
+				yield debugger.resume (cancellable);
+				yield let_the_guest_run (PARK_INTERVAL_MS);
+				yield debugger.stop (cancellable);
+				yield machine.write_virtual (address, SPIN_IN_PLACE, cancellable);
+			}
+
+			yield machine.write_virtual (address, original.get_data (), cancellable);
+
+			if (!parked) {
+				throw new Error.TIMED_OUT ("Timed out waiting for a task to reach 0x%" +
+					uint64.FORMAT_MODIFIER + "x", address);
+			}
+		}
+
+		private async void let_the_guest_run (uint milliseconds) {
+			var source = new TimeoutSource (milliseconds);
+			source.set_callback (let_the_guest_run.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+			source.destroy ();
+		}
+
 		private async bool system_is_running (uint64 system_state_address, Cancellable? cancellable)
 				throws Error, IOError {
 			if (system_state_address == 0)
@@ -246,7 +337,7 @@ namespace Frida.Barebone {
 			uint32 state = 0;
 			for (uint i = 0; i != 4; i++)
 				state |= ((uint32) data[i]) << (8 * i);
-			return state >= SYSTEM_RUNNING;
+			return state > SYSTEM_SCHEDULING;
 		}
 
 		// Linux on arm64 runs with FIQ permanently masked, so only the IRQ mask distinguishes a
@@ -261,7 +352,10 @@ namespace Frida.Barebone {
 			return (cpsr & IRQ_MASK_BIT) != 0;
 		}
 
-		private const uint32 SYSTEM_RUNNING = 3;
+		private const uint8[] SPIN_IN_PLACE = { 0xeb, 0xfe };
+		private const uint PARK_MAX_ATTEMPTS = 200;
+		private const uint PARK_INTERVAL_MS = 10;
+		private const uint32 SYSTEM_SCHEDULING = 1;
 		private const uint64 IRQ_MASK_BIT = 1ULL << 7;
 		private const uint64 INTERRUPT_ENABLE_BIT = 1ULL << 9;
 		private const uint LINUX_REGISTER_ARGUMENTS = 3;
