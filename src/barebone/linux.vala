@@ -19,8 +19,10 @@ namespace Frida.Barebone {
 			size = span_of (symbols, linked_base),
 		});
 
-		foreach (var symbol in symbols)
-			symbol.offset -= linked_base;
+		foreach (var symbol in symbols) {
+			if (symbol.offset >= linked_base)
+				symbol.offset -= linked_base;
+		}
 
 		return new LinuxLayout (running_base, modules, symbols);
 	}
@@ -83,7 +85,7 @@ namespace Frida.Barebone {
 		var registers = yield thread.read_registers (cancellable);
 
 		if (machine is IA32Machine || machine is X64Machine)
-			return yield find_relocated_kernel (debugger, registers, linked_base, symbols, cancellable);
+			return yield find_relocated_kernel (machine, linked_base, symbols, cancellable);
 
 		uint64 pc = registers["pc"].get_uint64 ();
 
@@ -129,29 +131,26 @@ namespace Frida.Barebone {
 		throw new Error.NOT_SUPPORTED ("Unable to find the running kernel; is the guest in kernel mode?");
 	}
 
-	private static async uint64 find_relocated_kernel (Debugger debugger, Gee.Map<string, Variant> registers,
-			uint64 linked_base, Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
-		uint64 pc = registers.has_key ("rip")
-			? registers["rip"].get_uint64 ()
-			: registers["eip"].get_uint64 ();
+	private static async uint64 find_relocated_kernel (Machine machine, uint64 linked_base,
+			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
+		Debugger debugger = machine.debugger;
 
 		uint64 banner = address_of (symbols, KERNEL_BANNER_SYMBOL);
 		if (banner == 0)
 			throw new Error.NOT_SUPPORTED ("System.map names no %s to anchor relocation", KERNEL_BANNER_SYMBOL);
 
 		uint64 banner_offset = banner - linked_base;
-
 		uint64 span = span_of (symbols, linked_base);
+		uint64 pc = yield read_program_counter (debugger, cancellable);
+
 		uint64 lowest = (pc - span) & ~(KERNEL_ALIGNMENT - 1);
-		uint64 highest = (pc + KERNEL_ALIGNMENT) & ~(KERNEL_ALIGNMENT - 1);
+		uint64 highest = pc & ~(KERNEL_ALIGNMENT - 1);
 
 		for (uint64 landing = lowest; landing <= highest; landing += KERNEL_ALIGNMENT) {
-			try {
-				var head = yield debugger.read_byte_array (landing + banner_offset, KERNEL_BANNER.length, cancellable);
-				if (Memory.cmp (head.get_data (), KERNEL_BANNER.data, KERNEL_BANNER.length) == 0)
-					return landing;
-			} catch (Error e) {
-			}
+			if (pc - landing >= span)
+				continue;
+			if (yield banner_present_at (debugger, landing + banner_offset, cancellable))
+				return landing;
 		}
 
 		for (uint64 landing = KERNEL_TEXT_MIN; landing < KERNEL_TEXT_MAX; landing += KERNEL_ALIGNMENT) {
@@ -160,6 +159,14 @@ namespace Frida.Barebone {
 		}
 
 		throw new Error.NOT_SUPPORTED ("Unable to find the relocated kernel; is the guest in kernel mode?");
+	}
+
+	private static async uint64 read_program_counter (Debugger debugger, Cancellable? cancellable)
+			throws Error, IOError {
+		var registers = yield debugger.exception.thread.read_registers (cancellable);
+		return registers.has_key ("rip")
+			? registers["rip"].get_uint64 ()
+			: registers["eip"].get_uint64 ();
 	}
 
 	private static async bool banner_present_at (Debugger debugger, uint64 address, Cancellable? cancellable)
