@@ -39,6 +39,7 @@ namespace Frida.Barebone {
 		}
 
 		public uint64 call_landing_zone = 0;
+		public uint64 call_stack = 0;
 		public uint64 set_memory_ro = 0;
 		public uint64 set_memory_rw = 0;
 		public uint64 set_memory_x = 0;
@@ -181,7 +182,8 @@ namespace Frida.Barebone {
 
 			uint64 landing_zone = (call_landing_zone != 0) ? call_landing_zone : saved_regs["rip"].get_uint64 ();
 
-			uint64 sp = saved_regs["rsp"].get_uint64 () - reserved_below_sp - 8;
+			uint64 stack_pointer = (call_stack != 0) ? call_stack : saved_regs["rsp"].get_uint64 ();
+			uint64 sp = stack_pointer - reserved_below_sp - 8;
 			sp = (sp & ~15ULL) - 8;
 
 			var builder = debugger.make_buffer_builder ();

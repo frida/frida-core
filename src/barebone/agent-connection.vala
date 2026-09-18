@@ -39,12 +39,14 @@ namespace Frida.Barebone {
 		private Gee.List<AgentSymbol> agent_symbols = new Gee.ArrayList<AgentSymbol> ();
 		private Gee.Map<string, SymbolInfo> resolved_symbols;
 		private Allocation config_allocation;
+		private Allocation? agent_stack;
 
 		private Promise<bool>? listening;
 
 		private Gee.Map<uint16, Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Promise<Variant>> ();
 		private uint16 next_request_id = 1;
 
+		private const size_t AGENT_STACK_SIZE = 512 * 1024;
 		private const int COMMAND_TIMEOUT_MS = 25000;
 		private const uint INJECT_MAX_ATTEMPTS = 100;
 		private const uint INJECT_POLL_INTERVAL_MS = 100;
@@ -307,12 +309,21 @@ namespace Frida.Barebone {
 			if (ia32 != null)
 				ia32.arguments_in_registers = 0;
 
+			var x64 = machine as X64Machine;
+			if (x64 != null) {
+				agent_stack = yield allocator.allocate (AGENT_STACK_SIZE, 16, cancellable);
+				x64.call_stack = agent_stack.virtual_address + AGENT_STACK_SIZE;
+			}
+
 			progress ("Starting the agent", 0.75);
 			yield machine.invoke (start_address, {
 					config_allocation.virtual_address,
 					config_allocation.size
 				},
 				cancellable);
+
+			if (x64 != null)
+				x64.call_stack = 0;
 
 			if (ia32 != null)
 				ia32.arguments_in_registers = kernel_arguments;
