@@ -477,7 +477,7 @@ impl Hostlink {
         let s = unsafe { &mut *self.state.get() };
 
         A_TURN_IS_WANTED.store(false, core::sync::atomic::Ordering::Release);
-        s.regs.isr_ack();
+        s.regs.interrupt_is_ours();
 
         self.ctrl_complete();
         self.ctrl_prime_rx(QSZ as usize);
@@ -850,11 +850,19 @@ impl Hostlink {
 }
 
 extern "C" fn isr_wake(token: *mut c_void, _refcon: *mut c_void, _nub: *mut c_void, _src: i32) {
-    unsafe {
-        if let Some(regs) = ISR_REGS {
-            regs.isr_ack();
+    let up = unsafe {
+        match ISR_REGS {
+            Some(regs) => {
+                regs.interrupt_is_ours();
+                true
+            }
+            None => false,
         }
+    };
+    if !up {
+        return;
     }
+
     A_TURN_IS_WANTED.store(true, core::sync::atomic::Ordering::Release);
     crate::nudge_the_loop(token as *const u8);
 }
@@ -998,15 +1006,15 @@ impl Regs {
         }
     }
 
-    fn isr_ack(&self) -> u8 {
+    fn interrupt_is_ours(&self) -> bool {
         match self {
             Regs::Mmio(base) => {
                 if (r32(*base, ISR) & INT_VRING) != 0 {
                     w32(*base, ISR_ACK, INT_VRING);
                 }
-                0
+                true
             }
-            Regs::Pci(p) => r8(p.isr, 0),
+            Regs::Pci(p) => r8(p.isr, 0) != 0,
         }
     }
 }
@@ -1125,12 +1133,14 @@ impl PciDevice {
         }))
     }
 
-    #[cfg(feature = "linux-injected")]
+    #[cfg(all(feature = "linux-injected",
+        not(any(target_arch = "x86", target_arch = "x86_64"))))]
     fn irq_line(&self) -> Option<u32> {
         kernel::pci_interrupt(self.bus, self.devfn)
     }
 
-    #[cfg(not(feature = "linux-injected"))]
+    #[cfg(any(not(feature = "linux-injected"),
+        target_arch = "x86", target_arch = "x86_64"))]
     fn irq_line(&self) -> Option<u32> {
         Some(self.read_config_byte(PCI_INTERRUPT_LINE) as u32)
     }
