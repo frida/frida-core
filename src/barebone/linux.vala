@@ -20,8 +20,11 @@ namespace Frida.Barebone {
 		});
 
 		foreach (var symbol in symbols) {
-			if (symbol.offset >= linked_base)
+			if (symbol.offset >= linked_base) {
 				symbol.offset -= linked_base;
+			} else {
+				symbol.per_cpu = true;
+			}
 		}
 
 		return new LinuxLayout (running_base, modules, symbols);

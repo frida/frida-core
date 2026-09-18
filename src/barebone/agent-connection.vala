@@ -205,7 +205,8 @@ namespace Frida.Barebone {
 					SymbolInfo? info = symbols[name];
 					if (info != null) {
 						size_t file_offset = (size_t) (sect.offset + (s.address - sect.address));
-						raw_elf.write_pointer (file_offset, kernel_base + info.offset);
+						uint64 value = info.per_cpu ? info.offset : kernel_base + info.offset;
+						raw_elf.write_pointer (file_offset, value);
 					}
 				}
 				return true;

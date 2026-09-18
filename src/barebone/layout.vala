@@ -233,6 +233,7 @@ namespace Frida.Barebone {
 		public string name;
 		public uint64 offset;
 		public uint8 symbol_type;
+		public bool per_cpu;
 		public uint8 section;
 		public uint16 description;
 	}
