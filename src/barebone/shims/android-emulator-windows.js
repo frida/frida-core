@@ -132,7 +132,6 @@ const REGISTER_DR6 = 0x25;
 const REGISTER_DR7 = 0x26;
 const DR7_ALWAYS_SET = 0x400;
 const MAX_BREAKPOINTS = 4;
-const REPORT_INTERVAL_MS = 50;
 const ARM_INTERVAL_MS = 100;
 
 const setPartitionProperty = new NativeFunction(WHP.getExportByName('WHvSetPartitionProperty'),
@@ -147,7 +146,6 @@ const getRegisters = new NativeFunction(WHP.getExportByName('WHvGetVirtualProces
     'uint32', ['pointer', 'uint32', 'pointer', 'uint32', 'pointer']);
 
 const programmed = new Map();
-const reported = new Map();
 const seen = new Set();
 
 let partition = null;
@@ -182,19 +180,13 @@ Interceptor.attach(WHP.getExportByName('WHvRunVirtualProcessor'), {
     if (this.exitContext.readU32() !== EXIT_REASON_EXCEPTION)
       return;
 
-    const rip = this.exitContext.add(VP_CONTEXT_RIP).readU64();
     const which = readRegister(this.partition, this.vpIndex, REGISTER_DR6).and(0xf);
-    writeRegister(this.partition, this.vpIndex, REGISTER_DR6, uint64(0));
-    this.exitContext.writeU32(EXIT_REASON_CANCELED);
-
     if (which.compare(0) === 0)
       return;
 
-    const episode = this.vpIndex + ':' + rip.toString(16);
-    const now = Date.now();
-    if (now - (reported.get(episode) || 0) < REPORT_INTERVAL_MS)
-      return;
-    reported.set(episode, now);
+    const rip = this.exitContext.add(VP_CONTEXT_RIP).readU64();
+    writeRegister(this.partition, this.vpIndex, REGISTER_DR6, uint64(0));
+    this.exitContext.writeU32(EXIT_REASON_CANCELED);
 
     send({
       type: 'breakpoint',
@@ -214,7 +206,6 @@ function onBreakpointsChanged(message) {
   planted = message.addresses.slice(0, MAX_BREAKPOINTS);
   generation++;
   programmed.clear();
-  reported.clear();
 
   if (partition !== null) {
     for (const vpIndex of seen)
