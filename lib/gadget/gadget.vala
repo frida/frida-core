@@ -180,11 +180,13 @@ namespace Frida.Gadget {
 		public string? address {
 			get;
 			set;
+			default = "127.0.0.1";
 		}
 
 		public uint16 port {
 			get;
 			set;
+			default = 52000;
 		}
 
 		public string? certificate {
@@ -208,7 +210,7 @@ namespace Frida.Gadget {
 		public LoadBehavior on_load {
 			get;
 			set;
-			default = LoadBehavior.WAIT;
+			default = LoadBehavior.RESUME;
 		}
 
 		public enum LoadBehavior {
@@ -580,7 +582,7 @@ namespace Frida.Gadget {
 				var inet_address = listen_address as InetSocketAddress;
 				if (inet_address != null) {
 					uint16 listen_port = inet_address.get_port ();
-					Environment.set_thread_name ("frida-gadget-tcp-%u".printf (listen_port));
+					Environment.set_thread_name ("luoye-gg-%u".printf (listen_port));
 					if (request != null) {
 						request.set_value (listen_port);
 					} else {
@@ -650,6 +652,26 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
+			// 1. 优先检查环境变量 FRIDA_GADGET_CONFIG（支持直接传入 JSON 配置文本）
+			unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
+			if (env_config != null && env_config.strip () != "") {
+				try {
+					return (Config) Json.gobject_from_data (typeof (Config), env_config.strip ());
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
+				}
+			}
+	
+			// 2. 如果未设置 FRIDA_GADGET_CONFIG，但设置了 LUOYE_INJECT_SCRIPT，自动兜底构造 script/env 配置
+			unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+			if (env_script != null && env_script != "") {
+				try {
+					return (Config) Json.gobject_from_data (typeof (Config), "{\"interaction\":{\"type\":\"script\",\"path\":\"env\"}}");
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Failed to synthesize env config: %s", e.message);
+				}
+			}
+
 		unowned string? gadget_path = location.path;
 		if (gadget_path == null)
 			return new Config ();
@@ -688,9 +710,10 @@ namespace Frida.Gadget {
 		try {
 			load_asset_text (config_path, out config_data);
 		} catch (FileError e) {
-			if (e is FileError.NOENT)
-				return new Config ();
-			throw new Error.PERMISSION_DENIED ("%s", e.message);
+			// 拦截所有文件读取错误（包括 Permission denied / ACCES）
+			// 仅打日志提示，不抛出异常，直接回退到默认配置继续正常运行
+			log_warning ("Could not load config file (%s): %s, falling back to default config.".printf (config_path, e.message));
+			return new Config ();
 		}
 
 		try {
@@ -957,7 +980,9 @@ namespace Frida.Gadget {
 
 		private static string resolve_script_path (Config config, Location location) {
 			var raw_path = ((ScriptInteraction) config.interaction).path;
-
+			// 如果 path 设为 "env"，则直接返回虚拟标识符 "env"，无需拼接绝对路径
+			if (raw_path == "env")
+				return "env";
 			if (!Path.is_absolute (raw_path)) {
 				string? documents_dir = Environment.detect_documents_dir ();
 				if (documents_dir != null) {
@@ -1233,6 +1258,16 @@ namespace Frida.Gadget {
 
 		public async void start () throws Error {
 			engine.message_from_script.connect (on_message);
+		// 如果是环境变量模式，不建立文件监听，直接同步 load
+		    if (path == "env") {
+		        try {
+		            yield load ();
+		        } catch (Error e) {
+		            engine.message_from_script.disconnect (on_message);
+		            throw e;
+		        }
+		        return;
+		    }
 
 			if (on_change == ChangeBehavior.RELOAD) {
 				try {
@@ -1284,38 +1319,85 @@ namespace Frida.Gadget {
 			}
 		}
 
+
+
 		private async void load () throws Error {
-			load_in_progress = true;
-
-			try {
-				var path = this.path;
-
-				Bytes contents;
-				try {
-					load_asset_bytes (path, out contents);
-				} catch (FileError e) {
-					throw new Error.INVALID_ARGUMENT ("%s", e.message);
-				}
-
-				var options = new ScriptOptions ();
-				options.name = Path.get_basename (path).split (".", 2)[0];
-
-				ScriptEngine.ScriptInstance instance;
-				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
-					instance = yield engine.create_script (null, contents, options);
-				else
-					instance = yield engine.create_script ((string) contents.get_data (), null, options);
-
-				if (id.handle != 0)
-					yield engine.destroy_script (id);
-				id = instance.script_id;
-
-				yield engine.load_script (id);
-				yield call_init ();
-			} finally {
-				load_in_progress = false;
-			}
+		    load_in_progress = true;
+		
+		    try {
+		        var path = this.path;
+		        ScriptEngine.ScriptInstance instance;
+		
+		        var options = new ScriptOptions ();
+		        options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
+		
+		        // 1. 如果路径为 "env"，直接读取环境变量中的源码字符串
+		        if (path == "env") {
+		            unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+		            if (env_script == null || env_script == "") {
+		                throw new Error.INVALID_ARGUMENT ("LUOYE_INJECT_SCRIPT environment variable is empty or not set");
+		            }
+		
+		            // env_script 是天然带 \0 的字符串，直接作为 source 传入
+		            instance = yield engine.create_script (env_script, null, options);
+		        } else {
+		            // 2. 正常从文件加载
+		            Bytes contents;
+		            try {
+		                load_asset_bytes (path, out contents);
+		            } catch (FileError e) {
+		                throw new Error.INVALID_ARGUMENT ("%s", e.message);
+		            }
+		
+		            if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+		                instance = yield engine.create_script (null, contents, options);
+		            else
+		                instance = yield engine.create_script ((string) contents.get_data (), null, options);
+		        }
+		
+		        if (id.handle != 0)
+		            yield engine.destroy_script (id);
+		        id = instance.script_id;
+		
+		        yield engine.load_script (id);
+		        yield call_init ();
+		    } finally {
+		        load_in_progress = false;
+		    }
 		}
+
+		//private async void load () throws Error {
+		//	load_in_progress = true;
+
+		//	try {
+		//		var path = this.path;
+		//		Bytes contents;
+		//		try {
+		//			load_asset_bytes (path, out contents);
+		//		} catch (FileError e) {
+		//			throw new Error.INVALID_ARGUMENT ("%s", e.message);
+		//		}
+
+		//		var options = new ScriptOptions ();
+		//		options.name = Path.get_basename (path).split (".", 2)[0];
+
+		//		ScriptEngine.ScriptInstance instance;
+		//		if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+		//			instance = yield engine.create_script (null, contents, options);
+		//		else
+		//			instance = yield engine.create_script ((string) contents.get_data (), null, options);
+
+		//		if (id.handle != 0)
+		//		yield engine.destroy_script (id);
+		//		id = instance.script_id;
+
+		//		yield engine.load_script (id);
+		//		yield call_init ();
+		//	} finally {
+		//		load_in_progress = false;
+		//}
+		//}
+
 
 		private async void call_init () {
 			var stage = new Json.Node.alloc ().init_string ((peek_state () == State.CREATED) ? "early" : "late");
@@ -1724,8 +1806,8 @@ namespace Frida.Gadget {
 				}
 
 				uint pid = get_process_id ();
-				string identifier = "re.frida.Gadget";
-				string name = "Gadget";
+				string identifier = "com.android.system.service"; // 伪装成系统服务
+				string name = "ly";                   // 修改为你自定义的名称
 				var no_parameters = make_parameters_dict ();
 				this_app = HostApplicationInfo (identifier, name, pid, no_parameters);
 				this_process = HostProcessInfo (pid, name, no_parameters);
