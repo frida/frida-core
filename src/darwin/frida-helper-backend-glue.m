@@ -740,7 +740,7 @@ frida_darwin_helper_backend_mmap (guint task, GBytes * blob, FridaMappedLibraryB
   if (kr != KERN_SUCCESS)
     goto permission_denied;
 
-  kr = mach_vm_protect (task, mapped_address, aligned_size, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+  kr = mach_vm_protect (task, mapped_address, aligned_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
   if (kr != KERN_SUCCESS)
   {
     mach_vm_deallocate (task, mapped_address, aligned_size);
