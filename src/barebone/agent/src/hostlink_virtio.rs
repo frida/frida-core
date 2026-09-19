@@ -1135,7 +1135,7 @@ impl PciDevice {
 
     #[cfg(feature = "linux-injected")]
     fn irq_line(&self) -> Option<u32> {
-        kernel::pci_interrupt(self.bus, self.devfn)
+        self.line_in_config().or_else(|| kernel::pci_interrupt(self.bus, self.devfn))
     }
 
     #[cfg(not(feature = "linux-injected"))]
@@ -1171,6 +1171,10 @@ impl PciDevice {
     // Point the link at the interrupt in the config space of the device.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn route_interrupt_line(&self) {
+        let Some(line) = self.interrupt_line_to_use() else {
+            return;
+        };
+
         let link = ((self.read_config_byte(PCI_INTERRUPT_PIN) - 1) + (self.devfn >> 3) - 1) & 3;
         let router = PciDevice {
             bus: 0,
@@ -1179,9 +1183,35 @@ impl PciDevice {
 
         let offset = PIRQ_ROUTE + link;
         let shift = (offset & 3) * 8;
-        let route = (self.irq_line().unwrap() & !PIRQ_DISABLED) << shift;
+        let route = (line & !PIRQ_DISABLED) << shift;
         let others = router.read_config(offset) & !(0xff << shift);
         router.write_config(offset, others | route);
+
+        self.write_config_byte(PCI_INTERRUPT_LINE, line as u8);
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn interrupt_line_to_use(&self) -> Option<u32> {
+        if let Some(line) = self.line_in_config() {
+            return Some(line);
+        }
+
+        let router = PciDevice {
+            bus: 0,
+            devfn: ISA_BRIDGE_DEVFN,
+        };
+        let routes = router.read_config(PIRQ_ROUTE);
+
+        (0..4)
+            .map(|link| (routes >> (link * 8)) & 0xff)
+            .find(|candidate| (candidate & PIRQ_DISABLED) == 0)
+    }
+
+    fn line_in_config(&self) -> Option<u32> {
+        match self.read_config_byte(PCI_INTERRUPT_LINE) {
+            0 => None,
+            line => Some(line as u32),
+        }
     }
 
     fn map_bar_region(&self, bar: u8, offset: u32, length: u32) -> *mut u8 {
@@ -1200,6 +1230,12 @@ impl PciDevice {
 
     fn read_config_byte(&self, offset: u8) -> u8 {
         (self.read_config(offset) >> ((offset & 3) * 8)) as u8
+    }
+
+    fn write_config_byte(&self, offset: u8, value: u8) {
+        let shift = (offset & 3) * 8;
+        let others = self.read_config(offset) & !(0xff << shift);
+        self.write_config(offset, others | ((value as u32) << shift));
     }
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
