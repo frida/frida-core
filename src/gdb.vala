@@ -115,6 +115,8 @@ namespace Frida.GDB {
 		private const string CLIENT_FEATURES = "xmlRegisters=i386,arm,aarch64";
 
 		private const char STOP_CHARACTER = 0x03;
+		private const uint INSIST_TIMEOUT_MSEC = 2000;
+		private const uint INSIST_MAX_ATTEMPTS = 5;
 		private const string ACK_NOTIFICATION = "+";
 		private const string NACK_NOTIFICATION = "-";
 		private const string PACKET_MARKER = "$";
@@ -348,37 +350,10 @@ namespace Frida.GDB {
 			if (_exception != null)
 				return _exception;
 
-			bool waiting = false;
+			if (state == STOPPED)
+				yield resume (cancellable);
 
-			var stop_observer = new StopObserverEntry (() => {
-				if (waiting)
-					continue_until_exception.callback ();
-				return false;
-			});
-			on_stop.add (stop_observer);
-
-			var cancel_source = new CancellableSource (cancellable);
-			cancel_source.set_callback (() => {
-				if (waiting)
-					continue_until_exception.callback ();
-				return false;
-			});
-			cancel_source.attach (MainContext.get_thread_default ());
-
-			try {
-				if (state == STOPPED)
-					yield resume (cancellable);
-
-				if (state != STOPPED) {
-					waiting = true;
-					yield;
-					waiting = false;
-				}
-			} finally {
-				cancel_source.destroy ();
-
-				on_stop.remove (stop_observer);
-			}
+			yield insist_until_stopped (cancellable);
 
 			if (_exception == null)
 				throw new Error.TRANSPORT ("Connection closed while waiting for exception");
@@ -399,47 +374,7 @@ namespace Frida.GDB {
 				write_bytes (new Bytes ({ STOP_CHARACTER }));
 			}
 
-			yield wait_until_stopped (cancellable);
-		}
-
-		private async void wait_until_stopped (Cancellable? cancellable, uint timeout_msec = 0) throws Error, IOError {
-			var stop_observer = new StopObserverEntry (() => {
-				wait_until_stopped.callback ();
-				return false;
-			});
-			on_stop.add (stop_observer);
-
-			var cancel_source = new CancellableSource (cancellable);
-			cancel_source.set_callback (() => {
-				wait_until_stopped.callback ();
-				return false;
-			});
-			cancel_source.attach (MainContext.get_thread_default ());
-
-			bool timed_out = false;
-			TimeoutSource? timeout_source = null;
-			if (timeout_msec != 0) {
-				timeout_source = new TimeoutSource (timeout_msec);
-				timeout_source.set_callback (() => {
-					timed_out = true;
-					wait_until_stopped.callback ();
-					return false;
-				});
-				timeout_source.attach (MainContext.get_thread_default ());
-			}
-
-			yield;
-
-			if (timeout_source != null)
-				timeout_source.destroy ();
-			cancel_source.destroy ();
-
-			on_stop.remove (stop_observer);
-
-			if (timed_out)
-				throw new Error.TIMED_OUT ("Timed out while waiting for target to stop");
-			if (state == CLOSED)
-				throw new Error.TRANSPORT ("Connection closed while waiting for target to stop");
+			yield insist_until_stopped (cancellable);
 		}
 
 		public async void detach (Cancellable? cancellable = null) throws Error, IOError {
@@ -486,7 +421,72 @@ namespace Frida.GDB {
 				write_bytes (command);
 			}
 
-			yield wait_until_stopped (cancellable);
+			yield insist_until_stopped (cancellable);
+		}
+
+		private async void insist_until_stopped (Cancellable? cancellable) throws Error, IOError {
+			if (!breakpoints_provided_externally) {
+				if (state != STOPPED)
+					yield wait_until_stopped (cancellable);
+				return;
+			}
+
+			for (uint attempt = 0; state != STOPPED; attempt++) {
+				try {
+					yield wait_until_stopped (cancellable, INSIST_TIMEOUT_MSEC);
+					return;
+				} catch (Error e) {
+					if (!(e is Error.TIMED_OUT))
+						throw e;
+				}
+
+				if (attempt == INSIST_MAX_ATTEMPTS - 1)
+					throw new Error.TIMED_OUT ("Timed out while waiting for target to stop");
+
+				if (state == RUNNING)
+					change_state (STOPPING);
+				write_bytes (new Bytes ({ STOP_CHARACTER }));
+			}
+		}
+
+		private async void wait_until_stopped (Cancellable? cancellable, uint timeout_msec = 0) throws Error, IOError {
+			var stop_observer = new StopObserverEntry (() => {
+				wait_until_stopped.callback ();
+				return false;
+			});
+			on_stop.add (stop_observer);
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				wait_until_stopped.callback ();
+				return false;
+			});
+			cancel_source.attach (MainContext.get_thread_default ());
+
+			bool timed_out = false;
+			TimeoutSource? timeout_source = null;
+			if (timeout_msec != 0) {
+				timeout_source = new TimeoutSource (timeout_msec);
+				timeout_source.set_callback (() => {
+					timed_out = true;
+					wait_until_stopped.callback ();
+					return false;
+				});
+				timeout_source.attach (MainContext.get_thread_default ());
+			}
+
+			yield;
+
+			if (timeout_source != null)
+				timeout_source.destroy ();
+			cancel_source.destroy ();
+
+			on_stop.remove (stop_observer);
+
+			if (timed_out)
+				throw new Error.TIMED_OUT ("Timed out while waiting for target to stop");
+			if (state == CLOSED)
+				throw new Error.TRANSPORT ("Connection closed while waiting for target to stop");
 		}
 
 		public void _step_thread_and_continue (Thread thread) throws Error {
