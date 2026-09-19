@@ -652,15 +652,24 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
-		//1. 优先检查环境变量（例如 FRIDA_GADGET_CONFIG），支持直接通过环境变量传入 JSON 配置字符串
-		unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
-		if (env_config != null && env_config != "") {
-			try {
-				return (Config) Json.gobject_from_data (typeof (Config), env_config);
-			} catch (GLib.Error e) {
-				throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
+			// 1. 优先检查环境变量 FRIDA_GADGET_CONFIG（支持直接传入 JSON 配置文本）
+			unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
+			if (env_config != null && env_config.strip () != "") {
+				try {
+					return (Config) Json.gobject_from_data (typeof (Config), env_config.strip ());
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
+				}
 			}
-	}
+	
+			// 2. 如果未设置配置环境变量，但设置了 LUOYE_INJECT_SCRIPT，自动兜底启用 script/env 模式
+			unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+			if (env_script != null && env_script != "") {
+				var config = new Config ();
+				config.interaction = InteractionType.SCRIPT;
+				config.path = "env";
+				return config;
+			}
 
 		unowned string? gadget_path = location.path;
 		if (gadget_path == null)
