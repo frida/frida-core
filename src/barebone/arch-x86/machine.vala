@@ -41,6 +41,7 @@ namespace Frida.Barebone {
 
 		private const uint64 CODE_SELECTOR_PRIVILEGE = 3;
 		private const uint64 USER_PRIVILEGE = 3;
+		private const int64 LANDING_TIMEOUT_USEC = 60000000;
 
 		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
 			DebuggerException? exception = debugger.exception;
@@ -174,7 +175,11 @@ namespace Frida.Barebone {
 			uint64 last_landing_sp = sp + ((1 + args.length) * 4);
 			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, landing_zone, 1, cancellable);
 			DebuggerException ex = null;
+			int64 deadline = get_monotonic_time () + LANDING_TIMEOUT_USEC;
 			while (true) {
+				if (get_monotonic_time () >= deadline)
+					throw new Error.TIMED_OUT ("Timed out waiting for the call to return");
+
 				ex = yield debugger.continue_until_exception (cancellable);
 				if (ex.breakpoint != bp)
 					continue;

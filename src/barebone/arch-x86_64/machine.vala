@@ -62,6 +62,7 @@ namespace Frida.Barebone {
 		private const size_t RED_ZONE_SIZE = 128;
 		private const uint8[] SPIN_IN_PLACE = { 0xeb, 0xfe };
 		private const uint LANDING_POLL_INTERVAL_MS = 1;
+		private const int64 LANDING_TIMEOUT_USEC = 60000000;
 		private const size_t SHADOW_SPACE_SIZE = 32;
 
 		public X64Machine (Debugger debugger) {
@@ -202,7 +203,11 @@ namespace Frida.Barebone {
 			uint64 landing_sp = sp + 8;
 			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, landing_zone, 1, cancellable);
 			DebuggerException ex = null;
+			int64 deadline = get_monotonic_time () + LANDING_TIMEOUT_USEC;
 			while (true) {
+				if (get_monotonic_time () >= deadline)
+					throw new Error.TIMED_OUT ("Timed out waiting for the call to return");
+
 				ex = yield debugger.continue_until_exception (cancellable);
 				if (ex.breakpoint != bp)
 					continue;

@@ -55,6 +55,7 @@ namespace Frida.Barebone {
 		private bool data_template_known = false;
 
 		private const uint NUM_ARGS_IN_REGS = 8;
+		private const int64 LANDING_TIMEOUT_USEC = 60000000;
 
 		private const uint64 INT2_MASK = 0x3ULL;
 		private const uint64 INT6_MASK = 0x3fULL;
@@ -1064,7 +1065,11 @@ namespace Frida.Barebone {
 		public async DebuggerThread run_until_pc (uint64 address, Cancellable? cancellable) throws Error, IOError {
 			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
 			DebuggerException ex = null;
+			int64 deadline = get_monotonic_time () + LANDING_TIMEOUT_USEC;
 			do {
+				if (get_monotonic_time () >= deadline)
+					throw new Error.TIMED_OUT ("Timed out waiting for the call to return");
+
 				ex = yield debugger.continue_until_exception (cancellable);
 			} while (ex.breakpoint != bp);
 			yield bp.remove (cancellable);

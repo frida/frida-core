@@ -15,6 +15,7 @@ namespace Frida.Barebone {
 		}
 
 		private const uint NUM_ARGS_IN_REGS = 4;
+		private const int64 LANDING_TIMEOUT_USEC = 60000000;
 
 		private const uint64 THUMB_BIT = 1ULL;
 
@@ -714,7 +715,11 @@ namespace Frida.Barebone {
 			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, address_from_funcptr (landing_zone),
 				breakpoint_size_from_funcptr (landing_zone), cancellable);
 			DebuggerException ex = null;
+			int64 deadline = get_monotonic_time () + LANDING_TIMEOUT_USEC;
 			do {
+				if (get_monotonic_time () >= deadline)
+					throw new Error.TIMED_OUT ("Timed out waiting for the call to return");
+
 				ex = yield debugger.continue_until_exception (cancellable);
 			} while (ex.breakpoint != bp);
 			yield bp.remove (cancellable);
