@@ -662,13 +662,14 @@ namespace Frida.Gadget {
 				}
 			}
 	
-			// 2. 如果未设置配置环境变量，但设置了 LUOYE_INJECT_SCRIPT，自动兜底启用 script/env 模式
+			// 2. 如果未设置 FRIDA_GADGET_CONFIG，但设置了 LUOYE_INJECT_SCRIPT，自动兜底构造 script/env 配置
 			unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
 			if (env_script != null && env_script != "") {
-				var config = new Config ();
-				config.interaction = InteractionType.SCRIPT;
-				config.path = "env";
-				return config;
+				try {
+					return (Config) Json.gobject_from_data (typeof (Config), "{\"interaction\":{\"type\":\"script\",\"path\":\"env\"}}");
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Failed to synthesize env config: %s", e.message);
+				}
 			}
 
 		unowned string? gadget_path = location.path;
