@@ -1755,8 +1755,8 @@ frida_darwin_helper_backend_is_application_process (guint pid)
 
 #endif
 
-gboolean
-_frida_darwin_helper_backend_is_suspended (guint task, GError ** error)
+gint
+frida_darwin_helper_backend_get_suspend_count (guint task, GError ** error)
 {
   mach_task_basic_info_data_t info;
   mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO_COUNT;
@@ -1773,7 +1773,7 @@ _frida_darwin_helper_backend_is_suspended (guint task, GError ** error)
 
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "task_info");
 
-  return info.suspend_count >= 1;
+  return info.suspend_count;
 
 mach_failure:
   {
@@ -1792,7 +1792,21 @@ mach_failure:
           "Unexpected error while interrogating target process (%s returned '%s')",
           failed_operation, mach_error_string (kr));
     }
-    return FALSE;
+    return -1;
+  }
+}
+
+void
+frida_darwin_helper_backend_suspend_process_fast (guint task, GError ** error)
+{
+  kern_return_t kr;
+
+  kr = task_suspend (task);
+  if (kr != KERN_SUCCESS)
+  {
+    g_set_error (error, FRIDA_ERROR, FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while suspending process: %s",
+        mach_error_string (kr));
   }
 }
 
