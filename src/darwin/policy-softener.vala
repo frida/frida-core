@@ -28,7 +28,7 @@ namespace Frida {
 			if (process_entries.has_key (pid))
 				return;
 
-			var entry = perform_softening (pid);
+			var entry = perform_softening_preserving_suspension (pid);
 
 			var expiry_source = new TimeoutSource.seconds (20);
 			expiry_source.set_callback (() => {
@@ -45,7 +45,7 @@ namespace Frida {
 		public void retain (uint pid) throws Error {
 			var entry = process_entries[pid];
 			if (entry == null)
-				entry = perform_softening (pid);
+				entry = perform_softening_preserving_suspension (pid);
 			entry.cancel_expiry ();
 			entry.usage_count++;
 		}
@@ -66,6 +66,38 @@ namespace Frida {
 			ProcessEntry entry;
 			if (process_entries.unset (pid, out entry))
 				entry.cancel_expiry ();
+		}
+
+		private ProcessEntry perform_softening_preserving_suspension (uint pid) throws Error {
+			uint task;
+			try {
+				task = DarwinHelperBackend.task_for_pid (pid);
+			} catch (Error e) {
+				return perform_softening (pid);
+			}
+
+			try {
+				int suspend_count = DarwinHelperBackend.get_suspend_count (task);
+				if (suspend_count < 1)
+					return perform_softening (pid);
+
+				DarwinHelperBackend.suspend_process_fast (task);
+				try {
+					return perform_softening (pid);
+				} finally {
+					drop_extra_suspension (task, suspend_count);
+				}
+			} finally {
+				DarwinHelperBackend.deallocate_port (task);
+			}
+		}
+
+		private static void drop_extra_suspension (uint task, int original_count) {
+			try {
+				if (DarwinHelperBackend.get_suspend_count (task) > original_count)
+					DarwinHelperBackend.resume_process_fast (task);
+			} catch (Error e) {
+			}
 		}
 
 		protected virtual ProcessEntry perform_softening (uint pid) throws Error {

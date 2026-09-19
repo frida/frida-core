@@ -268,7 +268,7 @@ namespace Frida {
 				do {
 					var task = task_for_pid (pid);
 					try {
-						if (_is_suspended (task)) {
+						if (get_suspend_count (task) >= 1) {
 							wait_request.resolve (true);
 							return;
 						}
@@ -384,7 +384,7 @@ namespace Frida {
 			try {
 				var spawn_instance = spawn_instances[pid];
 				bool instance_created_here = false;
-				bool not_yet_booted = _is_suspended (task) && is_booting (task);
+				bool not_yet_booted = get_suspend_count (task) >= 1 && is_booting (task);
 				if (spawn_instance == null && not_yet_booted) {
 					spawn_instance = _create_spawn_instance (pid);
 					instance_created_here = true;
@@ -674,7 +674,8 @@ namespace Frida {
 		protected extern uint _spawn (string path, HostSpawnOptions options, UnixInputStream? stdin_stream,
 			UnixOutputStream? stdout_stream, UnixOutputStream? stderr_stream, out StdioPipes? pipes) throws Error;
 		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
-		protected extern static bool _is_suspended (uint task) throws Error;
+		public extern static int get_suspend_count (uint task) throws Error;
+		public extern static void suspend_process_fast (uint task) throws Error;
 		public extern static void resume_process (uint task) throws Error;
 		public extern static void resume_process_fast (uint task) throws Error;
 		protected extern static void _kill_process (uint pid);
