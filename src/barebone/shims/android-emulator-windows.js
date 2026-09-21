@@ -10,11 +10,19 @@ const HF_CS64 = 1 << 15;
 
 const layout = locate();
 
+const cpuStateByIndex = new Map();
+const pendingCpuState = new Map();
+const CPU_STATE_REGISTERS = ['rbx', 'rbp', 'rsi', 'rdi', 'r12', 'r13', 'r14', 'r15'];
+let cpuStateRegister = null;
+const refreshRegisters = new NativeFunction(layout.getRegisters, 'void', ['pointer']);
+
 Interceptor.attach(layout.getRegisters, {
   onEnter(args) {
     this.cpuState = args[0];
+    pendingCpuState.set(this.threadId, args[0]);
   },
   onLeave() {
+    pendingCpuState.delete(this.threadId);
     repair(this.cpuState.add(layout.envOffset).readPointer());
   }
 });
@@ -158,6 +166,10 @@ recv('breakpoints', onBreakpointsChanged);
 Interceptor.attach(WHP.getExportByName('WHvGetVirtualProcessorRegisters'), {
   onEnter(args) {
     partition = args[0];
+
+    const pending = pendingCpuState.get(this.threadId);
+    if (pending !== undefined)
+      cpuStateByIndex.set(args[1].toUInt32(), pending);
   }
 });
 
@@ -171,6 +183,10 @@ Interceptor.attach(WHP.getExportByName('WHvRunVirtualProcessor'), {
 
     seen.add(this.vpIndex);
 
+    learnCpuStateRegister(this.context, this.vpIndex);
+    if (cpuStateRegister !== null && !cpuStateByIndex.has(this.vpIndex))
+      cpuStateByIndex.set(this.vpIndex, this.context[cpuStateRegister]);
+
     if (programmed.get(this.vpIndex) !== generation) {
       programmed.set(this.vpIndex, generation);
       programDebugRegisters(this.partition, this.vpIndex);
@@ -183,6 +199,8 @@ Interceptor.attach(WHP.getExportByName('WHvRunVirtualProcessor'), {
     const which = readRegister(this.partition, this.vpIndex, REGISTER_DR6).and(0xf);
     if (which.compare(0) === 0)
       return;
+
+    refreshLandingProcessor(this.vpIndex);
 
     const rip = this.exitContext.add(VP_CONTEXT_RIP).readU64();
     writeRegister(this.partition, this.vpIndex, REGISTER_DR6, uint64(0));
@@ -201,6 +219,31 @@ setInterval(() => {
   if (!armed && partition !== null)
     armed = arm();
 }, ARM_INTERVAL_MS);
+
+function learnCpuStateRegister(context, vpIndex) {
+  if (cpuStateRegister !== null)
+    return;
+
+  const known = cpuStateByIndex.get(vpIndex);
+  if (known === undefined)
+    return;
+
+  for (const name of CPU_STATE_REGISTERS) {
+    if (context[name].equals(known)) {
+      cpuStateRegister = name;
+      return;
+    }
+  }
+}
+
+function refreshLandingProcessor(vpIndex) {
+  const cpuState = cpuStateByIndex.get(vpIndex);
+  if (cpuState === undefined)
+    return;
+
+  refreshRegisters(cpuState);
+  repair(cpuState.add(layout.envOffset).readPointer());
+}
 
 function onBreakpointsChanged(message) {
   planted = message.addresses.slice(0, MAX_BREAKPOINTS);
