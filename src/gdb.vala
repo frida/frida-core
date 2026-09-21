@@ -117,6 +117,8 @@ namespace Frida.GDB {
 		private const char STOP_CHARACTER = 0x03;
 		private const uint INSIST_TIMEOUT_MSEC = 2000;
 		private const uint INSIST_MAX_ATTEMPTS = 5;
+		private const uint CONNECT_TIMEOUT_MSEC = 10000;
+		private const uint CONNECT_MAX_ATTEMPTS = 3;
 		private const string ACK_NOTIFICATION = "+";
 		private const string NACK_NOTIFICATION = "-";
 		private const string PACKET_MARKER = "$";
@@ -184,12 +186,8 @@ namespace Frida.GDB {
 				yield enable_extensions (cancellable);
 
 				string attached_response = yield query_property ("Attached", cancellable);
-				if (attached_response == "1") {
-					if (_exception == null) {
-						request_stop_info ();
-						yield wait_until_stopped (cancellable);
-					}
-				}
+				if (attached_response == "1" && _exception == null)
+					yield ask_until_stopped (cancellable);
 			} catch (GLib.Error e) {
 				io_cancellable.cancel ();
 
@@ -197,6 +195,23 @@ namespace Frida.GDB {
 			}
 
 			return true;
+		}
+
+		private async void ask_until_stopped (Cancellable? cancellable) throws Error, IOError {
+			for (uint attempt = 0; state != STOPPED; attempt++) {
+				request_stop_info ();
+
+				try {
+					yield wait_until_stopped (cancellable, CONNECT_TIMEOUT_MSEC);
+					return;
+				} catch (Error e) {
+					if (!(e is Error.TIMED_OUT))
+						throw e;
+				}
+
+				if (attempt == CONNECT_MAX_ATTEMPTS - 1)
+					throw new Error.TIMED_OUT ("Timed out while connecting to the stub");
+			}
 		}
 
 		protected virtual async void prepare_connection (Cancellable? cancellable) throws Error, IOError {
