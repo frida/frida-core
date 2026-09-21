@@ -726,7 +726,8 @@ namespace Frida {
 				try {
 					remote_address = sc.get_remote_address ();
 				} catch (GLib.Error e) {
-					assert_not_reached ();
+					remove_connection (peer);
+					return;
 				}
 
 				incoming (peer, remote_address);
