@@ -57,6 +57,7 @@ namespace Frida.GDB {
 		private AckMode ack_mode = SEND_ACKS;
 		internal bool bulk_registers = true;
 		internal bool breakpoints_provided_externally = false;
+		internal string? selected_thread_id = null;
 		private TimeoutSource? stall_watchdog;
 		private const uint QUERY_TIMEOUT_SECONDS = 30;
 		private const uint STALL_CHECK_SECONDS = 5;
@@ -433,6 +434,7 @@ namespace Frida.GDB {
 			} else {
 				// Expensive roundtrip
 				yield execute_simple ("Hg" + thread.id, cancellable);
+				selected_thread_id = thread.id;
 				var command = make_packet_builder_sized (16)
 					.append ("s")
 					.build ();
@@ -2038,6 +2040,8 @@ namespace Frida.GDB {
 			if (!client.bulk_registers)
 				return yield read_registers_individually (cancellable);
 
+			yield select (cancellable);
+
 			var response = yield client.query_simple ("g", cancellable);
 			if (response.payload.length == 0) {
 				client.bulk_registers = false;
@@ -2122,6 +2126,8 @@ namespace Frida.GDB {
 				}
 			}
 
+			yield select (cancellable);
+
 			var builder = client.make_packet_builder_sized (2048)
 				.append_c ('G');
 
@@ -2144,6 +2150,14 @@ namespace Frida.GDB {
 			yield client.execute (builder.build (), cancellable);
 		}
 
+		private async void select (Cancellable? cancellable) throws Error, IOError {
+			if (client.selected_thread_id == id)
+				return;
+
+			yield client.execute_simple ("Hg" + id, cancellable);
+			client.selected_thread_id = id;
+		}
+
 		public async uint64 read_register (string name, Cancellable? cancellable = null) throws Error, IOError {
 			var reg = client.get_register_by_name (name);
 
@@ -2158,6 +2172,7 @@ namespace Frida.GDB {
 					.append_c (';');
 			} else {
 				yield client.execute_simple ("Hg" + id, cancellable);
+				client.selected_thread_id = id;
 			}
 
 			var response = yield client.query (request.build (), cancellable);
@@ -2185,6 +2200,7 @@ namespace Frida.GDB {
 					.append_c (';');
 			} else {
 				yield client.execute_simple ("Hg" + id, cancellable);
+				client.selected_thread_id = id;
 			}
 
 			yield client.execute (command.build (), cancellable);
