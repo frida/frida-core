@@ -82,15 +82,28 @@ pub unsafe fn pipe_read(file: *mut c_void, into: *mut u8, count: usize, position
     unsafe { _kernel_read(file, into, count, position) }
 }
 
+#[cfg(not(target_arch = "x86"))]
 pub unsafe fn pipe_write(file: *mut c_void, from: *const u8, count: usize, position: *mut i64) -> isize {
     let write: unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut i64) -> isize =
         unsafe { core::mem::transmute(_kernel_write) };
     unsafe { write(file, from, count, position) }
 }
 
+#[cfg(target_arch = "x86")]
+pub unsafe fn pipe_write(file: *mut c_void, from: *const u8, count: usize, position: *mut i64) -> isize {
+    unsafe { _kernel_write(file, from, count, position) }
+}
+
+#[cfg(not(target_arch = "x86"))]
 pub fn leave_a_word(file: *mut c_void) {
     let one: u64 = 1;
     unsafe { _kernel_write(file, &one as *const u64 as *const u8, 8, 0) };
+}
+
+#[cfg(target_arch = "x86")]
+pub fn leave_a_word(file: *mut c_void) {
+    let one: u64 = 1;
+    unsafe { _kernel_write(file, &one as *const u64 as *const u8, 8, core::ptr::null_mut()) };
 }
 
 // A CONFIG_CFI_CLANG kernel checks the 4-byte type id in front of any function it
@@ -441,7 +454,7 @@ pub fn pci_interrupt(bus: u8, devfn: u8) -> Option<u32> {
 
     // pci_irq_vector arrived in 4.10; older kernels resolve a legacy INTx line through the
     // device-tree PCI mapping instead.
-    let line = if let Some(f) = unsafe { _pci_irq_vector } {
+    let line = if let Some(f) = pci_irq_vector() {
         unsafe { f(device, 0) }
     } else if let Some(f) = unsafe { _of_irq_parse_and_map_pci } {
         unsafe { f(device, 0, 0) }
@@ -455,6 +468,16 @@ pub fn pci_interrupt(bus: u8, devfn: u8) -> Option<u32> {
     }
 
     Some(line as u32)
+}
+
+#[cfg(target_arch = "x86")]
+fn pci_irq_vector() -> Option<unsafe extern "C" fn(*mut c_void, c_uint) -> c_int> {
+    Some(_pci_irq_vector)
+}
+
+#[cfg(not(target_arch = "x86"))]
+fn pci_irq_vector() -> Option<unsafe extern "C" fn(*mut c_void, c_uint) -> c_int> {
+    unsafe { _pci_irq_vector }
 }
 
 #[cfg(target_arch = "arm")]
@@ -491,13 +514,23 @@ pub fn monotonic_micros() -> i64 {
 pub fn wall_clock_micros() -> (u32, u32) {
     let mut now = Timespec64 { tv_sec: 0, tv_nsec: 0 };
     unsafe {
-        if let Some(f) = _ktime_get_real_ts64 {
+        if let Some(f) = ktime_get_real_ts64() {
             f(&mut now);
         } else if let Some(f) = _getnstimeofday64 {
             f(&mut now);
         }
     }
     (now.tv_sec as u32, (now.tv_nsec / 1000) as u32)
+}
+
+#[cfg(target_arch = "x86")]
+fn ktime_get_real_ts64() -> Option<unsafe extern "C" fn(*mut Timespec64)> {
+    Some(_ktime_get_real_ts64)
+}
+
+#[cfg(not(target_arch = "x86"))]
+fn ktime_get_real_ts64() -> Option<unsafe extern "C" fn(*mut Timespec64)> {
+    unsafe { _ktime_get_real_ts64 }
 }
 
 // Linux keeps the running task where the architecture puts it: in a register
@@ -597,7 +630,7 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     unsafe { _ioremap(phys_addr as u32, size as usize) }
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     unsafe {
         if let Some(f) = _ioremap {
@@ -610,6 +643,11 @@ pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
     }
 
     core::ptr::null_mut()
+}
+
+#[cfg(target_arch = "x86")]
+pub fn map_io(phys_addr: u64, size: u64) -> *mut c_void {
+    unsafe { _ioremap(phys_addr as usize, size as usize) }
 }
 
 #[cfg(not(any(target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
@@ -831,6 +869,7 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _kernel_read: unsafe extern "C" fn(*mut c_void, *mut u8, usize, *mut i64) -> isize;
     #[cfg(not(target_arch = "x86"))]
+    #[cfg(not(target_arch = "x86"))]
     static _kernel_write: unsafe extern "C" fn(*mut c_void, *const u8, usize, i64) -> isize;
     // Allocation profiling renamed the entry points in 6.10; before that the
     // size-plus-flags pair went to __kmalloc.
@@ -928,9 +967,9 @@ unsafe extern "C" {
     static _of_irq_get: unsafe extern "C" fn(*mut c_void, c_int) -> c_int;
     #[cfg(target_arch = "arm")]
     static _of_node_put: unsafe extern "C" fn(*mut c_void);
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     static _ioremap: Option<unsafe extern "C" fn(usize, usize) -> *mut c_void>;
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     static _ioremap_nocache: Option<unsafe extern "C" fn(usize, usize) -> *mut c_void>;
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     static ___default_kernel_pte_mask: *const usize;
