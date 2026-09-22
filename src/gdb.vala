@@ -114,7 +114,7 @@ namespace Frida.GDB {
 		protected const char NOTIFICATION_TYPE_STOP_WITH_PROPERTIES = 'T';
 		protected const char NOTIFICATION_TYPE_OUTPUT = 'O';
 
-		private bool binary_writes_supported = true;
+		private bool binary_writes_supported = false;
 
 		private const string CLIENT_FEATURES = "xmlRegisters=i386,arm,aarch64";
 
@@ -176,6 +176,8 @@ namespace Frida.GDB {
 						break;
 					}
 				}
+
+				binary_writes_supported = "binary-upload+" in supported_features;
 
 				if ("QStartNoAckMode+" in supported_features || "qEcho+" in supported_features) {
 					yield execute_simple ("QStartNoAckMode", cancellable);
