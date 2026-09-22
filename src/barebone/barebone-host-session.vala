@@ -151,11 +151,13 @@ namespace Frida {
 					break;
 			}
 
+#if WINDOWS || MACOS
 			if (emulator_instrumentation != null) {
 				var client = debugger as GDB.Client;
 				if (client != null)
 					emulator_instrumentation.adopt_breakpoints (client);
 			}
+#endif
 
 			try {
 				host_session = yield establish (config, debugger, (owned) connecting, cancellable);
