@@ -2414,12 +2414,12 @@ namespace Frida {
 					return xnu;
 				}
 
-				var linux = (BareboneLinuxKernelConfig) Json.gobject_deserialize (
+				var config = (BareboneLinuxKernelConfig) Json.gobject_deserialize (
 					typeof (BareboneLinuxKernelConfig), node);
-				linux.kernel = (kind == "linux-system-map")
+				config.kernel = (kind == "linux-system-map")
 					? (LinuxKernelSymbols) LinuxSystemMap.open (file)
 					: (LinuxKernelSymbols) LinuxKernelImage.open (file);
-				return linux;
+				return config;
 			} catch (Error e) {
 				return new BareboneInvalidImageConfig (e.message);
 			}
