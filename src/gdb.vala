@@ -204,7 +204,7 @@ namespace Frida.GDB {
 		}
 
 		private async void ask_until_stopped (Cancellable? cancellable) throws Error, IOError {
-			for (uint attempt = 0; state != STOPPED; attempt++) {
+			for (uint attempt = 0; _exception == null; attempt++) {
 				request_stop_info ();
 
 				try {
