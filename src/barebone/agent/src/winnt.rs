@@ -1714,13 +1714,6 @@ const DESCRIPTOR_SIZE: usize = 2 + core::mem::size_of::<usize>();
 // Report only the faults from our own code. Send the other faults, primarily the paging
 // faults of the kernel, to the handler that was there before.
 
-// A thunk cannot name data, the image being position-independent. Thus it asks for the record.
-#[cfg(target_arch = "x86")]
-#[unsafe(no_mangle)]
-extern "C" fn frida_winnt_resume_block() -> *mut u32 {
-    &raw mut RESUME as *mut u32
-}
-
 // A long-mode frame always contains the stack pointer. Thus write the values from Gum into
 // the frame.
 
