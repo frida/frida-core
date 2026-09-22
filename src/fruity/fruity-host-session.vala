@@ -1209,7 +1209,7 @@ namespace Frida {
 				if (tunnel == null)
 					throw new Error.NOT_SUPPORTED ("RemoteXPC not supported by device");
 
-				var service_info = tunnel.discovery.get_service (service_name);
+				var service_info = yield tunnel.resolve_service (new string[] { service_name }, cancellable);
 				var stream = yield tunnel.open_tcp_connection (service_info.port, cancellable);
 
 				return new XpcServiceSession (new Fruity.XpcConnection (stream));

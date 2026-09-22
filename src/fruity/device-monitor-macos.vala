@@ -355,6 +355,12 @@ namespace Frida.Fruity {
 			return connection;
 		}
 
+		public async void refresh_discovery (Cancellable? cancellable) throws Error, IOError {
+			var disco = yield locate_discovery_service (tunnel_device_address, cancellable);
+			_discovery.close ();
+			_discovery = disco;
+		}
+
 		private static async DiscoveryService locate_discovery_service (InetAddress tunnel_device_address, Cancellable? cancellable)
 				throws Error, IOError {
 			var main_context = MainContext.get_thread_default ();

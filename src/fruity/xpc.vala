@@ -54,17 +54,35 @@ namespace Frida.Fruity {
 		}
 
 		public ServiceInfo get_service (string identifier) throws Error {
+			ServiceInfo? service = find_service (identifier);
+			if (service == null)
+				throw new Error.NOT_SUPPORTED ("Service '%s' not found", identifier);
+			return service;
+		}
+
+		public ServiceInfo? find_first_service (string[] identifiers) throws Error {
+			foreach (unowned string identifier in identifiers) {
+				ServiceInfo? service = find_service (identifier);
+				if (service != null)
+					return service;
+			}
+
+			return null;
+		}
+
+		public ServiceInfo? find_service (string identifier) throws Error {
 			var reader = new VariantReader (handshake_body);
 			reader.read_member ("Services");
 			try {
 				reader.read_member (identifier);
 			} catch (Error e) {
-				throw new Error.NOT_SUPPORTED ("Service '%s' not found", identifier);
+				return null;
 			}
 
 			var port = (uint16) uint.parse (reader.read_member ("Port").get_string_value ());
 
 			return new ServiceInfo () {
+				name = identifier,
 				port = port,
 			};
 		}
@@ -117,6 +135,7 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class ServiceInfo {
+		public string name;
 		public uint16 port;
 	}
 

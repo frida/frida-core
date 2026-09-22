@@ -47,13 +47,7 @@ namespace Frida.Fruity {
 
 			_opened_at = get_monotonic_time ();
 
-			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tc.remote_address,
-				port: tc.remote_rsd_port,
-				scope_id: tc.tunnel_netstack.scope_id
-			);
-			var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
-			var disco = yield DiscoveryService.open (rsd_connection, cancellable);
+			var disco = yield open_discovery_service (tc, cancellable);
 
 			tunnel_connection = tc;
 			_discovery_service = disco;
@@ -76,6 +70,12 @@ namespace Frida.Fruity {
 				scope_id: netstack.scope_id
 			);
 			return yield netstack.open_tcp_connection (endpoint, cancellable);
+		}
+
+		public async void refresh_discovery (Cancellable? cancellable) throws Error, IOError {
+			var disco = yield open_discovery_service (tunnel_connection, cancellable);
+			_discovery_service.close ();
+			_discovery_service = disco;
 		}
 
 		private void on_tunnel_connection_close () {
@@ -1164,13 +1164,7 @@ namespace Frida.Fruity {
 			_opened_at = get_monotonic_time ();
 			_remote_unlock_host_key = pairing_service.established_peer.remote_unlock_host_key;
 
-			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tc.remote_address,
-				port: tc.remote_rsd_port,
-				scope_id: tc.tunnel_netstack.scope_id
-			);
-			var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
-			var disco = yield DiscoveryService.open (rsd_connection, cancellable);
+			var disco = yield open_discovery_service (tc, cancellable);
 
 			tunnel_connection = tc;
 			_discovery_service = disco;
@@ -1193,6 +1187,12 @@ namespace Frida.Fruity {
 				scope_id: netstack.scope_id
 			);
 			return yield netstack.open_tcp_connection (endpoint, cancellable);
+		}
+
+		public async void refresh_discovery (Cancellable? cancellable) throws Error, IOError {
+			var disco = yield open_discovery_service (tunnel_connection, cancellable);
+			_discovery_service.close ();
+			_discovery_service = disco;
 		}
 
 		private void on_tunnel_connection_close () {
@@ -1365,13 +1365,7 @@ namespace Frida.Fruity {
 			_opened_at = get_monotonic_time ();
 			_remote_unlock_host_key = pairing_service.established_peer.remote_unlock_host_key;
 
-			var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tc.remote_address,
-				port: tc.remote_rsd_port,
-				scope_id: tc.tunnel_netstack.scope_id
-			);
-			var rsd_connection = yield tc.tunnel_netstack.open_tcp_connection (rsd_endpoint, cancellable);
-			var disco = yield DiscoveryService.open (rsd_connection, cancellable);
+			var disco = yield open_discovery_service (tc, cancellable);
 
 			tunnel_connection = tc;
 			_discovery_service = disco;
@@ -1392,6 +1386,24 @@ namespace Frida.Fruity {
 			);
 			return yield netstack.open_tcp_connection (endpoint, cancellable);
 		}
+
+		public async void refresh_discovery (Cancellable? cancellable) throws Error, IOError {
+			var disco = yield open_discovery_service (tunnel_connection, cancellable);
+			_discovery_service.close ();
+			_discovery_service = disco;
+		}
+	}
+
+	private async DiscoveryService open_discovery_service (TunnelConnection tc, Cancellable? cancellable) throws Error, IOError {
+		var netstack = tc.tunnel_netstack;
+		var rsd_endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+			address: tc.remote_address,
+			port: tc.remote_rsd_port,
+			scope_id: netstack.scope_id
+		);
+		var rsd_connection = yield netstack.open_tcp_connection (rsd_endpoint, cancellable);
+
+		return yield DiscoveryService.open (rsd_connection, cancellable);
 	}
 
 	private async void sleep (uint duration_msec, Cancellable? cancellable) throws IOError {

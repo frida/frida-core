@@ -243,19 +243,11 @@ namespace Frida.Fruity {
 		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
 			var tunnel = yield find_tunnel (cancellable);
 			if (tunnel != null) {
-				ServiceInfo? service_info = null;
-				bool needs_checkin = service_name == "";
-				try {
-					service_info = tunnel.discovery.get_service (
-						(service_name == "") ? "com.apple.mobile.lockdown.remote.trusted" : service_name);
-				} catch (Error e) {
-					if (!(e is Error.NOT_SUPPORTED))
-						throw e;
-				}
-				if (service_info == null) {
-					service_info = tunnel.discovery.get_service (service_name + ".shim.remote");
-					needs_checkin = true;
-				}
+				string[] candidates = (service_name == "")
+					? new string[] { "com.apple.mobile.lockdown.remote.trusted" }
+					: new string[] { service_name, service_name + ".shim.remote" };
+				var service_info = yield tunnel.resolve_service (candidates, cancellable);
+				bool needs_checkin = service_info.name != service_name;
 
 				var stream = yield tunnel.open_tcp_connection (service_info.port, cancellable);
 
@@ -334,7 +326,7 @@ namespace Frida.Fruity {
 					throw new Error.NOT_SUPPORTED ("Unable to resolve port name; tunnel not available");
 				if ((flags & OpenTcpChannelFlags.ALLOW_TUNNEL) == 0)
 					throw new Error.NOT_SUPPORTED ("Connection to tunnel service not allowed by flags");
-				var service_info = tunnel.discovery.get_service (location);
+				var service_info = yield tunnel.resolve_service (new string[] { location }, cancellable);
 				port = service_info.port;
 			}
 
@@ -485,6 +477,21 @@ namespace Frida.Fruity {
 
 		public abstract async void close (Cancellable? cancellable) throws IOError;
 		public abstract async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError;
+
+		public async ServiceInfo resolve_service (string[] identifiers, Cancellable? cancellable) throws Error, IOError {
+			ServiceInfo? service = discovery.find_first_service (identifiers);
+			if (service != null)
+				return service;
+
+			yield refresh_discovery (cancellable);
+
+			service = discovery.find_first_service (identifiers);
+			if (service == null)
+				throw new Error.NOT_SUPPORTED ("Service '%s' not found", identifiers[0]);
+			return service;
+		}
+
+		public abstract async void refresh_discovery (Cancellable? cancellable) throws Error, IOError;
 	}
 
 	public interface Backend : Object {
