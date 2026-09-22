@@ -240,8 +240,18 @@ namespace Frida.Fruity {
 			return new LockdownClient (stream);
 		}
 
-		public async IOStream open_lockdown_service (string service_name, Cancellable? cancellable) throws Error, IOError {
-			var tunnel = yield find_tunnel (cancellable);
+		public async IOStream open_lockdown_service (string name_with_options, Cancellable? cancellable) throws Error, IOError {
+			var tokens = name_with_options.split ("?", 2);
+			unowned string service_name = (tokens.length > 0) ? tokens[0] : "";
+			bool force_usbmux = false;
+			if (tokens.length > 1) {
+				unowned string options = tokens[1];
+				force_usbmux = "force_transport=usbmux" in options;
+			}
+
+			Tunnel? tunnel = null;
+			if (!force_usbmux)
+				tunnel = yield find_tunnel (cancellable);
 			if (tunnel != null) {
 				string[] candidates = (service_name == "")
 					? new string[] { "com.apple.mobile.lockdown.remote.trusted" }
@@ -282,7 +292,7 @@ namespace Frida.Fruity {
 				return stream;
 			}
 
-			return yield get_usbmux_transport ().open_lockdown_service (service_name, cancellable);
+			return yield get_usbmux_transport ().open_lockdown_service (name_with_options, cancellable);
 		}
 
 		// FIXME: Replace with `element in array`-check once Vala compiler bug has been fixed so generated C code is warning-free.
