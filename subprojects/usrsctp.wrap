@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/usrsctp.git
-revision = 377fecfe06bb766c69cc0e1e1f6d5c72cf7704e6
+revision = 57b8b42abad9b00861f92281f013830bbbd0b5f0
 depth = 1
 
 [provide]
