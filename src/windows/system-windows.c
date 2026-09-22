@@ -222,7 +222,7 @@ frida_get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
 {
   gsize name_length;
   WCHAR drive_strings[DRIVE_STRINGS_MAX_LENGTH];
-  WCHAR *drive;
+  WCHAR * drive;
 
   if (GetProcessImageFileNameW (process, name, name_capacity) == 0)
     return FALSE;

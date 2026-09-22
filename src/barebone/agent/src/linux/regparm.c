@@ -363,21 +363,21 @@ typedef void (__attribute__((regparm(3))) * frida_release_flags_t) (void *, unsi
 
 void frida_k_log (const char * message)
 {
-  void *say = __printk ? __printk : _printk;
+  void * say = __printk ? __printk : _printk;
 
   ((frida_say_t) say) (message);
 }
 
 void * frida_k_alloc (unsigned long size, unsigned long flags)
 {
-  void *take = ___kmalloc_noprof ? ___kmalloc_noprof : _kmalloc;
+  void * take = ___kmalloc_noprof ? ___kmalloc_noprof : _kmalloc;
 
   return ((frida_take_t) take) (size, flags);
 }
 
 void * frida_k_alloc_code (unsigned long kind, unsigned long size, unsigned long pages)
 {
-  void *code;
+  void * code;
 
   if (_execmem_alloc)
     code = ((frida_take_t) _execmem_alloc) (kind, size);
@@ -392,7 +392,7 @@ void * frida_k_alloc_code (unsigned long kind, unsigned long size, unsigned long
 
 void frida_k_free_code (void * code)
 {
-  void *give = _execmem_free ? _execmem_free : _module_memfree;
+  void * give = _execmem_free ? _execmem_free : _module_memfree;
 
   ((frida_give_t) give) (code);
 }

@@ -886,10 +886,10 @@ namespace Frida.Fruity {
 
 #if LINUX
 		[CCode (cheader_filename = "net/if.h", cname = "if_nameindex")]
-		private extern static Linux.Network.IfNameindex* if_nameindex ();
+		private extern static Linux.Network.IfNameindex * if_nameindex ();
 
 		[CCode (cheader_filename = "net/if.h", cname = "if_freenameindex")]
-		private extern static void if_freenameindex (Linux.Network.IfNameindex* index);
+		private extern static void if_freenameindex (Linux.Network.IfNameindex * index);
 #endif
 
 		public static async NcmPeer locate_on_system_netifs (Gee.List<InetSocketAddress> ifaddrs, Cancellable? cancellable)

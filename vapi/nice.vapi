@@ -110,7 +110,7 @@ namespace Nice {
 		[Version (since = "0.1.8")]
 		public bool keepalive_conncheck { get; set; }
 		[NoAccessorMethod]
-		public void* main_context { get; construct; }
+		public void * main_context { get; construct; }
 		[NoAccessorMethod]
 		public uint max_connectivity_checks { get; set; }
 		[NoAccessorMethod]
@@ -245,7 +245,7 @@ namespace Nice {
 		[NoAccessorMethod]
 		public uint ack_delay { get; set; }
 		[NoAccessorMethod]
-		public void* callbacks { get; set; }
+		public void * callbacks { get; set; }
 		[NoAccessorMethod]
 		public uint conversation { get; construct; }
 		[NoAccessorMethod]
@@ -263,12 +263,12 @@ namespace Nice {
 	[CCode (cheader_filename = "nice.h", has_type_id = false)]
 	public struct Address {
 		[CCode (cname = "s.addr")]
-		public void* s_addr;
+		public void * s_addr;
 		[CCode (cname = "s.ip4")]
-		public void* s_ip4;
+		public void * s_ip4;
 		[CCode (cname = "s.ip6")]
-		public void* s_ip6;
-		public void copy_to_sockaddr (void* sin);
+		public void * s_ip6;
+		public void copy_to_sockaddr (void * sin);
 		public bool equal (Nice.Address b);
 		[Version (since = "0.1.8")]
 		public bool equal_no_port (Nice.Address b);
@@ -278,7 +278,7 @@ namespace Nice {
 		public int ip_version ();
 		public bool is_private ();
 		public bool is_valid ();
-		public void set_from_sockaddr (void* sin);
+		public void set_from_sockaddr (void * sin);
 		public bool set_from_string (string str);
 		public void set_ipv4 (uint32 addr_ipv4);
 		public void set_ipv6 (uint8 addr_ipv6);
@@ -304,18 +304,18 @@ namespace Nice {
 	[CCode (cheader_filename = "nice.h", cname = "PseudoTcpCallbacks", has_type_id = false)]
 	[Version (since = "0.0.11")]
 	public struct PseudoTcpCallbacks {
-		public void* user_data;
+		public void * user_data;
 		public PseudoTcpOpenedFunc PseudoTcpOpened;
 		public PseudoTcpReadableFunc PseudoTcpReadable;
 		public PseudoTcpWritableFunc PseudoTcpWritable;
 		public PseudoTcpClosedFunc PseudoTcpClosed;
 		public WritePacketFunc WritePacket;
 	}
-	public delegate void PseudoTcpOpenedFunc (PseudoTcpSocket tcp, void* data);
-	public delegate void PseudoTcpReadableFunc (PseudoTcpSocket tcp, void* data);
-	public delegate void PseudoTcpWritableFunc (PseudoTcpSocket tcp, void* data);
-	public delegate void PseudoTcpClosedFunc (PseudoTcpSocket tcp, uint32 error, void* data);
-	public delegate void WritePacketFunc (PseudoTcpSocket tcp, uint8[] buffer, void* data);
+	public delegate void PseudoTcpOpenedFunc (PseudoTcpSocket tcp, void * data);
+	public delegate void PseudoTcpReadableFunc (PseudoTcpSocket tcp, void * data);
+	public delegate void PseudoTcpWritableFunc (PseudoTcpSocket tcp, void * data);
+	public delegate void PseudoTcpClosedFunc (PseudoTcpSocket tcp, uint32 error, void * data);
+	public delegate void WritePacketFunc (PseudoTcpSocket tcp, uint8[] buffer, void * data);
 	[CCode (cheader_filename = "nice.h", cprefix = "NICE_AGENT_OPTION_", has_type_id = false)]
 	[Flags]
 	[Version (since = "0.1.15")]

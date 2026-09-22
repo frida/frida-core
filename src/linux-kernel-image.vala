@@ -254,11 +254,11 @@ namespace Frida {
 		 * The first character each symbol carries is its type, which the caller does not name.
 		 */
 		private bool names_symbol (uint start, uint len, string name) {
-			char* needle = (char*) name;
+			char * needle = (char *) name;
 			bool typed = false;
 
 			for (uint i = 0; i != len; i++) {
-				char* c = (char*) tokens[raw[start + i]];
+				char * c = (char *) tokens[raw[start + i]];
 				if (!typed) {
 					if (*c == '\0')
 						return false;
@@ -948,8 +948,8 @@ namespace Frida {
 			var builder = new StringBuilder ();
 			for (uint i = 0; i != len; i++) {
 				unowned string token = tokens[raw[p + i]];
-				char* cursor = (char*) token;
-				for (char* c = cursor; *c != '\0'; c++) {
+				char * cursor = (char *) token;
+				for (char * c = cursor; *c != '\0'; c++) {
 					uint8 byte = (uint8) (*c);
 					if (byte < 0x21 || byte > 0x7e)
 						return 0;
