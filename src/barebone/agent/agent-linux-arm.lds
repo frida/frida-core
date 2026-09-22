@@ -24,6 +24,7 @@ SECTIONS {
     _kernel_write = .; . += 4;
     ___kmalloc_noprof = .; . += 4;
     _kmalloc = .; . += 4;
+    ___kmalloc = .; . += 4;
     _kfree = .; . += 4;
     _vmalloc = .; . += 4;
     _execmem_alloc = .; . += 4;
@@ -45,10 +46,12 @@ SECTIONS {
     _schedule_hrtimeout_range = .; . += 4;
     _pci_get_domain_bus_and_slot = .; . += 4;
     _pci_irq_vector = .; . += 4;
+    _of_irq_parse_and_map_pci = .; . += 4;
     _pci_dev_put = .; . += 4;
     _schedule = .; . += 4;
     _ktime_get_mono_fast_ns = .; . += 4;
     _ktime_get_real_ts64 = .; . += 4;
+    _getnstimeofday64 = .; . += 4;
     _send_sig = .; . += 4;
     _free_irq = .; . += 4;
     _request_threaded_irq = .; . += 4;
@@ -93,12 +96,19 @@ SECTIONS {
     _get_user_pages_unlocked = .; . += 4;
     _get_user_pages_remote = .; . += 4;
     _user_mode_thread = .; . += 4;
+    _fget_task = .; . += 4;
     ___start_BTF = .; . += 4;
     ___stop_BTF = .; . += 4;
     _call_usermodehelper_setup = .; . += 4;
     _call_usermodehelper_exec = .; . += 4;
     _arm_copy_from_user = .; . += 4;
     _fixup_exception = .; . += 4;
+    _init_net = .; . += 4;
+    _sock_create_kern = .; . += 4;
+    _kernel_connect = .; . += 4;
+    _kernel_sendmsg = .; . += 4;
+    _kernel_recvmsg = .; . += 4;
+    _sock_release = .; . += 4;
     _patch_text = .; . += 4;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very

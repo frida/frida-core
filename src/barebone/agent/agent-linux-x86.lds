@@ -99,6 +99,13 @@ SECTIONS {
     _call_usermodehelper_exec = .; . += 4;
     __copy_from_user = .; . += 4;
     _access_process_vm = .; . += 4;
+    _fget_task = .; . += 4;
+    _init_net = .; . += 4;
+    _sock_create_kern = .; . += 4;
+    _kernel_connect = .; . += 4;
+    _kernel_sendmsg = .; . += 4;
+    _kernel_recvmsg = .; . += 4;
+    _sock_release = .; . += 4;
     _register_die_notifier = .; . += 4;
     _unregister_die_notifier = .; . += 4;
   }
