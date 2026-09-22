@@ -198,7 +198,26 @@ frida_system_query_kinfo_procs (guint * count)
     size += size / 10;
   }
 
-  *count = size / sizeof (struct kinfo_proc);
+  {
+    guint8 * cursor = (guint8 *) processes;
+    const guint8 * end = cursor + size;
+    guint n = 0;
+
+    while (cursor != end)
+    {
+      gint record_size = *((gint *) cursor);
+
+      if (record_size <= 0 || cursor + record_size > end)
+        break;
+
+      memmove (&processes[n], cursor, MIN ((gsize) record_size, sizeof (struct kinfo_proc)));
+      n++;
+
+      cursor += record_size;
+    }
+
+    *count = n;
+  }
 
   success = TRUE;
 
