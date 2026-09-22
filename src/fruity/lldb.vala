@@ -562,11 +562,7 @@ namespace Frida.LLDB {
 		private const uint32 THREAD_MAGIC = 0x54485244U;
 
 		public Thread (string id, string? name, Client client) {
-			Object (
-				id: id,
-				name: name,
-				client: client
-			);
+			base (id, name, client);
 		}
 
 		public async Snapshot save_register_state (Cancellable? cancellable = null) throws Error, IOError {
