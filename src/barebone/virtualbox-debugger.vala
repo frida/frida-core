@@ -285,13 +285,15 @@ namespace Frida.Barebone {
 
 	public sealed class VirtualBoxThread : Object, DebuggerThread {
 		public string id {
-			get;
-			construct;
+			get {
+				return _id;
+			}
 		}
 
 		public string? name {
-			get;
-			construct;
+			get {
+				return _name;
+			}
 		}
 
 		public Debugger debugger {
@@ -300,14 +302,14 @@ namespace Frida.Barebone {
 			}
 		}
 
+		private string _id;
+		private string? _name;
 		private uint cpu;
 		private weak VirtualBoxDebugger owner;
 
 		public VirtualBoxThread (uint cpu, VirtualBoxDebugger owner) {
-			Object (
-				id: "%u".printf (cpu + 1),
-				name: "CPU %u".printf (cpu)
-			);
+			_id = "%u".printf (cpu + 1);
+			_name = "CPU %u".printf (cpu);
 			this.cpu = cpu;
 			this.owner = owner;
 		}
@@ -361,29 +363,33 @@ namespace Frida.Barebone {
 		public signal void removed ();
 
 		public BreakpointKind kind {
-			get;
-			construct;
+			get {
+				return _kind;
+			}
 		}
 
 		public uint64 address {
-			get;
-			construct;
+			get {
+				return _address;
+			}
 		}
 
 		public size_t size {
-			get;
-			construct;
+			get {
+				return _size;
+			}
 		}
 
+		private BreakpointKind _kind;
+		private uint64 _address;
+		private size_t _size;
 		private VirtualBoxConsole console;
 		private Bytes? displaced;
 
 		public VirtualBoxBreakpoint (BreakpointKind kind, uint64 address, size_t size, VirtualBoxConsole console) {
-			Object (
-				kind: kind,
-				address: address,
-				size: size
-			);
+			_kind = kind;
+			_address = address;
+			_size = size;
 			this.console = console;
 		}
 

@@ -61,12 +61,10 @@ namespace Frida {
 	public interface DebuggerThread : Object {
 		public abstract string id {
 			get;
-			construct;
 		}
 
 		public abstract string? name {
 			get;
-			construct;
 		}
 
 		public abstract Debugger debugger {
@@ -88,17 +86,14 @@ namespace Frida {
 	public interface DebuggerBreakpoint : Object {
 		public abstract BreakpointKind kind {
 			get;
-			construct;
 		}
 
 		public abstract uint64 address {
 			get;
-			construct;
 		}
 
 		public abstract size_t size {
 			get;
-			construct;
 		}
 
 		public abstract async void enable (Cancellable? cancellable = null) throws Error, IOError;

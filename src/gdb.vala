@@ -2000,13 +2000,15 @@ namespace Frida.GDB {
 
 	public class Thread : Object, DebuggerThread {
 		public string id {
-			get;
-			construct;
+			get {
+				return _id;
+			}
 		}
 
 		public string? name {
-			get;
-			construct;
+			get {
+				return _name;
+			}
 		}
 
 		public weak Client client {
@@ -2020,12 +2022,14 @@ namespace Frida.GDB {
 			}
 		}
 
+		private string _id;
+		private string? _name;
+
 		public Thread (string id, string? name, Client client) {
-			Object (
-				id: id,
-				name: name,
-				client: client
-			);
+			Object (client: client);
+
+			_id = id;
+			_name = name;
 		}
 
 		public async void step (Cancellable? cancellable = null) throws Error, IOError {
@@ -2211,18 +2215,21 @@ namespace Frida.GDB {
 		public signal void removed ();
 
 		public BreakpointKind kind {
-			get;
-			construct;
+			get {
+				return _kind;
+			}
 		}
 
 		public uint64 address {
-			get;
-			construct;
+			get {
+				return _address;
+			}
 		}
 
 		public size_t size {
-			get;
-			construct;
+			get {
+				return _size;
+			}
 		}
 
 		public weak Client client {
@@ -2235,15 +2242,17 @@ namespace Frida.GDB {
 			ENABLED
 		}
 
+		private BreakpointKind _kind;
+		private uint64 _address;
+		private size_t _size;
 		private State state = DISABLED;
 
 		public Breakpoint (BreakpointKind kind, uint64 address, size_t size, Client client) {
-			Object (
-				kind: kind,
-				address: address,
-				size: size,
-				client: client
-			);
+			Object (client: client);
+
+			_kind = kind;
+			_address = address;
+			_size = size;
 		}
 
 		public async void enable (Cancellable? cancellable = null) throws Error, IOError {
