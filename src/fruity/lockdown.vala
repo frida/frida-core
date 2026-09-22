@@ -145,7 +145,7 @@ namespace Frida.Fruity {
 			bool tls_handshake_only = false;
 			if (tokens.length > 1) {
 				unowned string options = tokens[1];
-				tls_handshake_only = options == "tls=handshake-only";
+				tls_handshake_only = "tls=handshake-only" in options;
 			}
 
 			Plist request = create_request ("StartService");
