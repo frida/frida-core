@@ -220,4 +220,128 @@ namespace Frida {
 		Posix.tcsetattr (fd, 0, tios);
 	}
 #endif
+
+	namespace ChildProcess {
+		public async WaitResult wait_for_next_stop (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var main_context = MainContext.get_thread_default ();
+
+			bool timed_out = false;
+			var timeout_source = new TimeoutSource.seconds (5);
+			timeout_source.set_callback (() => {
+				timed_out = true;
+				return Source.REMOVE;
+			});
+			timeout_source.attach (main_context);
+
+			int status = 0;
+			uint[] delays = { 0, 1, 2, 5, 10, 20, 50, 250 };
+
+			try {
+				for (uint i = 0; !timed_out && !cancellable.set_error_if_cancelled (); i++) {
+					int res = Posix.waitpid ((Posix.pid_t) pid, out status, Posix.WNOHANG);
+					if (res == -1)
+						throw new Error.NOT_SUPPORTED ("Unable to wait for next stop: %s", strerror (errno));
+					if (res != 0)
+						break;
+
+					uint delay_ms = (i < delays.length) ? delays[i] : delays[delays.length - 1];
+
+					var delay_source = new TimeoutSource (delay_ms);
+					delay_source.set_callback (wait_for_next_stop.callback);
+					delay_source.attach (main_context);
+
+					var cancel_source = new CancellableSource (cancellable);
+					cancel_source.set_callback (wait_for_next_stop.callback);
+					cancel_source.attach (main_context);
+
+					yield;
+
+					cancel_source.destroy ();
+					delay_source.destroy ();
+				}
+			} finally {
+				timeout_source.destroy ();
+			}
+
+			if (timed_out)
+				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for stop from process with PID %u", pid);
+
+			return WaitResult (pid, status);
+		}
+	}
+
+	public struct WaitResult {
+		public uint pid;
+		public int status;
+
+		public WaitKind kind;
+
+		public uint exit_status;
+
+		public Posix.Signal term_signal;
+
+		public Posix.Signal stop_signal;
+
+		public WaitResult (uint pid, int status) {
+			this.pid = pid;
+			this.status = status;
+
+			kind = WaitKind.OTHER;
+			exit_status = 0;
+			term_signal = 0;
+			stop_signal = 0;
+
+			if (PosixStatus.is_exit (status)) {
+				kind = WaitKind.EXITED;
+				exit_status = PosixStatus.parse_exit_status (status);
+			} else if (PosixStatus.is_signaled (status)) {
+				kind = WaitKind.SIGNALED;
+				term_signal = PosixStatus.parse_termination_signal (status);
+			} else if (PosixStatus.is_stopped (status)) {
+				kind = WaitKind.STOPPED;
+
+				stop_signal = PosixStatus.parse_stop_signal (status);
+			}
+		}
+
+		public void check_stopped () throws Error {
+			switch (kind) {
+				case WaitKind.EXITED:
+					throw new Error.NOT_SUPPORTED ("Target exited with status %u", exit_status);
+				case WaitKind.SIGNALED:
+					throw new Error.NOT_SUPPORTED ("Target terminated with signal %u", term_signal);
+				case WaitKind.STOPPED:
+					return;
+				default:
+					throw new Error.NOT_SUPPORTED ("Unexpected status: 0x%08x", status);
+			}
+		}
+	}
+
+	public enum WaitKind {
+		EXITED,
+		SIGNALED,
+		STOPPED,
+		OTHER
+	}
+
+	namespace PosixStatus {
+		[CCode (cname = "WIFEXITED", cheader_filename = "sys/wait.h")]
+		private extern bool is_exit (int status);
+
+		[CCode (cname = "WIFSIGNALED", cheader_filename = "sys/wait.h")]
+		private extern bool is_signaled (int status);
+
+		[CCode (cname = "WIFSTOPPED", cheader_filename = "sys/wait.h")]
+		private extern bool is_stopped (int status);
+
+		[CCode (cname = "WEXITSTATUS", cheader_filename = "sys/wait.h")]
+		private extern uint parse_exit_status (int status);
+
+		[CCode (cname = "WTERMSIG", cheader_filename = "sys/wait.h")]
+		private extern Posix.Signal parse_termination_signal (int status);
+
+		[CCode (cname = "WSTOPSIG", cheader_filename = "sys/wait.h")]
+		private extern Posix.Signal parse_stop_signal (int status);
+	}
 }

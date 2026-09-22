@@ -89,6 +89,7 @@ endif
 if host_os_family != 'windows'
   base_vala_args += [
     '--pkg=gio-unix-2.0',
+    '--pkg=posix',
   ]
 endif
 if host_os_family == 'darwin'
