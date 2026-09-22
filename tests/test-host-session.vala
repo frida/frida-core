@@ -3840,7 +3840,7 @@ namespace Frida.HostSessionTest {
 				var device_manager = new DeviceManager ();
 
 				try {
-					var device = yield device_manager.get_device_by_id (DEVICE_ID);
+					var device = yield device_manager.get_device_by_id (DEVICE_ID, 5000);
 
 					device.output.connect ((pid, fd, data) => {
 						var chars = data.get_data ();
@@ -3990,7 +3990,7 @@ namespace Frida.HostSessionTest {
 				var device_manager = new DeviceManager ();
 
 				try {
-					var device = yield device_manager.get_device_by_id (DEVICE_ID);
+					var device = yield device_manager.get_device_by_id (DEVICE_ID, 5000);
 
 					{
 						var stream = yield device.open_channel ("tcp:5050");
@@ -4045,7 +4045,7 @@ namespace Frida.HostSessionTest {
 
 					try {
 						var timer = new Timer ();
-						var device = yield device_manager.get_device_by_id (DEVICE_ID);
+						var device = yield device_manager.get_device_by_id (DEVICE_ID, 5000);
 						printerr ("[*] Got device in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
 						timer.reset ();
@@ -4079,7 +4079,7 @@ namespace Frida.HostSessionTest {
 
 					try {
 						var timer = new Timer ();
-						var device = yield device_manager.get_device_by_id (DEVICE_ID);
+						var device = yield device_manager.get_device_by_id (DEVICE_ID, 5000);
 						printerr ("[*] Got device in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
 						timer.reset ();
