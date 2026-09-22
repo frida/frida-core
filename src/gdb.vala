@@ -54,6 +54,7 @@ namespace Frida.GDB {
 		private DebuggerException? breakpoint_exception;
 		private Gee.List<StopObserverEntry> on_stop = new Gee.ArrayList<StopObserverEntry> ();
 		private size_t max_packet_size = 1024;
+		private bool binary_writes_supported = false;
 		private AckMode ack_mode = SEND_ACKS;
 		internal bool bulk_registers = true;
 		internal bool breakpoints_provided_externally = false;
@@ -113,8 +114,6 @@ namespace Frida.GDB {
 		protected const char NOTIFICATION_TYPE_STOP = 'S';
 		protected const char NOTIFICATION_TYPE_STOP_WITH_PROPERTIES = 'T';
 		protected const char NOTIFICATION_TYPE_OUTPUT = 'O';
-
-		private bool binary_writes_supported = false;
 
 		private const string CLIENT_FEATURES = "xmlRegisters=i386,arm,aarch64";
 
@@ -604,17 +603,7 @@ namespace Frida.GDB {
 						builder.append_hexbyte (byte);
 				}
 
-				if (binary_writes_supported) {
-					try {
-						yield execute (builder.build (), cancellable);
-					} catch (Error e) {
-						binary_writes_supported = false;
-						builder.reset ();
-						continue;
-					}
-				} else {
-					yield execute (builder.build (), cancellable);
-				}
+				yield execute (builder.build (), cancellable);
 
 				builder.reset ();
 
