@@ -223,6 +223,7 @@ namespace Frida.GDB {
 		}
 
 		protected async void halt (Cancellable? cancellable, uint timeout_msec = 0) throws Error, IOError {
+			selected_thread_id = null;
 			change_state (RUNNING);
 			write_bytes (new Bytes ({ STOP_CHARACTER }));
 			request_stop_info ();
@@ -1332,6 +1333,7 @@ namespace Frida.GDB {
 		}
 
 		private void handle_exit (string data) throws Error {
+			selected_thread_id = null;
 			change_state (STOPPED);
 			foreach (var observer in on_stop.to_array ())
 				observer.func ();
