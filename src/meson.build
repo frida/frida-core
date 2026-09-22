@@ -490,12 +490,17 @@ if have_local_backend
   endif
 
   if host_os_family == 'freebsd'
-    backend_sources += [
-      'freebsd' / 'freebsd-host-session.vala',
-      'freebsd' / 'binjector.vala',
-      'freebsd' / 'binjector-glue.c',
-    ]
-    backend_vala_args_private += '--pkg=frida-gum-freebsd-1.0'
+    backend_sources += 'freebsd' / 'freebsd-host-session.vala'
+    if host_is_prospero
+      backend_sources += 'prospero' / 'binjector.vala'
+      backend_vala_args_private += '--pkg=prospero'
+    else
+      backend_sources += [
+        'freebsd' / 'binjector.vala',
+        'freebsd' / 'binjector-glue.c',
+      ]
+    endif
+    backend_vala_args_private += ['--pkg=frida-gum-freebsd-1.0', '--pkg=freebsd', '--pkg=posix']
   endif
 
   if host_os_family == 'qnx'

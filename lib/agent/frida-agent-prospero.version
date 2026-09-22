@@ -1,0 +1,8 @@
+{
+  global:
+    frida_agent_main;
+    frida_prospero_agent_args;
+
+  local:
+    *;
+};

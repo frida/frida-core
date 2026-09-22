@@ -42,6 +42,8 @@ if build_agent
       symscript = 'frida-agent-glibc.version'
     elif host_os == 'android'
       symscript = 'frida-agent-android.version'
+    elif host_is_prospero
+      symscript = 'frida-agent-prospero.version'
     else
       symscript = 'frida-agent.version'
     endif
@@ -53,6 +55,8 @@ if build_agent
     # For our libc shim to be effective.
     extra_link_args += '-Wl,-Bsymbolic'
   endif
+
+  extra_link_args += prospero_crt_link_args
 
   raw_agent = shared_library('frida-agent-raw', agent_sources,
     name_prefix: 'lib',

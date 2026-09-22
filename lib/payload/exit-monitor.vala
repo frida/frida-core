@@ -35,15 +35,21 @@ namespace Frida {
 			interceptor.attach ((void *) Gum.Process.find_module_by_name ("kernel32.dll").find_export_by_name ("ExitProcess"),
 				listener);
 #else
-			var libc = Gum.Process.get_libc_module ();
 			const string[] apis = {
 				"exit",
 				"_exit",
 				"abort",
 			};
+#if PROSPERO
+			foreach (var symbol in apis) {
+				interceptor.attach ((void *) Gum.Module.find_global_export_by_name (symbol), listener);
+			}
+#else
+			var libc = Gum.Process.get_libc_module ();
 			foreach (var symbol in apis) {
 				interceptor.attach ((void *) libc.find_export_by_name (symbol), listener);
 			}
+#endif
 #endif
 		}
 

@@ -14,6 +14,44 @@
 #elif defined (HAVE_GIOOPENSSL)
 # include <gioopenssl.h>
 #endif
+#ifdef HAVE_PROSPERO
+# include "frida-prospero.h"
+# include <unistd.h>
+#endif
+
+#ifdef HAVE_PROSPERO
+
+FridaProsperoAgentArgs frida_prospero_agent_args = { .fifo_fd = -1 };
+
+int
+main (int argc, char * argv[], char * envp[])
+{
+  FridaProsperoAgentArgs * args = &frida_prospero_agent_args;
+  FridaProsperoInjectorState injector_state;
+  guint8 hello_byte = FRIDA_PROSPERO_HELLO_BYTE;
+  FridaUnloadPolicy unload_policy = FRIDA_UNLOAD_POLICY_IMMEDIATE;
+  guint8 policy_byte;
+  guint32 worker_id;
+
+  injector_state.fifo_fd = args->fifo_fd;
+  injector_state.agent_ctrlfd = args->agent_ctrlfd;
+  injector_state.mapped_range = &args->mapped_range;
+
+  write (injector_state.fifo_fd, &hello_byte, sizeof (hello_byte));
+
+  frida_agent_main (GSIZE_TO_POINTER (args->agent_parameters), &unload_policy, &injector_state);
+
+  policy_byte = unload_policy;
+  worker_id = gum_process_get_current_thread_id ();
+
+  write (injector_state.fifo_fd, &policy_byte, sizeof (policy_byte));
+  write (injector_state.fifo_fd, &worker_id, sizeof (worker_id));
+  close (injector_state.fifo_fd);
+
+  return 0;
+}
+
+#endif
 
 void
 _frida_agent_environment_init (void)

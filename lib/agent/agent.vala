@@ -128,6 +128,12 @@ namespace Frida.Agent {
 					mapped_range = injector_state.mapped_range;
 #endif
 
+#if PROSPERO
+				var prospero_state = (ProsperoInjectorState *) opaque_injector_state;
+				if (prospero_state != null)
+					mapped_range = prospero_state.mapped_range;
+#endif
+
 				if (cached_agent_path == null) {
 					cached_agent_range = detect_own_range_and_path (mapped_range, out cached_agent_path);
 					Gum.Cloak.add_range (cached_agent_range);
@@ -149,6 +155,19 @@ namespace Frida.Agent {
 				if (linjector_state != null) {
 					int agent_ctrlfd = linjector_state->agent_ctrlfd;
 					linjector_state->agent_ctrlfd = -1;
+
+					fdt_padder.move_descriptor_if_needed (ref agent_ctrlfd);
+
+					agent_parameters_with_transport_uri = "socket:%d%s".printf (agent_ctrlfd, agent_parameters);
+					agent_parameters = agent_parameters_with_transport_uri;
+				}
+#endif
+
+#if PROSPERO
+				string? agent_parameters_with_transport_uri = null;
+				if (prospero_state != null) {
+					int agent_ctrlfd = prospero_state.agent_ctrlfd;
+					prospero_state.agent_ctrlfd = -1;
 
 					fdt_padder.move_descriptor_if_needed (ref agent_ctrlfd);
 

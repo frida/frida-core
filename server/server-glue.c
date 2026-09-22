@@ -29,6 +29,8 @@ void CFLog (CFLogLevel level, CFStringRef format, ...);
 
 #elif defined (HAVE_ANDROID)
 # include <android/log.h>
+#elif defined (HAVE_PROSPERO)
+# include <ps5/klog.h>
 #else
 # include <stdio.h>
 #endif
@@ -137,6 +139,13 @@ frida_server_on_log_message (const gchar * log_domain, GLogLevelFlags log_level,
   }
 
   __android_log_write (priority, log_domain, message);
+#elif defined (HAVE_PROSPERO)
+  (void) user_data;
+
+  if (log_domain != NULL)
+    klog_printf ("%s: %s\n", log_domain, message);
+  else
+    klog_printf ("%s\n", message);
 #else
   FILE * file = NULL;
   const gchar * severity = NULL;

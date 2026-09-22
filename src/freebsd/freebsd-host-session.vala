@@ -127,6 +127,18 @@ namespace Frida {
 				Cancellable? cancellable, out Object? transport) throws Error, IOError {
 			var binjector = (Binjector) injector;
 
+#if PROSPERO
+			var id = yield binjector.inject_library_resource (pid, agent_desc, "frida_agent_main",
+				make_agent_parameters (pid, "", options), cancellable);
+			injectee_by_pid[pid] = id;
+
+			var stream_request = new Promise<IOStream> ();
+			stream_request.resolve (binjector.request_control_channel (id));
+
+			transport = null;
+
+			return stream_request.future;
+#else
 			PipeTransport.set_temp_directory (binjector.temp_directory);
 
 			var t = new PipeTransport ();
@@ -140,6 +152,7 @@ namespace Frida {
 			transport = t;
 
 			return stream_request;
+#endif
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {

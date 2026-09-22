@@ -273,6 +273,15 @@ if host_os != host_os_family
   cdata.set('HAVE_' + host_os.to_upper(), 1)
 endif
 
+host_is_prospero = host_os_family == 'freebsd' and cc.get_define('__PROSPERO__') != ''
+prospero_crt_link_args = []
+if host_is_prospero
+  cdata.set('HAVE_PROSPERO', 1)
+  vala_flags += '--define=PROSPERO'
+  prospero_crt_link_args += \
+      run_command(cc.cmd_array(), '-print-file-name=crt1.o', check: true).stdout().strip()
+endif
+
 cpu_defines = [
   ['x86', 'HAVE_I386'],
   ['x86_64', 'HAVE_I386'],
@@ -757,7 +766,9 @@ if host_os_family == 'linux' and have_local_backend
   backend_reqs_private += 'libbpf'
 endif
 
-if host_os_family in ['darwin', 'freebsd'] or (host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>'))
+if host_os_family == 'darwin' \
+    or (host_os_family == 'freebsd' and not host_is_prospero) \
+    or (host_os_family == 'linux' and cc.has_function('openpty', prefix: '#include <pty.h>'))
   vala_flags += '--define=HAVE_OPENPTY'
 endif
 
@@ -886,8 +897,11 @@ endif
 if host_os in ['ios', 'tvos']
   backend_libs_private += ['-Wl,-framework,CoreGraphics', '-Wl,-framework,UIKit']
 endif
-if host_os_family == 'freebsd'
+if host_os_family == 'freebsd' and not host_is_prospero
   backend_libs_private += ['-lutil']
+endif
+if host_is_prospero
+  backend_libs_private += ['-lSceSystemService', '-lSceUserService']
 endif
 
 if get_option('devkits').length() != 0
@@ -955,7 +969,7 @@ if host_os_family == 'darwin'
   executable_no_exports_link_args = ['-Wl,-exported_symbols_list,' + script]
   executable_no_exports_link_depends = [script]
 elif host_os_family != 'windows'
-  script_name = (host_os == 'freebsd') ? 'executable-no-exports-freebsd.version' : 'executable-no-exports.version'
+  script_name = (host_os == 'freebsd' and not host_is_prospero) ? 'executable-no-exports-freebsd.version' : 'executable-no-exports.version'
   script = meson.project_source_root() / 'tools' / script_name
   executable_no_exports_link_args = ['-Wl,--version-script,' + script]
   executable_no_exports_link_depends = [script]

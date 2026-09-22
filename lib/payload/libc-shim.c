@@ -28,6 +28,7 @@
 #undef feof
 #undef ferror
 #undef fgetwc
+#undef fileno
 #undef fopen
 #undef fopen64
 #undef fputwc
@@ -638,7 +639,7 @@ __vsnprintf_chk (char * string, size_t size, int flags, size_t len, const char *
   return gum_vsnprintf (string, size, format, args);
 }
 
-#ifdef HAVE_XLOCALE_H
+#if defined (HAVE_XLOCALE_H) && !defined (HAVE_PROSPERO)
 
 G_GNUC_INTERNAL int
 sprintf_l (char * string, locale_t loc, const char * format, ...)

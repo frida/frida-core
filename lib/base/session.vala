@@ -1152,6 +1152,14 @@ namespace Frida {
 	}
 #endif
 
+#if PROSPERO
+	public struct ProsperoInjectorState {
+		public int fifo_fd;
+		public int agent_ctrlfd;
+		public Gum.MemoryRange? mapped_range;
+	}
+#endif
+
 	/**
 	 * Why spawn gating was disabled on a {@link Device}.
 	 */

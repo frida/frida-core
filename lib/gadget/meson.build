@@ -55,6 +55,10 @@ if host_os_family in ['linux', 'qnx']
   extra_link_args += ['-Wl,-Bsymbolic']
 endif
 
+if host_is_prospero
+  extra_link_args += [prospero_crt_link_args, '-Wl,--defsym=main=0']
+endif
+
 raw_gadget = shared_library('frida-gadget-raw', gadget_sources,
   name_prefix: 'lib',
   vala_args: [base_vala_args, payload_vala_args, extra_vala_args],
