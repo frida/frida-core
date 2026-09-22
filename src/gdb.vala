@@ -57,6 +57,9 @@ namespace Frida.GDB {
 		private AckMode ack_mode = SEND_ACKS;
 		internal bool bulk_registers = true;
 		internal bool breakpoints_provided_externally = false;
+		private TimeoutSource? stall_watchdog;
+		private const uint QUERY_TIMEOUT_SECONDS = 30;
+		private const uint STALL_CHECK_SECONDS = 5;
 		public signal void breakpoints_changed (uint64[] addresses);
 		private uint64? trapped_address;
 		private string? trapped_thread;
@@ -1141,7 +1144,9 @@ namespace Frida.GDB {
 				throw new Error.INVALID_OPERATION ("Unable to perform query; connection is closed");
 
 			var pending = new PendingResponse ((owned) predicate, query_with_predicate.callback);
+			pending.deadline = get_monotonic_time () + (QUERY_TIMEOUT_SECONDS * 1000000);
 			pending_responses.offer (pending);
+			start_stall_watchdog ();
 			if (!pipelining_supported) {
 				if (awaiting_response)
 					pending.unsent_request = request;
@@ -1170,6 +1175,32 @@ namespace Frida.GDB {
 				throw_api_error (pending.error);
 
 			return response;
+		}
+
+		private void start_stall_watchdog () {
+			if (stall_watchdog != null)
+				return;
+
+			stall_watchdog = new TimeoutSource.seconds (STALL_CHECK_SECONDS);
+			stall_watchdog.set_callback (() => {
+				if (pending_responses.is_empty) {
+					stall_watchdog = null;
+					return false;
+				}
+
+				int64 now = get_monotonic_time ();
+				foreach (var pending in pending_responses.to_array ()) {
+					if (now < pending.deadline)
+						continue;
+
+					pending_responses.remove (pending);
+					pending.complete_with_error (
+						new Error.TIMED_OUT ("Timed out waiting for the stub to answer"));
+				}
+
+				return true;
+			});
+			stall_watchdog.attach (MainContext.get_thread_default ());
 		}
 
 		private async void process_incoming_packets () {
@@ -1635,6 +1666,7 @@ namespace Frida.GDB {
 		private class PendingResponse {
 			public ResponsePredicate? predicate;
 			public Bytes? unsent_request;
+			public int64 deadline;
 
 			public Packet? response {
 				get;
