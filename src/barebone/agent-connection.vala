@@ -562,7 +562,7 @@ namespace Frida.Barebone {
 
 			{
 				try {
-					yield protect_unless_already (machine, allocator, elf_allocation.virtual_address,
+					yield machine.protect_pages (elf_allocation.virtual_address,
 						elf_allocation.size, READ | WRITE, cancellable);
 
 					yield elf_allocation.deallocate (cancellable);
