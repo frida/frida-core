@@ -12,7 +12,7 @@ use crate::{
         _GumRwxSupport_GUM_RWX_NONE, GArray,
         GumDebugSymbolDetails, GumFoundRangeFunc, GumFoundThreadFunc, GumMemoryRange,
         GumModuleRegistry, GumPageProtection, GumRangeDetails, GumRwxSupport, GumThreadDetails,
-        GumThreadId, GumThreadRegistry, gum_barebone_register_thread,
+        GumThreadFlags, GumThreadId, GumThreadRegistry, gum_barebone_register_thread,
         gum_barebone_unregister_thread,
         g_array_append_vals, g_array_new, g_object_unref, g_strdup, g_variant_get_boolean,
         g_variant_get_uint64, g_variant_new, g_variant_new_fixed_array, g_variant_type_free,
@@ -705,7 +705,8 @@ static mut THREAD_REGISTRY: *mut GumThreadRegistry = ptr::null_mut();
 
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer) {
+pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer,
+        _flags: GumThreadFlags) {
     let Some(emit) = func else {
         return;
     };
