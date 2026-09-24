@@ -22,7 +22,7 @@ namespace Frida {
 
 				yield script.load (cancellable);
 
-#if MACOS
+#if MACOS || LINUX
 				string? pipe_path = pipe_socket_path (config);
 				if (pipe_path != null) {
 					var builder = new Json.Builder ();
@@ -99,12 +99,14 @@ namespace Frida {
 		private static Frida.Data.Barebone.Blob shim_blob () {
 #if WINDOWS
 			return Frida.Data.Barebone.get_android_emulator_windows_js_blob ();
-#else
+#elif MACOS
 			return Frida.Data.Barebone.get_android_emulator_macos_js_blob ();
+#else
+			return Frida.Data.Barebone.get_android_emulator_linux_js_blob ();
 #endif
 		}
 
-#if MACOS
+#if MACOS || LINUX
 		private static string? pipe_socket_path (BareboneConfig config) {
 			var injected = config.agent as BareboneInjectedAgentConfig;
 			if (injected == null)

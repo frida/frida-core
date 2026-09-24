@@ -40,7 +40,7 @@ if host_os_family == 'darwin'
   backend_sources += files('vz-physical-memory.vala')
   backend_vala_args += '--pkg=frida-gum-darwin-1.0'
 endif
-if host_os_family == 'windows' or host_os == 'macos'
+if host_os_family == 'windows' or host_os == 'macos' or host_os == 'linux'
   backend_sources += files('emulator-instrumentation.vala')
 endif
 barebone_script_runtime = custom_target('frida-barebone-script-runtime',
@@ -73,6 +73,7 @@ backend_sources += custom_target('frida-data-barebone',
     'helpers/memory-scanner-arm64.elf',
     'shims/android-emulator-windows.js',
     'shims/android-emulator-macos.js',
+    'shims/android-emulator-linux.js',
   ],
   output: [
     'frida-data-barebone.vapi',
@@ -88,6 +89,7 @@ backend_sources += custom_target('frida-data-barebone',
     '@INPUT2@',
     '@INPUT3@',
     '@INPUT4@',
+    '@INPUT5@',
   ],
 )
 
