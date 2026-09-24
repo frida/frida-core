@@ -2,7 +2,9 @@ namespace Frida {
 	private sealed class EmulatorInstrumentation : InternalAgent {
 		private LocalConnection local_connection;
 		private uint pid;
+#if WINDOWS
 		private GDB.Client? client;
+#endif
 
 		private EmulatorInstrumentation (LocalConnection connection, uint pid) {
 			Object (connection: connection);
@@ -40,6 +42,7 @@ namespace Frida {
 #endif
 		}
 
+#if WINDOWS
 		public void adopt_breakpoints (GDB.Client client) {
 			this.client = client;
 
@@ -65,6 +68,7 @@ namespace Frida {
 			uint64 stack = uint64.parse (hit.get_string_member ("rsp").substring (2), 16);
 			client.report_breakpoint_hit.begin (address, vp, stack, null);
 		}
+#endif
 
 		public async void tear_down (Cancellable? cancellable) throws IOError {
 			yield close (cancellable);

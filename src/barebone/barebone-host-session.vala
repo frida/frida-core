@@ -151,7 +151,7 @@ namespace Frida {
 					break;
 			}
 
-#if WINDOWS || MACOS
+#if WINDOWS
 			if (emulator_instrumentation != null) {
 				var client = debugger as GDB.Client;
 				if (client != null)
