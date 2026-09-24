@@ -4425,12 +4425,8 @@ FAIL: %s
 			var machine = new Barebone.X64Machine (debugger);
 			var layout = yield Barebone.collect_winnt_layout (machine, null);
 
-			Barebone.ModuleInfo? kernel = null;
-			foreach (var m in layout.modules) {
-				if (m.name.down () == "ntoskrnl.exe")
-					kernel = m;
-			}
-			assert_nonnull (kernel);
+			Barebone.ModuleInfo kernel = layout.kernel;
+			assert_true (kernel.name.down () == "ntoskrnl.exe");
 
 			// All of these addresses are above the limit of a 32-bit kernel.
 			assert_true (kernel.offset > uint32.MAX);
@@ -4473,12 +4469,8 @@ FAIL: %s
 			var machine = new Barebone.Arm64Machine (debugger);
 			var layout = yield Barebone.collect_winnt_layout (machine, null);
 
-			Barebone.ModuleInfo? kernel = null;
-			foreach (var m in layout.modules) {
-				if (m.name.down () == "ntoskrnl.exe")
-					kernel = m;
-			}
-			assert_nonnull (kernel);
+			Barebone.ModuleInfo kernel = layout.kernel;
+			assert_true (kernel.name.down () == "ntoskrnl.exe");
 
 			assert_true (kernel.offset > uint32.MAX);
 			assert_true (layout.module_list > uint32.MAX);
@@ -4658,12 +4650,8 @@ FAIL: %s
 			var machine = new Barebone.X64Machine (debugger);
 			var layout = yield Barebone.collect_winnt_layout (machine, null);
 
-			Barebone.ModuleInfo? kernel = null;
-			foreach (var m in layout.modules) {
-				if (m.name.down () == "ntoskrnl.exe")
-					kernel = m;
-			}
-			assert_nonnull (kernel);
+			Barebone.ModuleInfo kernel = layout.kernel;
+			assert_true (kernel.name.down () == "ntoskrnl.exe");
 
 			assert_true (kernel.offset > uint32.MAX);
 			assert_true (layout.module_list > uint32.MAX);
@@ -6739,22 +6727,17 @@ FAIL: %s
 			target.map_virtual (PCR_VA, pcr_page ());
 			target.map_virtual (NT_STRUCTS_VA, nt_kernel_structs ());
 			target.map_virtual (NT_KERNEL_VA, nt_kernel_image ());
-			target.map_virtual (NT_HAL_VA, nt_hal_image ());
 			yield target.open ();
 			var machine = new Barebone.IA32Machine (target.client);
 
 			var layout = yield Barebone.collect_winnt_layout (machine, null);
 
-			var modules = layout.modules;
-			assert_true (modules.size == 2);
-			assert_true (modules[0].name == "ntoskrnl.exe");
-			assert_true (modules[0].offset == NT_KERNEL_VA);
-			assert_true (modules[0].size == NT_IMAGE_SIZE);
-			assert_true (modules[1].name == "hal.dll");
-			assert_true (modules[1].offset == NT_HAL_VA);
+			var kernel = layout.kernel;
+			assert_true (kernel.name == "ntoskrnl.exe");
+			assert_true (kernel.offset == NT_KERNEL_VA);
+			assert_true (kernel.size == NT_IMAGE_SIZE);
+			assert_true (layout.module_list == NT_STRUCTS_VA + MODULE_LIST_OFFSET);
 
-			// The forwarded export is skipped, and the module without an export directory
-			// contributes nothing.
 			var symbols = layout.symbols;
 			assert_true (symbols.size == 1);
 			assert_symbol (symbols[0], "NtWaitForSingleObject", (uint32) (NT_KERNEL_VA + NT_WAIT_RVA));
@@ -6930,14 +6913,6 @@ FAIL: %s
 		put_uint16 (image, ORDINAL_TABLE_RVA + 2, 1);
 		put_ascii (image, WAIT_NAME_RVA, "NtWaitForSingleObject");
 		put_ascii (image, FORWARDED_NAME_RVA, "Forwarded");
-
-		return new Bytes.take ((owned) image);
-	}
-
-	private Bytes nt_hal_image () {
-		var image = new uint8[NT_PAGE_SIZE];
-
-		put_pe_headers (image, 0, 0);
 
 		return new Bytes.take ((owned) image);
 	}

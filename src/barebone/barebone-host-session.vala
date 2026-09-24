@@ -255,7 +255,7 @@ namespace Frida {
 				kernel_symbols = win9x_layout.symbols;
 			} else if (config.kernel == WINNT) {
 				var winnt_layout = yield Barebone.collect_winnt_layout (machine, cancellable);
-				kernel_modules = winnt_layout.modules;
+				kernel_modules.add (winnt_layout.kernel);
 				kernel_symbols = winnt_layout.symbols;
 				kernel_notes[Barebone.MODULE_LIST_NOTE] = winnt_layout.module_list;
 			} else if (config.kernel == LINUX) {

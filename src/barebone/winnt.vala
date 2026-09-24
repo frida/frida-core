@@ -2,24 +2,24 @@
 namespace Frida.Barebone {
 	public static async WinNtLayout collect_winnt_layout (Machine machine, Cancellable? cancellable)
 			throws Error, IOError {
-		var modules = new Gee.ArrayList<ModuleInfo> ();
 		var symbols = new Gee.ArrayList<SymbolInfo> ();
 
 		Shape shape = Shape.of (machine.debugger);
 
 		Anchors anchors = yield find_anchors (machine, shape, cancellable);
 
-		LoadedModule? kernel = yield read_first_loaded_module (machine, anchors.module_list, shape, cancellable);
-		if (kernel != null) {
-			modules.add (new ModuleInfo () {
-				name = kernel.name,
-				version = "",
-				offset = kernel.base_address,
-				size = kernel.size,
-			});
+		LoadedModule? first = yield read_first_loaded_module (machine, anchors.module_list, shape, cancellable);
+		if (first == null)
+			throw new Error.NOT_SUPPORTED ("Unable to find the kernel");
 
-			yield add_export_symbols (machine, kernel, anchors.exports, symbols, cancellable);
-		}
+		var kernel = new ModuleInfo () {
+			name = first.name,
+			version = "",
+			offset = first.base_address,
+			size = first.size,
+		};
+
+		yield add_export_symbols (machine, first, anchors.exports, symbols, cancellable);
 
 		if (anchors.process_list_head != 0) {
 			symbols.add (new SymbolInfo () {
@@ -30,11 +30,11 @@ namespace Frida.Barebone {
 			});
 		}
 
-		return new WinNtLayout (modules, symbols, anchors.module_list);
+		return new WinNtLayout (kernel, symbols, anchors.module_list);
 	}
 
 	public sealed class WinNtLayout : Object {
-		public Gee.List<ModuleInfo> modules {
+		public ModuleInfo kernel {
 			get;
 			construct;
 		}
@@ -49,8 +49,8 @@ namespace Frida.Barebone {
 			construct;
 		}
 
-		public WinNtLayout (Gee.List<ModuleInfo> modules, Gee.List<SymbolInfo> symbols, uint64 module_list) {
-			Object (modules: modules, symbols: symbols, module_list: module_list);
+		public WinNtLayout (ModuleInfo kernel, Gee.List<SymbolInfo> symbols, uint64 module_list) {
+			Object (kernel: kernel, symbols: symbols, module_list: module_list);
 		}
 	}
 
