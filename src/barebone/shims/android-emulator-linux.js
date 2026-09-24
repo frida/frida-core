@@ -1,6 +1,6 @@
-recv('allow-pipe-path', onAllowPipePath);
+rpc.exports.allowPipePath = allowPipePath;
 
-function onAllowPipePath(message) {
+function allowPipePath(path) {
   const addAllowedPath = new NativeFunction(Module.getGlobalExportByName('android_unix_pipes_add_allowed_path'), 'void', ['pointer']);
-  addAllowedPath(Memory.allocUtf8String(message.path));
+  addAllowedPath(Memory.allocUtf8String(path));
 }

@@ -161,7 +161,7 @@ let armed = false;
 let planted = [];
 let generation = 0;
 
-recv('breakpoints', onBreakpointsChanged);
+rpc.exports.setBreakpoints = setBreakpoints;
 
 Interceptor.attach(WHP.getExportByName('WHvGetVirtualProcessorRegisters'), {
   onEnter(args) {
@@ -206,12 +206,11 @@ Interceptor.attach(WHP.getExportByName('WHvRunVirtualProcessor'), {
     writeRegister(this.partition, this.vpIndex, REGISTER_DR6, uint64(0));
     this.exitContext.writeU32(EXIT_REASON_CANCELED);
 
-    send({
-      type: 'breakpoint',
+    send(['breakpoint', {
       address: '0x' + rip.toString(16),
       rsp: '0x' + readRegister(this.partition, this.vpIndex, REGISTER_RSP).toString(16),
       vp: this.vpIndex
-    });
+    }]);
   }
 });
 
@@ -245,8 +244,8 @@ function refreshLandingProcessor(vpIndex) {
   repair(cpuState.add(layout.envOffset).readPointer());
 }
 
-function onBreakpointsChanged(message) {
-  planted = message.addresses.slice(0, MAX_BREAKPOINTS);
+function setBreakpoints(addresses) {
+  planted = addresses.slice(0, MAX_BREAKPOINTS);
   generation++;
   programmed.clear();
 
@@ -254,8 +253,6 @@ function onBreakpointsChanged(message) {
     for (const vpIndex of seen)
       cancelRun(partition, vpIndex, 0);
   }
-
-  recv('breakpoints', onBreakpointsChanged);
 }
 
 function arm() {

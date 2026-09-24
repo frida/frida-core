@@ -1,52 +1,43 @@
 namespace Frida {
-	private sealed class EmulatorInstrumentation : Object {
-		private DeviceManager manager;
-		private Script script;
+	private sealed class EmulatorInstrumentation : InternalAgent {
+		private LocalConnection local_connection;
+		private uint pid;
 		private GDB.Client? client;
 
-		private EmulatorInstrumentation (DeviceManager manager, Script script) {
-			this.manager = manager;
-			this.script = script;
+		private EmulatorInstrumentation (LocalConnection connection, uint pid) {
+			Object (connection: connection);
+			local_connection = connection;
+			this.pid = pid;
 		}
 
-		public static async EmulatorInstrumentation apply (BareboneConfig config, Cancellable? cancellable)
-				throws Error, IOError {
-			var manager = new DeviceManager ();
-			bool adopted = false;
+		public static async EmulatorInstrumentation apply (HostSessionHub hub, BareboneConfig config,
+				Cancellable? cancellable) throws Error, IOError {
+			HostSessionEntry local_system = yield hub.resolve_host_session ("local", cancellable);
+			var connection = new LocalConnection (local_system);
+
+			var instrumentation = new EmulatorInstrumentation (connection, config.connection.pid);
 			try {
-				var device = yield manager.get_device_by_type (DeviceType.LOCAL, 0, cancellable);
-				var session = yield device.attach (config.connection.pid, null, cancellable);
+				yield instrumentation.start (config, cancellable);
+			} catch (GLib.Error e) {
+				try {
+					yield instrumentation.close (cancellable);
+				} catch (IOError ignored) {
+				}
+				throw_api_error (e);
+			}
+			return instrumentation;
+		}
 
-				unowned string source = (string) shim_blob ().data;
-				var script = yield session.create_script (source, null, cancellable);
-
-				yield script.load (cancellable);
+		private async void start (BareboneConfig config, Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
 
 #if MACOS || LINUX
-				string? pipe_path = pipe_socket_path (config);
-				if (pipe_path != null) {
-					var builder = new Json.Builder ();
-					builder.begin_object ();
-					builder.set_member_name ("type");
-					builder.add_string_value ("allow-pipe-path");
-					builder.set_member_name ("path");
-					builder.add_string_value (pipe_path);
-					builder.end_object ();
-					script.post (Json.to_string (builder.get_root (), false));
-				}
-
-#endif
-				var instrumentation = new EmulatorInstrumentation (manager, script);
-				adopted = true;
-				return instrumentation;
-			} finally {
-				if (!adopted) {
-					try {
-						yield manager.close (cancellable);
-					} catch (IOError e) {
-					}
-				}
+			string? pipe_path = pipe_socket_path (config);
+			if (pipe_path != null) {
+				var path = new Json.Node.alloc ().init_string (pipe_path);
+				yield call ("allowPipePath", new Json.Node[] { path }, null, cancellable);
 			}
+#endif
 		}
 
 		public void adopt_breakpoints (GDB.Client client) {
@@ -54,46 +45,37 @@ namespace Frida {
 
 			client.breakpoints_provided_externally = true;
 			client.breakpoints_changed.connect (on_breakpoints_changed);
-			script.message.connect (on_message);
 		}
 
 		private void on_breakpoints_changed (uint64[] addresses) {
-			var builder = new Json.Builder ();
-			builder.begin_object ();
-			builder.set_member_name ("type");
-			builder.add_string_value ("breakpoints");
-			builder.set_member_name ("addresses");
-			builder.begin_array ();
+			var values = new Json.Array ();
 			foreach (uint64 address in addresses)
-				builder.add_string_value (("0x%" + uint64.FORMAT_MODIFIER + "x").printf (address));
-			builder.end_array ();
-			builder.end_object ();
-			script.post (Json.to_string (builder.get_root (), false));
+				values.add_string_element (("0x%" + uint64.FORMAT_MODIFIER + "x").printf (address));
+			var arg = new Json.Node.alloc ().init_array (values);
+			call.begin ("setBreakpoints", new Json.Node[] { arg }, null, null);
 		}
 
-		private void on_message (string json, Bytes? data) {
-			try {
-				var root = Json.from_string (json).get_object ();
-				if (!root.has_member ("payload"))
-					return;
-				var payload = root.get_object_member ("payload");
-				if (payload.get_string_member ("type") != "breakpoint")
-					return;
+		protected override void on_event (string type, Json.Array event) {
+			if (type != "breakpoint")
+				return;
 
-				uint64 address = uint64.parse (payload.get_string_member ("address").substring (2), 16);
-				uint vp = (uint) payload.get_int_member ("vp");
-				uint64 stack = uint64.parse (payload.get_string_member ("rsp").substring (2), 16);
-				client.report_breakpoint_hit.begin (address, vp, stack, null);
-			} catch (GLib.Error e) {
-			}
+			var hit = event.get_object_element (1);
+			uint64 address = uint64.parse (hit.get_string_member ("address").substring (2), 16);
+			uint vp = (uint) hit.get_int_member ("vp");
+			uint64 stack = uint64.parse (hit.get_string_member ("rsp").substring (2), 16);
+			client.report_breakpoint_hit.begin (address, vp, stack, null);
 		}
 
 		public async void tear_down (Cancellable? cancellable) throws IOError {
-			try {
-				yield script.unload (cancellable);
-			} catch (GLib.Error e) {
-			}
-			yield manager.close (cancellable);
+			yield close (cancellable);
+		}
+
+		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
+			return pid;
+		}
+
+		protected override async string? load_source (Cancellable? cancellable) throws Error, IOError {
+			return (string) shim_blob ().data;
 		}
 
 		private static Frida.Data.Barebone.Blob shim_blob () {
@@ -123,5 +105,31 @@ namespace Frida {
 			return null;
 		}
 #endif
+	}
+
+	private sealed class LocalConnection : Object, HostSessionConnection {
+		public HostSessionEntry local_system {
+			get;
+			construct;
+		}
+
+		public HostSession host_session {
+			get {
+				return local_system.session;
+			}
+		}
+
+		public LocalConnection (HostSessionEntry local_system) {
+			Object (local_system: local_system);
+		}
+
+		public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
+				Cancellable? cancellable) throws Error, IOError {
+			return yield local_system.provider.link_agent_session (local_system.session, id, sink, cancellable);
+		}
+
+		public void unlink_agent_session (AgentSessionId id) {
+			local_system.provider.unlink_agent_session (local_system.session, id);
+		}
 	}
 }

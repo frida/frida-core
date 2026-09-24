@@ -131,7 +131,7 @@ namespace Frida {
 #if WINDOWS || MACOS || LINUX
 			if (config.connection.flavor == BareboneStubFlavor.ANDROID_EMULATOR) {
 				connecting ("Instrumenting the emulator", 0.05);
-				emulator_instrumentation = yield EmulatorInstrumentation.apply (config, cancellable);
+				emulator_instrumentation = yield EmulatorInstrumentation.apply (hub, config, cancellable);
 			}
 #endif
 

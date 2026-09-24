@@ -62,7 +62,7 @@ commitGdbRegisterWrites();
 emulateHardwareBreakpoints();
 rewriteUnknownVcpuExits();
 handleDebugExceptions();
-recv('allow-pipe-path', onAllowPipePath);
+rpc.exports.allowPipePath = allowPipePath;
 
 function verifyBuild() {
   const sites = [
@@ -219,7 +219,7 @@ function neutralizeSyndrome(syndrome) {
   syndrome.writeU64(syndrome.readU64().and(uint64('0x03ffffff')).or(uint64('0x04000000')));
 }
 
-function onAllowPipePath(message) {
+function allowPipePath(path) {
   const addAllowedPath = new NativeFunction(Module.getGlobalExportByName('android_unix_pipes_add_allowed_path'), 'void', ['pointer']);
-  addAllowedPath(Memory.allocUtf8String(message.path));
+  addAllowedPath(Memory.allocUtf8String(path));
 }
