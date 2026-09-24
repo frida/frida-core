@@ -14,7 +14,7 @@ use crate::bindings::{
     GumAddress, GumX86Writer, cs_insn, gconstpointer, gpointer, gum_x86_writer_flush,
     gum_x86_writer_new, gum_x86_writer_put_jmp_address, gum_x86_writer_unref,
 };
-use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+use crate::kernel::{CpuState, MemoryRegion, ThreadEntry, ThreadInfo};
 use crate::ring::{Ring, Taken};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
@@ -1113,7 +1113,7 @@ pub struct Primitives {
     pub current_process_id: fn() -> u32,
     pub current_thread_id: fn() -> u64,
     pub protect: fn(u64, usize, u32) -> bool,
-    pub protection_at: fn(usize) -> u32,
+    pub region_at: fn(usize) -> Option<MemoryRegion>,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
     pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo), bool),
     pub find_thread: fn(u32, bool) -> Option<ThreadInfo>,
@@ -1147,7 +1147,7 @@ static KERNEL: Primitives = Primitives {
     current_process_id: kernel::current_process_id,
     current_thread_id: kernel::current_thread_id,
     protect: kernel::protect,
-    protection_at: kernel::protection_at,
+    region_at: kernel::region_at,
     enumerate_ranges: kernel::enumerate_ranges,
     enumerate_threads: kernel::enumerate_threads,
     find_thread: kernel::find_thread,
@@ -1253,25 +1253,50 @@ mod kernel {
         unsafe { get_cur_thread_handle() as u64 }
     }
 
-    pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
-        super::enumerate_ring_zero_threads(found, with_registers)
+    pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
+        let first_page = address / PAGE_SIZE as u64;
+        let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
+
+        let mut set = PAGE_PRESENT;
+        if (gum_prot & GUM_PAGE_WRITE) != 0 {
+            set |= PAGE_WRITEABLE;
+        }
+        let clear = PAGE_WRITEABLE & !set;
+
+        unsafe { __PageModifyPermissions(first_page as u32, pages, !clear, set) != 0xffff_ffff }
     }
 
-    pub fn find_thread(id: u32, with_registers: bool) -> Option<ThreadInfo> {
-        let thread = super::ring_zero_thread(id)?;
+    pub fn region_at(address: usize) -> Option<MemoryRegion> {
+        let protection = protection_at(address);
+        if protection == 0 {
+            return None;
+        }
 
-        Some(ThreadInfo {
-            id,
-            cpu_state: with_registers.then(|| super::thread_cpu_state(thread)).flatten(),
+        let page = address & !(PAGE_SIZE as usize - 1);
+        let start = start_of_run(page, protection);
+        let end = end_of_run(page.wrapping_add(PAGE_SIZE as usize), protection);
+
+        Some(MemoryRegion {
+            base: start as u64,
+            size: end.wrapping_sub(start) as u64,
+            protection,
         })
     }
 
-    pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
-        let Some(thread) = super::ring_zero_thread(id) else {
-            return false;
-        };
+    fn start_of_run(start: usize, protection: u32) -> usize {
+        let mut start = start;
+        while protection_at(start.wrapping_sub(PAGE_SIZE as usize)) == protection {
+            start = start.wrapping_sub(PAGE_SIZE as usize);
+        }
+        start
+    }
 
-        super::modify_thread_at(thread, change)
+    fn end_of_run(end: usize, protection: u32) -> usize {
+        let mut end = end;
+        while protection_at(end) == protection {
+            end = end.wrapping_add(PAGE_SIZE as usize);
+        }
+        end
     }
 
     pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
@@ -1313,17 +1338,25 @@ mod kernel {
         protection_of(entry)
     }
 
-    pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
-        let first_page = address / PAGE_SIZE as u64;
-        let pages = size.div_ceil(PAGE_SIZE as usize) as u32;
+    pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
+        super::enumerate_ring_zero_threads(found, with_registers)
+    }
 
-        let mut set = PAGE_PRESENT;
-        if (gum_prot & GUM_PAGE_WRITE) != 0 {
-            set |= PAGE_WRITEABLE;
-        }
-        let clear = PAGE_WRITEABLE & !set;
+    pub fn find_thread(id: u32, with_registers: bool) -> Option<ThreadInfo> {
+        let thread = super::ring_zero_thread(id)?;
 
-        unsafe { __PageModifyPermissions(first_page as u32, pages, !clear, set) != 0xffff_ffff }
+        Some(ThreadInfo {
+            id,
+            cpu_state: with_registers.then(|| super::thread_cpu_state(thread)).flatten(),
+        })
+    }
+
+    pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
+        let Some(thread) = super::ring_zero_thread(id) else {
+            return false;
+        };
+
+        super::modify_thread_at(thread, change)
     }
 }
 
@@ -1568,15 +1601,15 @@ pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
     (primitives().protect)(address, size, gum_prot)
 }
 
+pub fn region_at(address: usize) -> Option<MemoryRegion> {
+    (primitives().region_at)(address)
+}
+
 // This kernel has no self-map, but VMM copies a run of page table entries into a buffer,
 // which gives the same data. Report only the arena, because the memory below it belongs to
 // the VM that is current.
 pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
     (primitives().enumerate_ranges)(found)
-}
-
-pub fn protection_at(address: usize) -> u32 {
-    (primitives().protection_at)(address)
 }
 
 // These processors have no execute permission, thus all present pages are executable.

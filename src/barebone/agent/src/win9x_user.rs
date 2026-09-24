@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::kernel::ThreadEntry;
+use crate::kernel::{MemoryRegion, ThreadEntry};
 use crate::win9x::*;
 
 // No code in this image calls the ring 3 entry point, thus tell the linker to keep it.
@@ -67,7 +67,7 @@ pub static USER: Primitives = Primitives {
     current_process_id,
     current_thread_id,
     protect,
-    protection_at,
+    region_at,
     enumerate_ranges,
     enumerate_threads,
     find_thread,
@@ -250,15 +250,15 @@ struct UserThreadStart {
 fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
     let mut address = 0usize;
     loop {
-        let Some(region) = describe_region(address) else {
+        let Some(region) = region_at(address) else {
             return;
         };
 
         if region.protection != 0 {
-            found(region.base as u64, region.size as u64, region.protection);
+            found(region.base, region.size, region.protection);
         }
 
-        address = region.base + region.size;
+        address = (region.base + region.size) as usize;
     }
 }
 
@@ -283,14 +283,7 @@ fn modify_thread(id: u32, change: &mut dyn FnMut(&mut crate::kernel::CpuState)) 
     crate::win9x::modify_thread_at(thread, change)
 }
 
-fn protection_at(address: usize) -> u32 {
-    match describe_region(address) {
-        Some(region) => region.protection,
-        None => 0,
-    }
-}
-
-fn describe_region(address: usize) -> Option<Region> {
+fn region_at(address: usize) -> Option<MemoryRegion> {
     let mut info = [0u32; REGION_WORDS];
     let query: extern "stdcall" fn(usize, *mut u32, u32) -> u32 =
         unsafe { core::mem::transmute(user_api().virtual_query) };
@@ -298,9 +291,9 @@ fn describe_region(address: usize) -> Option<Region> {
         return None;
     }
 
-    Some(Region {
-        base: info[REGION_BASE] as usize,
-        size: info[REGION_SIZE] as usize,
+    Some(MemoryRegion {
+        base: info[REGION_BASE] as u64,
+        size: info[REGION_SIZE] as u64,
         protection: if info[REGION_STATE] == MEM_COMMIT {
             gum_protection_of(info[REGION_PROTECTION])
         } else {
@@ -317,12 +310,6 @@ fn gum_protection_of(protection: u32) -> u32 {
         PAGE_EXECUTE => GUM_PAGE_READ | GUM_PAGE_EXECUTE,
         _ => 0,
     }
-}
-
-struct Region {
-    base: usize,
-    size: usize,
-    protection: u32,
 }
 
 const REGION_WORDS: usize = 7;

@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::kernel::MemoryRegion;
 use crate::winnt::{
     BLOCK_PROCESS_ID, BLOCK_THREAD_ID, CURRENT_PROCESS, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
     COPY_LEFT, OBSERVED_PID, OBSERVED_THREAD, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives,
@@ -124,7 +125,7 @@ pub static USER: Primitives = Primitives {
     alloc_code,
     free_code,
     protect,
-    protection_at,
+    region_at,
     enumerate_ranges,
     enumerate_threads,
     find_thread,
@@ -1200,13 +1201,17 @@ fn page_protection_of(gum_prot: u32) -> u32 {
 }
 
 // Only the kernel half can read the page tables. The copy asks the memory manager.
-fn protection_at(address: usize) -> u32 {
+fn region_at(address: usize) -> Option<MemoryRegion> {
     let mut region = [0u8; MEMORY_INFORMATION_SIZE];
     if !query_region(address as u64, &mut region) {
-        return 0;
+        return None;
     }
 
-    gum_protection_of(&region)
+    Some(MemoryRegion {
+        base: read_field(&region, MEMORY_BASE),
+        size: read_field(&region, MEMORY_REGION_SIZE),
+        protection: gum_protection_of(&region),
+    })
 }
 
 fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {

@@ -98,6 +98,12 @@ pub struct CpuState {
     pub eax: u32,
 }
 
+pub struct MemoryRegion {
+    pub base: u64,
+    pub size: u64,
+    pub protection: u32,
+}
+
 // What the host looked up before the agent started, for the kernels that say nothing about
 // their own layout and leave nowhere for the agent to read it.
 pub fn take_note_of(what: &str, number: u64) {

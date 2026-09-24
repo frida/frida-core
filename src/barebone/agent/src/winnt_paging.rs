@@ -4,6 +4,8 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::kernel::MemoryRegion;
+
 pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
     let mut at = address as usize & !(PAGE_SIZE - 1);
     let end = address as usize + size;
@@ -20,6 +22,40 @@ pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
     }
 
     true
+}
+
+pub fn region_at(address: usize) -> Option<MemoryRegion> {
+    let (protection, span) = mapping_at(address)?;
+    let first = address & !(span - 1);
+    let start = start_of_run(first, protection);
+    let end = end_of_run(first.wrapping_add(span), protection);
+
+    Some(MemoryRegion {
+        base: start as u64,
+        size: end.wrapping_sub(start) as u64,
+        protection,
+    })
+}
+
+fn start_of_run(start: usize, protection: u32) -> usize {
+    let mut start = start;
+    loop {
+        let below = start.wrapping_sub(1);
+        match mapping_at(below) {
+            Some((here, span)) if here == protection => start = below & !(span - 1),
+            _ => return start,
+        }
+    }
+}
+
+fn end_of_run(end: usize, protection: u32) -> usize {
+    let mut end = end;
+    loop {
+        match mapping_at(end) {
+            Some((here, span)) if here == protection => end = end.wrapping_add(span),
+            _ => return end,
+        }
+    }
 }
 
 // Read the page tables and join adjacent pages that have the same permissions. Report only
@@ -70,34 +106,34 @@ mod arch {
 
     // A 32-bit kernel can use PAE. The two forms differ in the width of an entry, in the address
     // of the directory, and in the availability of the non-executable bit.
-    pub fn protection_at(address: usize) -> u32 {
+    pub fn mapping_at(address: usize) -> Option<(u32, usize)> {
         unsafe {
             if pae_enabled() {
                 let pde = ((PAE_PDE_BASE + (address >> 21) * 8) as *const u64).read_volatile();
                 if (pde & PAGE_PRESENT as u64) == 0 {
-                    return 0;
+                    return None;
                 }
                 if (pde & PAGE_LARGE as u64) != 0 {
-                    return protection_of(pde, PAGE_NO_EXECUTE);
+                    return Some((protection_of(pde, PAGE_NO_EXECUTE), PAE_LARGE_PAGE_SIZE));
                 }
                 let pte = ((PTE_BASE + (address >> 12) * 8) as *const u64).read_volatile();
                 if (pte & PAGE_PRESENT as u64) == 0 {
-                    return 0;
+                    return None;
                 }
-                protection_of(pte, PAGE_NO_EXECUTE)
+                Some((protection_of(pte, PAGE_NO_EXECUTE), PAGE_SIZE))
             } else {
                 let pde = ((PDE_BASE + (address >> 22) * 4) as *const u32).read_volatile();
                 if (pde & PAGE_PRESENT) == 0 {
-                    return 0;
+                    return None;
                 }
                 if (pde & PAGE_LARGE) != 0 {
-                    return protection_of(pde as u64, 0);
+                    return Some((protection_of(pde as u64, 0), LARGE_PAGE_SIZE));
                 }
                 let pte = ((PTE_BASE + (address >> 12) * 4) as *const u32).read_volatile();
                 if (pte & PAGE_PRESENT) == 0 {
-                    return 0;
+                    return None;
                 }
-                protection_of(pte as u64, 0)
+                Some((protection_of(pte as u64, 0), PAGE_SIZE))
             }
         }
     }
@@ -106,8 +142,7 @@ mod arch {
     pub fn walk_kernel_space(ranges: &mut Ranges) {
         let mut address = KERNEL_SPACE_START;
         while address != 0 {
-            let protection = protection_at(address);
-            if protection != 0 {
+            if let Some((protection, _)) = mapping_at(address) {
                 ranges.add(address, PAGE_SIZE, protection);
             }
             address = address.wrapping_add(PAGE_SIZE);
@@ -163,6 +198,8 @@ mod arch {
     const PTE_BASE: usize = 0xc000_0000;
     const PDE_BASE: usize = 0xc030_0000;
     const PAE_PDE_BASE: usize = 0xc060_0000;
+    const LARGE_PAGE_SIZE: usize = 4 * 1024 * 1024;
+    const PAE_LARGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
     const CR4_PAE: u32 = 1 << 5;
 }
 
@@ -170,23 +207,23 @@ mod arch {
 mod arch {
     use super::*;
 
-    pub fn protection_at(address: usize) -> u32 {
+    pub fn mapping_at(address: usize) -> Option<(u32, usize)> {
         for level in TOP_LEVEL..TABLE_LEVEL {
             let entry = entry_at(level, address);
             if (entry & PAGE_PRESENT as u64) == 0 {
-                return 0;
+                return None;
             }
             if (entry & PAGE_LARGE as u64) != 0 {
-                return protection_of(entry, PAGE_NO_EXECUTE);
+                return Some((protection_of(entry, PAGE_NO_EXECUTE), 1usize << LEVEL_SHIFTS[level]));
             }
         }
 
         let entry = entry_at(TABLE_LEVEL, address);
         if (entry & PAGE_PRESENT as u64) == 0 {
-            return 0;
+            return None;
         }
 
-        protection_of(entry, PAGE_NO_EXECUTE)
+        Some((protection_of(entry, PAGE_NO_EXECUTE), PAGE_SIZE))
     }
 
     // Half of a 48-bit space contains too many pages to examine each one. Thus the walk goes down
@@ -345,12 +382,11 @@ mod arch {
 mod arch {
     use super::*;
 
-    pub fn protection_at(address: usize) -> u32 {
-        match resolve(address) {
-            Some((descriptor, _)) =>
-                protection_of_descriptor(unsafe { descriptor.read_volatile() }, address),
-            None => 0,
-        }
+    pub fn mapping_at(address: usize) -> Option<(u32, usize)> {
+        let (descriptor, level) = resolve(address)?;
+        let protection = protection_of_descriptor(unsafe { descriptor.read_volatile() }, address);
+
+        Some((protection, 1usize << LEVEL_SHIFTS[level]))
     }
 
     pub fn walk_kernel_space(ranges: &mut Ranges) {
@@ -541,11 +577,10 @@ macro_rules! read_system_register {
 #[cfg(target_arch = "aarch64")]
 use read_system_register;
 
-pub use arch::protection_at;
 #[cfg(target_arch = "x86_64")]
 pub use arch::present_span;
 
-use arch::{reprotect, walk_kernel_space};
+use arch::{mapping_at, reprotect, walk_kernel_space};
 
 fn protection_of(entry: u64, no_execute: u64) -> u32 {
     let mut prot = GUM_PAGE_READ;

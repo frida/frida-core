@@ -8,7 +8,7 @@ use crate::{
         gsize, guint, gum_barebone_register_module, gum_mprotect, GumFoundRangeFunc,
         GumFoundThreadFunc, GumModifyThreadFlags, GumModifyThreadFunc, GumRangeDetails,
         GumThreadDetails, GumThreadFlags, GumThreadId, GumThreadRegistry,
-        gum_thread_details_copy,
+        gconstpointer, gum_thread_details_copy,
     },
     gum::{self, FoundExportCallback},
     kernel,
@@ -71,16 +71,23 @@ pub extern "C" fn gum_memory_dispose_writable_pages(_writable: gpointer, _n_page
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_memory_query_protection(
-    address: gpointer,
+pub extern "C" fn gum_memory_query_region(
+    address: gconstpointer,
+    range: *mut GumMemoryRange,
     prot: *mut GumPageProtection,
 ) -> gboolean {
-    let protection = kernel::protection_at(address as usize);
-    if protection == 0 {
+    let Some(region) = kernel::region_at(address as usize).filter(|region| region.protection != 0)
+    else {
         return 0;
-    }
+    };
 
-    unsafe { *prot = protection as GumPageProtection };
+    unsafe {
+        *range = GumMemoryRange {
+            base_address: region.base,
+            size: region.size as gsize,
+        };
+        *prot = region.protection as GumPageProtection;
+    }
     1
 }
 

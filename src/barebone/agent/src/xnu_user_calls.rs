@@ -4,7 +4,7 @@ use core::ffi::c_void;
 use core::ptr::null_mut;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+use crate::kernel::{CpuState, MemoryRegion, ThreadEntry, ThreadInfo};
 use crate::xnu::Primitives;
 
 pub static SLOTS: crate::gthread::ThreadSlots = crate::gthread::ThreadSlots {
@@ -86,7 +86,7 @@ pub static USER: Primitives = Primitives {
     protect,
     page_size,
     cache_shape,
-    protection_at,
+    region_at,
     enumerate_ranges,
     enumerate_threads,
     find_thread,
@@ -203,18 +203,21 @@ fn current_thread_id() -> u64 {
     }
 }
 
+fn region_at(address: u64) -> Option<MemoryRegion> {
+    region_from(address)
+        .filter(|region| region.address <= address)
+        .map(|region| MemoryRegion {
+            base: region.address,
+            size: region.size,
+            protection: region.protection,
+        })
+}
+
 fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {
     let mut at = 0u64;
     while let Some(region) = region_from(at) {
         found(region.address, region.size as usize, region.protection);
         at = region.address + region.size;
-    }
-}
-
-fn protection_at(address: u64) -> u32 {
-    match region_from(address) {
-        Some(region) if region.address <= address => region.protection,
-        _ => 0,
     }
 }
 

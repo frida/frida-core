@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use crate::kernel::ThreadEntry;
+use crate::kernel::{MemoryRegion, ThreadEntry};
 
 pub struct Primitives {
     pub alloc: fn(usize) -> *mut u8,
@@ -17,7 +17,7 @@ pub struct Primitives {
     pub current_process_id: fn() -> u32,
     pub current_thread_id: fn() -> u64,
     pub protect: fn(u64, usize, u32) -> bool,
-    pub protection_at: fn(u64) -> u32,
+    pub region_at: fn(u64) -> Option<MemoryRegion>,
     pub page_size: fn() -> usize,
     pub cache_shape: fn() -> u64,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, usize, u32)),
@@ -54,7 +54,7 @@ static KERNEL: Primitives = Primitives {
     current_process_id: kernel_current_process_id,
     current_thread_id: kernel_current_thread_id,
     protect: kernel_protect,
-    protection_at: crate::xnu_ranges::protection_at,
+    region_at: crate::xnu_ranges::region_at,
     page_size: kernel_page_size,
     cache_shape: kernel_cache_shape,
     enumerate_ranges: crate::xnu_ranges::enumerate_ranges,
@@ -113,8 +113,8 @@ pub fn protect(address: u64, size: usize, may: u32) -> bool {
     (primitives().protect)(address, size, may)
 }
 
-pub fn protection_at(address: u64) -> u32 {
-    (primitives().protection_at)(address)
+pub fn region_at(address: u64) -> Option<MemoryRegion> {
+    (primitives().region_at)(address)
 }
 
 pub fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {

@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::kernel::{CpuState, ThreadEntry, ThreadInfo};
+use crate::kernel::{CpuState, MemoryRegion, ThreadEntry, ThreadInfo};
 use crate::ring::{Ring, Taken};
 
 // A process is made in ring 3, thus a copy of the agent does this work.
@@ -412,8 +412,8 @@ pub fn current_thread_id() -> u64 {
 }
 
 // Only the kernel half can read the page tables. The copy asks the memory manager.
-pub fn protection_at(address: usize) -> u32 {
-    (primitives().protection_at)(address)
+pub fn region_at(address: usize) -> Option<MemoryRegion> {
+    (primitives().region_at)(address)
 }
 
 pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
@@ -3489,7 +3489,7 @@ pub struct Primitives {
     pub alloc_code: fn(usize) -> *mut u8,
     pub free_code: fn(*mut u8, usize),
     pub protect: fn(u64, usize, u32) -> bool,
-    pub protection_at: fn(usize) -> u32,
+    pub region_at: fn(usize) -> Option<MemoryRegion>,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
     pub enumerate_threads: fn(&mut dyn FnMut(ThreadInfo), bool),
     pub find_thread: fn(u32, bool) -> Option<ThreadInfo>,
@@ -3524,7 +3524,7 @@ static KERNEL: Primitives = Primitives {
     alloc_code: kernel::alloc_code,
     free_code: kernel::free_code,
     protect: kernel::protect,
-    protection_at: kernel::protection_at,
+    region_at: kernel::region_at,
     enumerate_ranges: kernel::enumerate_ranges,
     enumerate_threads: kernel::enumerate_threads,
     find_thread: kernel::find_thread,
@@ -3572,8 +3572,8 @@ mod kernel {
         crate::winnt_paging::protect(address, size, gum_prot)
     }
 
-    pub fn protection_at(address: usize) -> u32 {
-        crate::winnt_paging::protection_at(address)
+    pub fn region_at(address: usize) -> Option<MemoryRegion> {
+        crate::winnt_paging::region_at(address)
     }
 
     pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {

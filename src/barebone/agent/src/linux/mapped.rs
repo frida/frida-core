@@ -14,6 +14,7 @@ use crate::bindings::{
 };
 use crate::bindings::{GumElfSymbolBind_GUM_ELF_BIND_LOCAL, GumElfSymbolDetails};
 use crate::gum::{self, FoundExportCallback, FoundSymbolCallback};
+use crate::kernel::MemoryRegion;
 use alloc::ffi::CString;
 
 use super::user::{EXECUTABLE, READABLE, WRITABLE, contents_of};
@@ -257,9 +258,9 @@ pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
     }
 }
 
-pub fn protection_at(address: u64) -> u32 {
+pub fn region_at(address: u64) -> Option<MemoryRegion> {
     if super::user::range_is_ours(address) {
-        return 0;
+        return None;
     }
 
     let listed = contents_of(c"/proc/self/maps");
@@ -270,11 +271,15 @@ pub fn protection_at(address: u64) -> u32 {
         };
 
         if address >= mapping.start && address < mapping.end {
-            return mapping.protection;
+            return Some(MemoryRegion {
+                base: mapping.start,
+                size: mapping.end - mapping.start,
+                protection: mapping.protection,
+            });
         }
     }
 
-    0
+    None
 }
 
 fn mapped_images() -> Vec<Image> {

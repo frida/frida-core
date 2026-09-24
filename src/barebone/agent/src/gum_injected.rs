@@ -771,32 +771,49 @@ fn each_kernel_module_range(mut visit: impl FnMut(u64, u64)) {
 
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_memory_query_protection(
-    address: gpointer,
+pub extern "C" fn gum_memory_query_region(
+    address: gconstpointer,
+    range: *mut GumMemoryRange,
     prot: *mut GumPageProtection,
 ) -> gboolean {
+    let Some(region) = region_at(address as u64).filter(|region| region.protection != 0) else {
+        return 0;
+    };
+
+    unsafe {
+        *range = GumMemoryRange {
+            base_address: region.base,
+            size: region.size as gsize,
+        };
+        *prot = region.protection as GumPageProtection;
+    }
+    1
+}
+
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
+fn region_at(address: u64) -> Option<kernel::MemoryRegion> {
     #[cfg(feature = "linux-injected")]
     if !kernel::in_copy() {
-        let mut protection = 0u32;
-        each_kernel_module_range(|base, size| {
-            if address as u64 >= base && (address as u64) < base + size {
-                protection = KERNEL_RANGE_PROTECTION;
-            }
-        });
-        if protection == 0 {
-            return 0;
+        return kernel_module_region_at(address);
+    }
+
+    kernel::region_at(address)
+}
+
+#[cfg(feature = "linux-injected")]
+fn kernel_module_region_at(address: u64) -> Option<kernel::MemoryRegion> {
+    let mut found = None;
+    each_kernel_module_range(|base, size| {
+        if address >= base && address < base + size {
+            found = Some(kernel::MemoryRegion {
+                base,
+                size,
+                protection: KERNEL_RANGE_PROTECTION,
+            });
         }
-        unsafe { *prot = protection as GumPageProtection };
-        return 1;
-    }
+    });
 
-    let protection = kernel::protection_at(address as u64);
-    if protection == 0 {
-        return 0;
-    }
-
-    unsafe { *prot = protection as GumPageProtection };
-    1
+    found
 }
 
 pub(crate) unsafe fn enumerate_exports_in_range(
