@@ -39,7 +39,7 @@ namespace Frida {
 
 		private static Variant _icon;
 		private BareboneHostSession? host_session;
-#if WINDOWS || MACOS || LINUX
+#if WINDOWS || MACOS || (LINUX && !ANDROID)
 		private EmulatorInstrumentation? emulator_instrumentation;
 #endif
 
@@ -52,7 +52,7 @@ namespace Frida {
 				yield host_session.close (cancellable);
 				host_session = null;
 			}
-#if WINDOWS || MACOS || LINUX
+#if WINDOWS || MACOS || (LINUX && !ANDROID)
 			if (emulator_instrumentation != null) {
 				yield emulator_instrumentation.tear_down (cancellable);
 				emulator_instrumentation = null;
@@ -128,7 +128,7 @@ namespace Frida {
 				throw new Error.TRANSPORT ("The specified GDB remote stub cannot be reached: %s", e.message);
 			}
 
-#if WINDOWS || MACOS || LINUX
+#if WINDOWS || MACOS || (LINUX && !ANDROID)
 			if (config.connection.flavor == BareboneStubFlavor.ANDROID_EMULATOR) {
 				connecting ("Instrumenting the emulator", 0.05);
 				emulator_instrumentation = yield EmulatorInstrumentation.apply (hub, config, cancellable);
