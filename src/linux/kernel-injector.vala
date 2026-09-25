@@ -1,7 +1,4 @@
 namespace Frida {
-	// Bridges to the Frida kernel module over its magic-prctl control channel. The module
-	// exposes ptrace-free memory and thread primitives against an arbitrary pid, which the
-	// kernel-assisted injector drives instead of ptrace or /proc/<pid>/mem.
 	internal sealed class KernelSession : Object {
 		public uint pid {
 			get;
@@ -112,8 +109,6 @@ namespace Frida {
 					data.length, address);
 		}
 
-		// entry/stack/arg/tls seed the new thread's PC/SP/x0 and TPIDR_EL0. The thread joins
-		// the target's thread group; tls must point at a private block the caller prepared.
 		public uint spawn_thread (uint64 entry, uint64 stack, uint64 arg, uint64 tls) throws Error {
 			var args = SpawnArgs () {
 				entry = entry,
@@ -128,8 +123,6 @@ namespace Frida {
 			return (uint) result;
 		}
 
-		// Hide the loader's own footprint (which Gum doesn't track and so wouldn't self-cloak):
-		// the bootstrap thread plus the region/stack/tls we mapped for it.
 		public void cloak_thread (uint tid) {
 			var args = CloakThreadArgs () { tgid = pid, tid = tid };
 			control (Op.CLOAK_THREAD, (ulong) (uintptr) (&args), 0);
@@ -140,10 +133,6 @@ namespace Frida {
 			control (Op.CLOAK_RANGE, (ulong) (uintptr) (&args), 0);
 		}
 
-		// prctl (FRIDA_CONTROL_MAGIC, op, arg2, arg3, FRIDA_CONTROL_TOKEN). Absent the token
-		// the module falls through to the real prctl, so probing the magic looks like a stock
-		// kernel. We bind syscall() with a 64-bit return since the libc prctl() wrapper — and
-		// the vapi's syscall() — would truncate an allocated address.
 		private static long control (Op op, ulong arg2, ulong arg3) {
 			return syscall ((long) LinuxSyscall.PRCTL, CONTROL_MAGIC, (ulong) op, arg2, arg3, CONTROL_TOKEN);
 		}
@@ -170,11 +159,6 @@ namespace Frida {
 		}
 	}
 
-	// Injects frida-agent.so using the kernel module's ptrace-free primitives: stage the loader +
-	// context in a fresh region, then spawn a bootstrap thread straight into it. The loader hands
-	// off to a real pthread it creates, so the only libc call on the kernel-spawned thread is
-	// pthread_create — which we give a private, isolated bionic TLS so it never touches the
-	// target's live per-thread state.
 	internal sealed class KernelInjectSession : Object {
 		public uint pid {
 			get;
@@ -303,12 +287,10 @@ namespace Frida {
 			var buffer = new uint8[64];
 			var writer = new Gum.Arm64Writer ((void *) buffer);
 			writer.pc = region_base + l.entry_offset;
-			// x0 already holds the loader context (passed as the spawn argument). Call frida_load,
-			// then terminate this bootstrap thread; the agent runs on the pthread the loader spawned.
 			if (!writer.put_bl_imm ((Gum.Address) region_base))
 				throw new Error.NOT_SUPPORTED ("Loader is out of branch range of the bootstrap");
-			writer.put_instruction ((uint32) 0xd2800ba8); // movz x8, #93 (__NR_exit)
-			writer.put_instruction ((uint32) 0xd4000001); // svc #0
+			writer.put_instruction ((uint32) 0xd2800ba8);
+			writer.put_instruction ((uint32) 0xd4000001);
 			writer.flush ();
 			return buffer[:writer.offset ()];
 #else
@@ -316,11 +298,6 @@ namespace Frida {
 #endif
 		}
 
-		// Give the bootstrap thread a private, isolated bionic TLS so pthread_create's stack-guard
-		// check and errno access land in our own block, never the target's live per-thread state.
-		// Slot indices per bionic tls_defines.h (arm64): BIONIC_TLS=-1, THREAD_ID=1, STACK_GUARD=5,
-		// each at tp + index * 8. The guard check is self-consistent within our block, so any stable
-		// value passes and we never read the target's real canary.
 		private uint64 synthesize_tls (out uint64 block_base) throws Error {
 			uint64 block = kernel.alloc (TLS_SIZE, PROT_RW);
 			block_base = block;
