@@ -289,8 +289,8 @@ namespace Frida {
 			writer.pc = region_base + l.entry_offset;
 			if (!writer.put_bl_imm ((Gum.Address) region_base))
 				throw new Error.NOT_SUPPORTED ("Loader is out of branch range of the bootstrap");
-			writer.put_instruction ((uint32) 0xd2800ba8);
-			writer.put_instruction ((uint32) 0xd4000001);
+			writer.put_ldr_reg_u64 (X8, LinuxSyscall.EXIT);
+			writer.put_svc_imm (0);
 			writer.flush ();
 			return buffer[:writer.offset ()];
 #else
