@@ -418,6 +418,12 @@ namespace Frida {
 			}
 
 			public async RemoteAgent run (uint pid, Cancellable? cancellable) throws Error, IOError {
+				if (KernelInjectSession.is_available ()) {
+					var session = yield KernelInjectSession.open (pid, cancellable);
+					yield session.deallocate (agent.bootstrap_result, cancellable);
+					return agent;
+				}
+
 				var session = yield CleanupSession.open (pid, cancellable);
 				yield session.deallocate (agent.bootstrap_result, cancellable);
 				session.close ();

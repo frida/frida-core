@@ -242,12 +242,16 @@ namespace Frida {
 			string fallback_address = make_fallback_address ();
 			var region = RegionLayout.compute (spec, data, fallback_address);
 
-			Future<RemoteAgent> future_agent = establish_connection (spec, fallback_address, cancellable);
-
 			uint64 region_base = kernel.alloc (region.total, PROT_RWX);
 			uint64 stack_base = kernel.alloc (STACK_SIZE, PROT_RW);
 			uint64 tls_base;
 			uint64 tls = synthesize_tls (out tls_base);
+
+			var bres = new BootstrapResult ();
+			bres.context.allocation_base = (void *) region_base;
+			bres.context.allocation_size = region.total;
+
+			Future<RemoteAgent> future_agent = establish_connection (spec, fallback_address, bres, cancellable);
 
 			write_region (region_base, region, spec, data, fallback_address, libc);
 
@@ -268,6 +272,10 @@ namespace Frida {
 			kernel.free (tls_base, TLS_SIZE);
 
 			return agent;
+		}
+
+		public async void deallocate (BootstrapResult bres, Cancellable? cancellable) throws Error, IOError {
+			kernel.free ((uint64) (uintptr) bres.context.allocation_base, bres.context.allocation_size);
 		}
 
 		private void write_region (uint64 region_base, RegionLayout l, InjectSpec spec, string data,
@@ -333,7 +341,7 @@ namespace Frida {
 			kernel.write_memory ((uint64) ((int64) tp + (int64) index * 8), raw);
 		}
 
-		private Future<RemoteAgent> establish_connection (InjectSpec spec, string fallback_address,
+		private Future<RemoteAgent> establish_connection (InjectSpec spec, string fallback_address, BootstrapResult bres,
 				Cancellable? cancellable) throws Error {
 			var promise = new Promise<RemoteAgent> ();
 
@@ -348,19 +356,19 @@ namespace Frida {
 				throw new Error.TRANSPORT ("%s", e.message);
 			}
 
-			accept_agent.begin (server_socket, spec, promise, cancellable);
+			accept_agent.begin (server_socket, spec, bres, promise, cancellable);
 
 			return promise.future;
 		}
 
-		private async void accept_agent (Socket server_socket, InjectSpec spec, Promise<RemoteAgent> promise,
-				Cancellable? cancellable) {
+		private async void accept_agent (Socket server_socket, InjectSpec spec, BootstrapResult bres,
+				Promise<RemoteAgent> promise, Cancellable? cancellable) {
 			var listener = new SocketListener ();
 			try {
 				listener.add_socket (server_socket, null);
 
 				var connection = (UnixConnection) yield listener.accept_async (cancellable);
-				var agent = yield RemoteAgent.start (FROM_SCRATCH, spec, pid, new BootstrapResult (), connection, null,
+				var agent = yield RemoteAgent.start (FROM_SCRATCH, spec, pid, bres, connection, null,
 					cancellable);
 				promise.resolve (agent);
 			} catch (Error e) {
