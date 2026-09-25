@@ -64,6 +64,10 @@ namespace Frida {
 			Object (pid: pid);
 		}
 
+		static construct {
+			reference_request_fields ();
+		}
+
 		public static bool is_available () {
 			return control (Op.PING, 0, 0) == CONTROL_MAGIC;
 		}
@@ -108,26 +112,6 @@ namespace Frida {
 					data.length, address);
 		}
 
-		public uint8[] read_memory (uint64 address, size_t size) throws Error {
-			var result = new uint8[size];
-			var args = XferArgs () {
-				address = address,
-				buffer = (uint64) (uintptr) (uint8 *) result,
-				size = size,
-				pid = pid,
-			};
-			long n = control (Op.READ, (ulong) (uintptr) (&args), 0);
-			if (n < 0 || (size_t) n != size)
-				throw new Error.NOT_SUPPORTED ("Unable to read %s bytes at 0x%" + uint64.FORMAT_MODIFIER + "x",
-					size.to_string (), address);
-			return result;
-		}
-
-		public uint64 read_pointer (uint64 address) throws Error {
-			uint8[] raw = read_memory (address, sizeof (uint64));
-			return *((uint64 *) raw);
-		}
-
 		// entry/stack/arg/tls seed the new thread's PC/SP/x0 and TPIDR_EL0. The thread joins
 		// the target's thread group; tls must point at a private block the caller prepared.
 		public uint spawn_thread (uint64 entry, uint64 stack, uint64 arg, uint64 tls) throws Error {
@@ -166,6 +150,24 @@ namespace Frida {
 
 		[CCode (cname = "syscall", cheader_filename = "unistd.h,sys/syscall.h")]
 		private extern static long syscall (long number, ...);
+
+		private static void reference_request_fields () {
+			AllocArgs alloc = {};
+			FreeArgs free_args = {};
+			XferArgs xfer = {};
+			SpawnArgs spawn = {};
+			CloakThreadArgs cloak_thread = {};
+			CloakRangeArgs cloak_range = {};
+			uint64 referenced =
+				alloc.size + alloc.pid + alloc.prot +
+				free_args.address + free_args.size + free_args.pid +
+				xfer.address + xfer.buffer + xfer.size + xfer.pid +
+				spawn.entry + spawn.stack + spawn.arg + spawn.tls + spawn.pid +
+				cloak_thread.tgid + cloak_thread.tid +
+				cloak_range.start + cloak_range.size + cloak_range.tgid;
+			if (referenced != 0)
+				assert_not_reached ();
+		}
 	}
 
 	// Injects frida-agent.so using the kernel module's ptrace-free primitives: stage the loader +
