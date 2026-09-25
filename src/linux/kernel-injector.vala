@@ -260,7 +260,12 @@ namespace Frida {
 			uint tid = kernel.spawn_thread (entry, stack_top, context, tls);
 			kernel.cloak_thread (tid);
 
-			return yield await_agent (future_agent, cancellable);
+			var agent = yield await_agent (future_agent, cancellable);
+
+			kernel.free (stack_base, STACK_SIZE);
+			kernel.free (tls_base, TLS_SIZE);
+
+			return agent;
 		}
 
 		private void write_region (uint64 region_base, RegionLayout l, InjectSpec spec, string data,
