@@ -389,7 +389,8 @@ namespace Frida.Fruity {
 						break;
 				}
 
-				foreach (var item in XNU.query_active_tcp_connections ()) {
+				var connections = yield XNU.query_active_tcp_connections (cancellable);
+				foreach (var item in connections) {
 					if (item.family != IPV6)
 						continue;
 					if (!item.foreign_address.equal (tunnel_device_address))
@@ -427,21 +428,62 @@ namespace Frida.Fruity {
 	}
 
 	namespace XNU {
-		public PcbList query_active_tcp_connections () {
-			size_t size = 0;
-			Darwin.XNU.sysctlbyname ("net.inet.tcp.pcblist_n", null, &size);
+		public async PcbList query_active_tcp_connections (Cancellable? cancellable) throws Error, IOError {
+			var sysctl_output = new UnixInputStream (spawn_orphaned ({ "/usr/sbin/sysctl", "-b", "net.inet.tcp.pcblist_n" }), true);
 
-			var pcbs = new uint8[size];
-			Darwin.XNU.sysctlbyname ("net.inet.tcp.pcblist_n", pcbs, &size);
+			var pcbs = new MemoryOutputStream.resizable ();
+			try {
+				yield pcbs.splice_async (sysctl_output, CLOSE_SOURCE | CLOSE_TARGET, Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+				throw new Error.TRANSPORT ("Unable to query TCP connections: %s", e.message);
+			}
 
-			return new PcbList (pcbs);
+			return new PcbList (pcbs.steal_as_bytes ());
+		}
+
+		private int spawn_orphaned (string[] argv) throws Error {
+			int output[2];
+			try {
+				GLib.Unix.open_pipe (output, Posix.FD_CLOEXEC);
+			} catch (GLib.Error e) {
+				throw new Error.NOT_SUPPORTED ("Unable to open pipe: %s", e.message);
+			}
+
+			Posix.pid_t child = Posix.fork ();
+			if (child == 0) {
+				if (Posix.fork () == 0) {
+					await_adoption_by_launchd ();
+					Posix.dup2 (output[1], Posix.STDOUT_FILENO);
+					Posix.execv (argv[0], argv);
+				}
+				Posix._exit (0);
+			}
+
+			Posix.close (output[1]);
+
+			if (child == -1) {
+				var reason = Posix.strerror (Posix.errno);
+				Posix.close (output[0]);
+				throw new Error.NOT_SUPPORTED ("Unable to fork: %s", reason);
+			}
+
+			Posix.waitpid (child, null, 0);
+
+			return output[0];
+		}
+
+		private void await_adoption_by_launchd () {
+			while (Posix.getppid () != 1)
+				Posix.usleep (1000);
 		}
 
 		public sealed class PcbList {
-			private uint8[] pcbs;
+			private Bytes pcbs;
 
-			internal PcbList (owned uint8[] pcbs) {
-				this.pcbs = (owned) pcbs;
+			internal PcbList (Bytes pcbs) {
+				this.pcbs = pcbs;
 			}
 
 			public Iterator iterator () {
@@ -455,8 +497,9 @@ namespace Frida.Fruity {
 				internal Iterator (PcbList list) {
 					this.list = list;
 
-					var gen = (Darwin.XNU.InetPcbGeneration *) list.pcbs;
-					cursor = (InetItem *) ((uint8 *) list.pcbs + gen->length);
+					uint8 * pcbs = list.pcbs.get_data ();
+					var gen = (Darwin.XNU.InetPcbGeneration *) pcbs;
+					cursor = (InetItem *) (pcbs + gen->length);
 				}
 
 				public Item? next_value () {
