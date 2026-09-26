@@ -97,6 +97,7 @@ SECTIONS {
     _user_mode_thread = .; . += 8;
     _apply_to_existing_page_range = .; . += 8;
     _caches_clean_inval_pou = .; . += 8;
+    _do_madvise = .; . += 8;
     _fget_task = .; . += 8;
     _find_task_by_vpid = .; . += 8;
     ___start_BTF = .; . += 8;

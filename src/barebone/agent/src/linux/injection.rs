@@ -207,6 +207,9 @@ fn map_a_copy() -> Option<usize> {
         return None;
     }
 
+    #[cfg(target_arch = "aarch64")]
+    keep_the_copy_in_small_pages(base, size + ARENA_SIZE)?;
+
     give(base, own, shared)?;
 
     let rebased = native::alloc(private);
@@ -219,6 +222,13 @@ fn map_a_copy() -> Option<usize> {
     make_the_code_executable(base, shared)?;
 
     Some(base)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn keep_the_copy_in_small_pages(base: usize, size: usize) -> Option<()> {
+    let memory = borrowed_memory()? as *mut c_void;
+    unsafe { _do_madvise(memory, base, size, MADV_NOHUGEPAGE) };
+    Some(())
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -843,6 +853,8 @@ const PROT_WRITE: usize = 2;
 const PROT_EXEC: usize = 4;
 const MAP_PRIVATE: usize = 2;
 const MAP_ANONYMOUS: usize = 0x20;
+#[cfg(target_arch = "aarch64")]
+const MADV_NOHUGEPAGE: c_int = 15;
 const FIRST_ERROR_ADDRESS: usize = usize::MAX - 4095;
 const PAGE_SIZE: usize = 4096;
 const FOLL_WRITE: c_int = 1;
@@ -921,6 +933,8 @@ unsafe extern "C" {
     >;
     #[cfg(target_arch = "aarch64")]
     static _caches_clean_inval_pou: Option<unsafe extern "C" fn(usize, usize)>;
+    #[cfg(target_arch = "aarch64")]
+    static _do_madvise: unsafe extern "C" fn(*mut c_void, usize, usize, c_int) -> c_int;
 }
 
 #[cfg(target_arch = "x86")]
