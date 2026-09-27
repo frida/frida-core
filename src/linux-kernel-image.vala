@@ -154,6 +154,7 @@ namespace Frida {
 		private uint names_pos;
 		private uint64 relative_base;
 		private bool absolute;
+		private uint absolute_width = 8;
 		private bool percpu;
 
 		public static KallsymsTable load (uint8[] image) throws Error {
@@ -203,6 +204,39 @@ namespace Frida {
 				table.names_pos = counted_pos;
 				table.percpu = offsets_hold_absolute_percpu (table.raw, table.table_pos,
 					table.num_syms);
+				return table;
+			}
+
+			uint narrow_syms;
+			if (find_counted_addresses (table.raw, tokens_pos, out table.table_pos, out narrow_syms)) {
+				uint narrow_names, narrow_pos, narrow_stored;
+				uint32 narrow_longest;
+				scan_names (table.raw, table.tokens, tokens_pos, narrow_syms, out narrow_names,
+					out narrow_longest, out narrow_pos, out narrow_stored);
+				if (narrow_names != 0 && narrow_longest <= narrow_syms * 2) {
+					table.absolute = true;
+					table.absolute_width = 4;
+					table.num_syms = narrow_syms;
+					table.names_pos = narrow_names;
+					return table;
+				}
+			}
+
+			if (find_relative_offsets (table.raw, tokens_pos, table.tokens, out table.table_pos,
+					out table.num_syms, out table.relative_base, out table.names_pos)) {
+				table.absolute = false;
+				table.percpu = offsets_hold_absolute_percpu (table.raw, table.table_pos,
+					table.num_syms);
+				return table;
+			}
+
+			if (counted_syms != 0 && names_decode_fully (table.raw, counted_pos, counted_syms, table.tokens)
+					&& find_percpu_offsets (table.raw, counted_syms, counted_pos, table.tokens,
+						out table.table_pos, out table.relative_base)) {
+				table.absolute = false;
+				table.num_syms = counted_syms;
+				table.names_pos = counted_pos;
+				table.percpu = offsets_hold_absolute_percpu (table.raw, table.table_pos, counted_syms);
 				return table;
 			}
 
@@ -278,7 +312,7 @@ namespace Frida {
 
 		private uint64 address_at (uint i) {
 			if (absolute)
-				return read_u64 (raw, table_pos + i * 8);
+				return read_word (raw, table_pos + i * absolute_width, absolute_width);
 
 			int32 offset = read_i32 (raw, table_pos + i * 4);
 			if (!percpu)
@@ -583,6 +617,52 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Unable to locate kallsyms address table in kernel image");
 		}
 
+		private static bool find_counted_addresses (uint8[] raw, uint limit, out uint table_pos,
+				out uint num_syms) {
+			table_pos = 0;
+			num_syms = 0;
+
+			uint words = ((limit != 0) ? limit : raw.length) / 4;
+			uint i = 0;
+			while (i < words) {
+				uint64 first = (uint32) read_i32 (raw, i * 4);
+				if (first < KERNEL_ABS32_MIN) {
+					i++;
+					continue;
+				}
+
+				uint j = i + 1;
+				uint64 previous = first;
+				while (j < words) {
+					uint64 next = (uint32) read_i32 (raw, j * 4);
+					if (next < KERNEL_ABS32_MIN || next < previous)
+						break;
+					previous = next;
+					j++;
+				}
+
+				uint length = j - i;
+				if (length >= MIN_SYMS && count_follows (raw, j * 4, length)) {
+					table_pos = i * 4;
+					num_syms = length;
+					return true;
+				}
+				i = j;
+			}
+
+			return false;
+		}
+
+		private static bool count_follows (uint8[] raw, uint pos, uint count) {
+			for (uint pad = 0; pad <= COUNT_PADDING_MAX; pad += 4) {
+				if (pos + pad + 4 > raw.length)
+					return false;
+				if (((uint) (uint32) read_i32 (raw, pos + pad)) == count)
+					return true;
+			}
+			return false;
+		}
+
 		/**
 		 * The byte offset of the longest run of non-decreasing little-endian words (4 or 8 bytes)
 		 * whose values lie in [low, high), and its length in words.
@@ -631,6 +711,12 @@ namespace Frida {
 		}
 
 		private const uint64 KERNEL_VA_MIN = 0xffffff8000000000;
+		private const uint64 KERNEL_TEXT_VA_MIN = 0xffff800000000000;
+		private const uint64 KERNEL_ABS32_MIN = 0x80000000;
+		private const uint KERNEL_OFFSET_MAX = 0x8000000;
+		private const uint64 KERNEL_IMAGE_SPAN = 0x8000000;
+		private const uint64 MIN_KERNEL_TEXT_SPAN = 0x100000;
+		private const uint COUNT_PADDING_MAX = 12;
 
 		/**
 		 * kallsyms_names is the run of symbols the offsets index into, each one a length byte
@@ -750,7 +836,7 @@ namespace Frida {
 
 			for (uint pos = span + pad; pos + 8 <= n; pos += 8) {
 				uint64 candidate = read_u64 (raw, pos);
-				if ((candidate >> 32) != 0xffffffff || (candidate & 0xfff) != 0)
+				if (candidate < KERNEL_TEXT_VA_MIN || (candidate & 0x1fffff) != 0)
 					continue;
 
 				uint start = pos - span - pad;
@@ -765,6 +851,129 @@ namespace Frida {
 			}
 
 			return false;
+		}
+
+		private static bool find_relative_offsets (uint8[] raw, uint names_limit, string[] tokens,
+				out uint table_pos, out uint num_syms, out uint64 relative_base, out uint names_pos) {
+			table_pos = 0;
+			num_syms = 0;
+			relative_base = 0;
+			names_pos = 0;
+
+			uint words = raw.length / 4;
+			uint i = 0;
+			while (i < words) {
+				if (((uint) (uint32) read_i32 (raw, i * 4)) >= KERNEL_OFFSET_MAX) {
+					i++;
+					continue;
+				}
+
+				uint j = i + 1;
+				uint previous = (uint) (uint32) read_i32 (raw, i * 4);
+				while (j < words) {
+					uint offset = (uint) (uint32) read_i32 (raw, j * 4);
+					if (offset >= KERNEL_OFFSET_MAX || offset < previous)
+						break;
+					previous = offset;
+					j++;
+				}
+
+				uint length = j - i;
+				uint64 origin = (uint32) read_i32 (raw, j * 4);
+				if (length >= MIN_SYMS && origin >= KERNEL_ABS32_MIN
+						&& offsets_climb (raw, i * 4, length, origin)
+						&& locate_named_region (raw, names_limit, length, tokens, out names_pos)) {
+					table_pos = i * 4;
+					num_syms = length;
+					relative_base = origin;
+					return true;
+				}
+				i = j;
+			}
+
+			return false;
+		}
+
+		private static bool locate_named_region (uint8[] raw, uint limit, uint num_syms, string[] tokens,
+				out uint names_pos) {
+			names_pos = 0;
+
+			uint words = ((limit != 0) ? limit : raw.length) / 4;
+			for (uint i = 0; i < words; i++) {
+				if (((uint) (uint32) read_i32 (raw, i * 4)) != num_syms)
+					continue;
+
+				for (uint pad = 4; pad <= 8; pad += 4) {
+					uint pos = i * 4 + pad;
+					if (names_decode_fully (raw, pos, num_syms, tokens)) {
+						names_pos = pos;
+						return true;
+					}
+				}
+			}
+
+			return false;
+		}
+
+		private static bool names_decode_fully (uint8[] raw, uint pos, uint num_syms, string[] tokens) {
+			uint p = pos;
+			for (uint i = 0; i != num_syms; i++) {
+				string name;
+				uint next = try_decode_symbol (raw, p, tokens, out name);
+				if (next == 0 || name.length < 2)
+					return false;
+				p = next;
+			}
+			return true;
+		}
+
+		private static bool find_percpu_offsets (uint8[] raw, uint num_syms, uint names_pos, string[] tokens,
+				out uint table_pos, out uint64 relative_base) {
+			table_pos = 0;
+			relative_base = 0;
+
+			uint span = num_syms * 4;
+			uint n = raw.length;
+			for (uint pos = span; pos + 4 <= n; pos += 4) {
+				uint64 candidate = (uint32) read_i32 (raw, pos);
+				if (candidate < KERNEL_ABS32_MIN || (candidate & 0xfff) != 0)
+					continue;
+
+				uint start = pos - span;
+				if (!offsets_climb (raw, start, num_syms, candidate))
+					continue;
+				if (!anchors_resolve (raw, tokens, names_pos, num_syms, start, candidate))
+					continue;
+
+				table_pos = start;
+				relative_base = candidate;
+				return true;
+			}
+
+			return false;
+		}
+
+		private static bool anchors_resolve (uint8[] raw, string[] tokens, uint names_pos, uint num_syms,
+				uint table_pos, uint64 relative_base) {
+			var probe = new KallsymsTable ();
+			probe.raw = raw;
+			probe.tokens = tokens;
+			probe.names_pos = names_pos;
+			probe.num_syms = num_syms;
+			probe.table_pos = table_pos;
+			probe.relative_base = relative_base;
+			probe.absolute = false;
+			probe.percpu = offsets_hold_absolute_percpu (raw, table_pos, num_syms);
+
+			uint64 text;
+			if (!probe.try_find ("_text", out text))
+				return false;
+			uint64 end;
+			if (!probe.try_find ("_end", out end))
+				return false;
+			if (text < relative_base || text >= relative_base + KERNEL_IMAGE_SPAN)
+				return false;
+			return end > text + MIN_KERNEL_TEXT_SPAN && end <= text + KERNEL_IMAGE_SPAN;
 		}
 
 		private static bool offsets_climb (uint8[] raw, uint table_pos, uint num_syms, uint64 origin) {
@@ -782,7 +991,7 @@ namespace Frida {
 				previous = address;
 			}
 
-			return previous > origin;
+			return previous > origin && previous - origin < KERNEL_IMAGE_SPAN;
 		}
 
 		private static bool offsets_hold_absolute_percpu (uint8[] raw, uint table_pos, uint num_syms) {
@@ -801,13 +1010,15 @@ namespace Frida {
 			for (uint i = 0; i != NAMES_SAMPLE_SIZE; i++) {
 				string name;
 				uint next = try_decode_symbol (raw, p, tokens, out name);
-				if (next == 0 || name.length < 3 || name.length > 80)
+				if (next == 0 || name.length < 3 || name.length > MAX_SYMBOL_NAME_LENGTH)
 					return false;
 				seen.add (name);
 				p = next;
 			}
 			return seen.size >= (NAMES_SAMPLE_SIZE * 9) / 10;
 		}
+
+		private const uint MAX_SYMBOL_NAME_LENGTH = 512;
 
 		private const uint NAMES_SAMPLE_SIZE = 200;
 
