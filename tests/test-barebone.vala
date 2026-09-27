@@ -884,6 +884,12 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/ARM/reads-thread-registers-in-live-guest", () => {
+			var h = new Harness ((h) => linux_reads_thread_registers_in_live_guest.begin (h as Harness,
+				"LINUX_ARM"));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/ARM64/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_ARM64"));
 			h.run ();
@@ -5013,6 +5019,55 @@ FAIL: %s
 			while (messages.size < 2)
 				yield h.process_events ();
 			assert_true (messages[1].contains (pid.to_string ()));
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		} finally {
+			try {
+				yield manager.close (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		h.done ();
+	}
+
+	private async void linux_reads_thread_registers_in_live_guest (Harness h, string prefix) {
+		var config = linux_config_from_environment (h, prefix);
+		if (config == null)
+			return;
+
+		var manager = new DeviceManager ();
+		try {
+			var device = yield manager.add_barebone_device (config);
+
+			var options = new SpawnOptions ();
+			options.argv = { "/bin/busybox", "sleep", "3600" };
+			uint pid = yield device.spawn ("/bin/busybox", options, null);
+			printerr ("\nSPAWNED pid %u\n", pid);
+
+			var session = yield device.attach (pid, null, null);
+			var script = yield session.create_script ("""
+				let observed = null;
+				Process.attachThreadObserver({
+					onAdded(thread) { if (observed === null) observed = thread.id; },
+					onRemoved() {}
+				});
+				const d = Process.findThreadById(observed);
+				send(['snap', observed, d === null ? 'null' : { state: d.state, regs: d.context !== undefined ? Object.keys(d.context.toJSON()).length : 0 }]);
+			""", null, null);
+
+			var messages = new Gee.ArrayList<string> ();
+			script.message.connect ((json, data) => {
+				messages.add (json);
+			});
+			yield script.load (null);
+			while (messages.is_empty)
+				yield h.process_events ();
+			printerr ("\nSNAP %s\n", messages[0]);
+
+			assert_true (!messages[0].contains ("null"));
+
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();

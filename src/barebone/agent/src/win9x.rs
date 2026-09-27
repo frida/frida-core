@@ -1347,6 +1347,7 @@ mod kernel {
 
         Some(ThreadInfo {
             id,
+            state: None,
             cpu_state: with_registers.then(|| super::thread_cpu_state(thread)).flatten(),
         })
     }
@@ -1731,6 +1732,7 @@ pub fn enumerate_threads_of(pid: u32, found: &mut dyn FnMut(ThreadInfo), with_re
     enumerate_thread_handles_of(pid, &mut |thread, id| {
         found(ThreadInfo {
             id,
+            state: None,
             cpu_state: with_registers.then(|| thread_cpu_state(thread)).flatten(),
         });
     });
@@ -1782,6 +1784,7 @@ fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo), with_registers
     while thread != 0 {
         found(ThreadInfo {
             id: thread,
+            state: None,
             cpu_state: with_registers.then(|| thread_cpu_state(thread)).flatten(),
         });
 

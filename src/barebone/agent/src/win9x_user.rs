@@ -271,6 +271,7 @@ fn find_thread(id: u32, with_registers: bool) -> Option<crate::kernel::ThreadInf
 
     Some(crate::kernel::ThreadInfo {
         id,
+        state: None,
         cpu_state: with_registers.then(|| crate::win9x::thread_cpu_state(thread)).flatten(),
     })
 }

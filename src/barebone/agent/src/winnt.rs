@@ -1778,7 +1778,7 @@ pub fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
 
 fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
     let Some(layout) = thread_layout() else {
-        found(ThreadInfo { id: current_thread_id() as u32, cpu_state: None });
+        found(ThreadInfo { id: current_thread_id() as u32, state: None, cpu_state: None });
         return;
     };
 
@@ -1787,6 +1787,7 @@ fn enumerate_ring_zero_threads(found: &mut dyn FnMut(ThreadInfo), with_registers
     walk_threads_of(ours, &mut |thread| unsafe {
         found(ThreadInfo {
             id: (_PsGetThreadId)(thread),
+            state: None,
             cpu_state: with_registers.then(|| capture(thread)).flatten(),
         });
     });
@@ -3589,6 +3590,7 @@ mod kernel {
 
         Some(ThreadInfo {
             id,
+            state: None,
             cpu_state: with_registers.then(|| unsafe { super::capture(thread) }).flatten(),
         })
     }

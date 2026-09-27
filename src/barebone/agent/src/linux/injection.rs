@@ -420,6 +420,38 @@ const TOP_OF_STACK_PADDING: usize = 8;
 #[cfg(not(any(target_arch = "x86", target_arch = "arm")))]
 const TOP_OF_STACK_PADDING: usize = 0;
 
+pub fn thread_state(id: u32) -> Option<crate::bindings::GumThreadState> {
+    use crate::bindings::{
+        GumThreadState_GUM_THREAD_HALTED, GumThreadState_GUM_THREAD_RUNNING,
+        GumThreadState_GUM_THREAD_STOPPED, GumThreadState_GUM_THREAD_UNINTERRUPTIBLE,
+        GumThreadState_GUM_THREAD_WAITING,
+    };
+
+    let task = native::task_for_thread(id) as usize;
+    if task == 0 {
+        return None;
+    }
+    let at = field_offset("task_struct", "__state")?;
+    let running = unsafe { ((task + at) as *const u32).read() };
+
+    Some(if running == 0 {
+        GumThreadState_GUM_THREAD_RUNNING
+    } else if running & TASK_UNINTERRUPTIBLE != 0 {
+        GumThreadState_GUM_THREAD_UNINTERRUPTIBLE
+    } else if running & TASK_INTERRUPTIBLE != 0 {
+        GumThreadState_GUM_THREAD_WAITING
+    } else if running & (TASK_STOPPED | TASK_TRACED) != 0 {
+        GumThreadState_GUM_THREAD_STOPPED
+    } else {
+        GumThreadState_GUM_THREAD_HALTED
+    })
+}
+
+const TASK_INTERRUPTIBLE: u32 = 0x0001;
+const TASK_UNINTERRUPTIBLE: u32 = 0x0002;
+const TASK_STOPPED: u32 = 0x0004;
+const TASK_TRACED: u32 = 0x0008;
+
 fn registers_of_thread(id: u32) -> Option<usize> {
     let task = native::task_for_thread(id) as usize;
     if task == 0 {

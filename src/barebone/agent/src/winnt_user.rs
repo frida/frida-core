@@ -1237,6 +1237,7 @@ fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo), with_regi
     for_each_thread(&mut |id| {
         found(crate::kernel::ThreadInfo {
             id,
+            state: None,
             cpu_state: with_registers.then(|| registers_of(id)).flatten(),
         });
         true
@@ -1254,6 +1255,7 @@ fn find_thread(id: u32, with_registers: bool) -> Option<crate::kernel::ThreadInf
 
     found.then(|| crate::kernel::ThreadInfo {
         id,
+        state: None,
         cpu_state: with_registers.then(|| registers_of(id)).flatten(),
     })
 }

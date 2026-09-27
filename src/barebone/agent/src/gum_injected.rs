@@ -12,7 +12,8 @@ use crate::{
         _GumRwxSupport_GUM_RWX_NONE, GArray,
         GumDebugSymbolDetails, GumFoundRangeFunc, GumFoundThreadFunc, GumMemoryRange,
         GumCpuContext, GumModuleRegistry, GumPageProtection, GumRangeDetails, GumRwxSupport,
-        GumThreadDetails, GumThreadFlags, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT, GumThreadId,
+        GumThreadDetails, GumThreadFlags, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT,
+        GumThreadFlags_GUM_THREAD_FLAGS_STATE, GumThreadId,
         GumThreadRegistry, gum_barebone_register_thread,
         gum_barebone_unregister_thread,
         g_array_append_vals, g_array_new, g_object_unref, g_strdup, g_variant_get_boolean,
@@ -716,6 +717,11 @@ pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_
     kernel::enumerate_threads(&mut |thread| {
         let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
         details.id = thread.id as GumThreadId;
+
+        if let Some(state) = thread.state {
+            details.flags |= GumThreadFlags_GUM_THREAD_FLAGS_STATE;
+            details.state = state;
+        }
 
         if let Some(cpu) = thread.cpu_state {
             details.flags |= GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT;

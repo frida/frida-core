@@ -37,6 +37,7 @@ pub type ThreadEntry = unsafe extern "C" fn(parameter: *mut c_void, wait_result:
 
 pub struct ThreadInfo {
     pub id: u32,
+    pub state: Option<crate::bindings::GumThreadState>,
     pub cpu_state: Option<CpuState>,
 }
 

@@ -273,7 +273,7 @@ fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), _with_registers: bool) {
 
     for step in 0..counted as usize {
         let thread = unsafe { threads.add(step).read() };
-        found(ThreadInfo { id: thread, cpu_state: state_of(thread) });
+        found(ThreadInfo { id: thread, state: None, cpu_state: state_of(thread) });
     }
 
     unsafe { (asking.give_back)(task, threads as u64, (counted as u64) * 4) };
