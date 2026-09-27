@@ -1600,6 +1600,8 @@ fn process_incoming_message(variant: *mut GVariant) {
                 kernel::list_applications_when_the_loop_can(request_id);
                 None
             }
+            #[cfg(feature = "linux-injected")]
+            FridaCommand::EnumerateApplications => Some(handle_enumerate_no_applications()),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateShortcuts => Some(handle_enumerate_shortcuts()),
             #[cfg(any(
@@ -1866,6 +1868,16 @@ fn what_is_installed() -> HandlerResponse {
         g_variant_type_free(list_type);
         g_variant_type_free(application_type);
 
+        HandlerResponse::success(list)
+    }
+}
+
+#[cfg(feature = "linux-injected")]
+fn handle_enumerate_no_applications() -> HandlerResponse {
+    unsafe {
+        let list_type = g_variant_type_new(c"a(sss)".as_ptr() as *const gchar);
+        let list = g_variant_builder_end(g_variant_builder_new(list_type));
+        g_variant_type_free(list_type);
         HandlerResponse::success(list)
     }
 }
