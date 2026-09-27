@@ -16,14 +16,20 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
 
     let mut path = Vec::new();
     path.resize(PATH_MAX, 0u8);
+    let mut cmdline = Vec::new();
+    cmdline.resize(CMDLINE_MAX, 0u8);
 
     for task in take_task_snapshot(layout) {
-        found(ProcessInfo {
-            id: task.id,
-            name: task.name.as_ptr(),
-            path: path_of(task.executable, &mut path),
-            command_line: ptr::null(),
-        });
+        if !task.memory.is_null() {
+            let name = program_name(task.memory, &mut cmdline).unwrap_or(task.name.as_ptr());
+            found(ProcessInfo {
+                id: task.id,
+                name,
+                path: path_of(task.executable, &mut path),
+                command_line: ptr::null(),
+            });
+            unsafe { _mmput(task.memory) };
+        }
 
         if !task.executable.is_null() {
             unsafe { _fput(task.executable) };
@@ -69,6 +75,7 @@ struct Task {
     id: u32,
     name: [u8; NAME_SIZE + 1],
     executable: *mut c_void,
+    memory: *mut c_void,
 }
 
 fn take_task_snapshot(layout: &Layout) -> Vec<Task> {
@@ -94,6 +101,7 @@ fn read_task(task: usize, layout: &Layout) -> Task {
         id: read_id(task, layout),
         name,
         executable: unsafe { _get_task_exe_file(task as *mut c_void) },
+        memory: unsafe { _get_task_mm(task as *mut c_void) },
     }
 }
 
@@ -102,6 +110,34 @@ fn read_id(task: usize, layout: &Layout) -> u32 {
     read_kernel(task + layout.id, &mut id);
 
     u32::from_ne_bytes(id)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn program_name(memory: *mut c_void, buffer: &mut [u8]) -> Option<*const u8> {
+    let start = read_kernel_word(memory as usize + super::layout::field_offset("mm_struct", "arg_start")?)?;
+    if start == 0 {
+        return None;
+    }
+
+    let room = buffer.len() - 1;
+    unsafe { _kthread_use_mm(memory) };
+    let missed = unsafe {
+        ___arch_copy_from_user(buffer.as_mut_ptr() as *mut c_void, start as *const c_void, room)
+    };
+    unsafe { _kthread_unuse_mm(memory) };
+
+    let read = room - missed;
+    let end = buffer[..read].iter().position(|byte| *byte == 0)?;
+    if end == 0 {
+        return None;
+    }
+
+    Some(buffer.as_ptr())
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn program_name(_memory: *mut c_void, _buffer: &mut [u8]) -> Option<*const u8> {
+    None
 }
 
 fn path_of(executable: *mut c_void, buffer: &mut [u8]) -> *const u8 {
@@ -503,6 +539,7 @@ fn write_unlock_tasklist(flags: usize) {
 const IDLE_TASK_NAME: &[u8] = b"swapper";
 const NAME_SIZE: usize = 16;
 const PATH_MAX: usize = 4096;
+const CMDLINE_MAX: usize = 512;
 
 const MAX_TASK_SIZE: usize = 16 * 1024;
 const READ_CHUNK: usize = 64;
@@ -545,6 +582,17 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _copy_from_kernel_nofault:
         unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> c_long;
+    #[cfg(not(target_arch = "x86"))]
+    static _get_task_mm: unsafe extern "C" fn(*mut c_void) -> *mut c_void;
+    #[cfg(not(target_arch = "x86"))]
+    static _mmput: unsafe extern "C" fn(*mut c_void);
+    #[cfg(target_arch = "aarch64")]
+    static _kthread_use_mm: unsafe extern "C" fn(*mut c_void);
+    #[cfg(target_arch = "aarch64")]
+    static _kthread_unuse_mm: unsafe extern "C" fn(*mut c_void);
+    #[cfg(target_arch = "aarch64")]
+    static ___arch_copy_from_user:
+        unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
 }
 
 #[cfg(target_arch = "x86")]
@@ -567,4 +615,8 @@ unsafe extern "C" {
     fn _file_path(a0: *mut c_void, a1: *mut c_char, a2: c_int) -> *const c_char;
     #[link_name = "frida_k_fput"]
     fn _fput(a0: *mut c_void);
+    #[link_name = "frida_k_get_task_mm"]
+    fn _get_task_mm(a0: *mut c_void) -> *mut c_void;
+    #[link_name = "frida_k_mmput"]
+    fn _mmput(a0: *mut c_void);
 }
