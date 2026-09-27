@@ -1299,6 +1299,11 @@ fn kernel_half_has_work() -> bool {
     }
 
     #[cfg(feature = "linux-injected")]
+    if kernel::a_copy_is_asking() {
+        return true;
+    }
+
+    #[cfg(feature = "linux-injected")]
     if kernel::a_copy_has_something_to_say() || kernel::a_spawn_is_held() {
         return true;
     }
@@ -1331,6 +1336,9 @@ fn serve_the_kernel_half() {
 
     #[cfg(all(feature = "linux-injected", target_arch = "aarch64"))]
     kernel::serve_executable_requests();
+
+    #[cfg(feature = "linux-injected")]
+    kernel::serve_register_requests();
 
     #[cfg(feature = "linux-injected")]
     kernel::report_what_the_copies_hit();

@@ -392,11 +392,13 @@ pub unsafe extern "C" fn frida_cb_user(argument: *mut c_void) -> c_int {
 // What a task starts with in userland is at the top of the kernel stack it was given.
 #[cfg(target_arch = "aarch64")]
 fn registers_of_this_task(places: &Places) -> usize {
-    let stack = unsafe {
-        ((native::current_task() as usize + places.stack_of_task) as *const usize).read()
-    };
+    registers_of_task(native::current_task() as usize, places)
+}
 
-    stack + STACK_SPAN - places.size
+fn registers_of_task(task: usize, places: &Places) -> usize {
+    let stack = unsafe { ((task + places.stack_of_task) as *const usize).read() };
+
+    stack + STACK_SPAN - TOP_OF_STACK_PADDING - places.size
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -417,6 +419,241 @@ const TOP_OF_STACK_PADDING: usize = 8;
 
 #[cfg(not(any(target_arch = "x86", target_arch = "arm")))]
 const TOP_OF_STACK_PADDING: usize = 0;
+
+fn registers_of_thread(id: u32) -> Option<usize> {
+    let task = native::task_for_thread(id) as usize;
+    if task == 0 {
+        return None;
+    }
+    let mut places = describe_registers()?;
+    if places.stack_of_task == 0 {
+        places.stack_of_task = field_offset("task_struct", "stack")?;
+    }
+    Some(registers_of_task(task, &places))
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn capture_registers(id: u32) -> Option<crate::kernel::CpuState> {
+    let regs = registers_of_thread(id)?;
+    let general = regs as *const u64;
+
+    let mut x = [0u64; 29];
+    for slot in 0..29 {
+        x[slot] = unsafe { general.add(slot).read() };
+    }
+
+    Some(crate::kernel::CpuState {
+        x,
+        fp: unsafe { general.add(29).read() },
+        lr: unsafe { general.add(30).read() },
+        sp: unsafe { general.add(31).read() },
+        pc: unsafe { general.add(32).read() },
+        nzcv: unsafe { general.add(33).read() },
+    })
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn capture_registers(id: u32) -> Option<crate::kernel::CpuState> {
+    let regs = registers_of_thread(id)?;
+    let at = |slot: usize| unsafe { ((regs + slot * 8) as *const u64).read() };
+
+    Some(crate::kernel::CpuState {
+        r15: at(0),
+        r14: at(1),
+        r13: at(2),
+        r12: at(3),
+        rbp: at(4),
+        rbx: at(5),
+        r11: at(6),
+        r10: at(7),
+        r9: at(8),
+        r8: at(9),
+        rax: at(10),
+        rcx: at(11),
+        rdx: at(12),
+        rsi: at(13),
+        rdi: at(14),
+        rip: at(16),
+        rsp: at(19),
+    })
+}
+
+#[cfg(target_arch = "x86")]
+pub fn capture_registers(id: u32) -> Option<crate::kernel::CpuState> {
+    let regs = registers_of_thread(id)?;
+    let at = |slot: usize| unsafe { ((regs + slot * 4) as *const u32).read() };
+
+    Some(crate::kernel::CpuState {
+        ebx: at(0),
+        ecx: at(1),
+        edx: at(2),
+        esi: at(3),
+        edi: at(4),
+        ebp: at(5),
+        eax: at(6),
+        eip: at(12),
+        esp: at(15),
+    })
+}
+
+#[cfg(target_arch = "arm")]
+pub fn capture_registers(id: u32) -> Option<crate::kernel::CpuState> {
+    let regs = registers_of_thread(id)?;
+    let at = |slot: usize| unsafe { ((regs + slot * 4) as *const u32).read() };
+
+    let mut r = [0u32; 8];
+    for slot in 0..8 {
+        r[slot] = at(slot);
+    }
+
+    Some(crate::kernel::CpuState {
+        pc: at(15),
+        sp: at(13),
+        cpsr: at(16),
+        r,
+        r8: at(8),
+        r9: at(9),
+        r10: at(10),
+        r11: at(11),
+        r12: at(12),
+        lr: at(14),
+    })
+}
+
+#[cfg(target_arch = "aarch64")]
+pub const REGISTER_WORDS: usize = 34;
+#[cfg(target_arch = "x86_64")]
+pub const REGISTER_WORDS: usize = 17;
+#[cfg(target_arch = "x86")]
+pub const REGISTER_WORDS: usize = 9;
+#[cfg(target_arch = "arm")]
+pub const REGISTER_WORDS: usize = 17;
+
+#[cfg(target_arch = "aarch64")]
+pub fn words_from_registers(state: &crate::kernel::CpuState) -> [u64; REGISTER_WORDS] {
+    let mut words = [0u64; REGISTER_WORDS];
+    words[..29].copy_from_slice(&state.x);
+    words[29] = state.fp;
+    words[30] = state.lr;
+    words[31] = state.sp;
+    words[32] = state.pc;
+    words[33] = state.nzcv;
+    words
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn registers_from_words(words: &[u64; REGISTER_WORDS]) -> crate::kernel::CpuState {
+    let mut x = [0u64; 29];
+    x.copy_from_slice(&words[..29]);
+    crate::kernel::CpuState {
+        x,
+        fp: words[29],
+        lr: words[30],
+        sp: words[31],
+        pc: words[32],
+        nzcv: words[33],
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn words_from_registers(state: &crate::kernel::CpuState) -> [u64; REGISTER_WORDS] {
+    [
+        state.rip, state.r15, state.r14, state.r13, state.r12, state.r11, state.r10, state.r9,
+        state.r8, state.rdi, state.rsi, state.rbp, state.rsp, state.rbx, state.rdx, state.rcx,
+        state.rax,
+    ]
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn registers_from_words(words: &[u64; REGISTER_WORDS]) -> crate::kernel::CpuState {
+    crate::kernel::CpuState {
+        rip: words[0],
+        r15: words[1],
+        r14: words[2],
+        r13: words[3],
+        r12: words[4],
+        r11: words[5],
+        r10: words[6],
+        r9: words[7],
+        r8: words[8],
+        rdi: words[9],
+        rsi: words[10],
+        rbp: words[11],
+        rsp: words[12],
+        rbx: words[13],
+        rdx: words[14],
+        rcx: words[15],
+        rax: words[16],
+    }
+}
+
+#[cfg(target_arch = "x86")]
+pub fn words_from_registers(state: &crate::kernel::CpuState) -> [u64; REGISTER_WORDS] {
+    [
+        state.eip as u64,
+        state.edi as u64,
+        state.esi as u64,
+        state.ebp as u64,
+        state.esp as u64,
+        state.ebx as u64,
+        state.edx as u64,
+        state.ecx as u64,
+        state.eax as u64,
+    ]
+}
+
+#[cfg(target_arch = "x86")]
+pub fn registers_from_words(words: &[u64; REGISTER_WORDS]) -> crate::kernel::CpuState {
+    crate::kernel::CpuState {
+        eip: words[0] as u32,
+        edi: words[1] as u32,
+        esi: words[2] as u32,
+        ebp: words[3] as u32,
+        esp: words[4] as u32,
+        ebx: words[5] as u32,
+        edx: words[6] as u32,
+        ecx: words[7] as u32,
+        eax: words[8] as u32,
+    }
+}
+
+#[cfg(target_arch = "arm")]
+pub fn words_from_registers(state: &crate::kernel::CpuState) -> [u64; REGISTER_WORDS] {
+    let mut words = [0u64; REGISTER_WORDS];
+    for slot in 0..8 {
+        words[slot] = state.r[slot] as u64;
+    }
+    words[8] = state.r8 as u64;
+    words[9] = state.r9 as u64;
+    words[10] = state.r10 as u64;
+    words[11] = state.r11 as u64;
+    words[12] = state.r12 as u64;
+    words[13] = state.sp as u64;
+    words[14] = state.lr as u64;
+    words[15] = state.pc as u64;
+    words[16] = state.cpsr as u64;
+    words
+}
+
+#[cfg(target_arch = "arm")]
+pub fn registers_from_words(words: &[u64; REGISTER_WORDS]) -> crate::kernel::CpuState {
+    let mut r = [0u32; 8];
+    for slot in 0..8 {
+        r[slot] = words[slot] as u32;
+    }
+    crate::kernel::CpuState {
+        pc: words[15] as u32,
+        sp: words[13] as u32,
+        cpsr: words[16] as u32,
+        r,
+        r8: words[8] as u32,
+        r9: words[9] as u32,
+        r10: words[10] as u32,
+        r11: words[11] as u32,
+        r12: words[12] as u32,
+        lr: words[14] as u32,
+    }
+}
 
 #[cfg(target_arch = "x86_64")]
 unsafe fn write_selectors(registers: usize, _places: &Places) {
@@ -569,6 +806,24 @@ fn make_a_range_executable(task: usize, base: usize, size: usize) -> bool {
     unsafe { _kthread_unuse_mm(memory) };
     unsafe { _mmput(memory) };
     granted
+}
+
+pub fn a_copy_is_asking() -> bool {
+    unsafe { placements() }.values().any(|placed| {
+        let arena = Arena::at(placed.arena);
+        arena.wants_registers().is_some() || arena.wants_executable().is_some()
+    })
+}
+
+pub fn serve_register_requests() {
+    for placed in unsafe { placements() }.values() {
+        let arena = Arena::at(placed.arena);
+        let Some(thread) = arena.wants_registers() else {
+            continue;
+        };
+        let words = capture_registers(thread).map(|state| words_from_registers(&state));
+        arena.deliver_registers(words.as_ref().map(|w| w.as_slice()));
+    }
 }
 
 pub fn report_what_the_copies_hit() {

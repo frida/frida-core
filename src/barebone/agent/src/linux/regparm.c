@@ -34,6 +34,15 @@ void * frida_k_fget_task (void * a0, unsigned int a1)
   return ((fn_t) _fget_task) (a0, a1);
 }
 
+extern void * _find_task_by_vpid;
+
+void * frida_k_find_task_by_vpid (unsigned int a0)
+{
+  typedef void * (__attribute__((regparm(3))) * fn_t) (unsigned int);
+
+  return ((fn_t) _find_task_by_vpid) (a0);
+}
+
 extern void * _kernel_read;
 
 long frida_k_kernel_read (void * a0, void * a1, unsigned long a2, void * a3)

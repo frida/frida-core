@@ -257,7 +257,7 @@ struct Region {
     size: u64,
 }
 
-fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo)) {
+fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), _with_registers: bool) {
     let Some(asking) = crate::xnu_libsystem::asking_about_threads() else {
         return;
     };
@@ -285,7 +285,7 @@ fn find_thread(id: u32) -> Option<ThreadInfo> {
         if thread.id == id {
             found = Some(thread);
         }
-    });
+    }, true);
 
     found
 }

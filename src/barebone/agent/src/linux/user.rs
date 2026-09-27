@@ -230,6 +230,21 @@ fn ask_the_kernel_half_to_make_executable(address: u64, size: usize) -> bool {
     arena.executable_was_granted()
 }
 
+pub fn ask_the_kernel_half_for_registers(id: u32) -> Option<crate::kernel::CpuState> {
+    let arena = Arena::at(unsafe { ARENA });
+    let seq = arena.request_registers(id);
+    arena.tell_the_kernel_half();
+    while !arena.registers_settled(seq) {
+        yield_now();
+    }
+    if !arena.registers_were_captured() {
+        return None;
+    }
+    let mut words = [0u64; super::injection::REGISTER_WORDS];
+    arena.captured_registers(&mut words);
+    Some(super::injection::registers_from_words(&words))
+}
+
 pub fn map_writable(size: usize) -> *mut u8 {
     map(size, READABLE | WRITABLE)
 }

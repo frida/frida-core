@@ -65,6 +65,10 @@ pub fn take_the_file_of(task: *mut c_void, descriptor: u32) -> *mut c_void {
     unsafe { _fget_task(task, descriptor) }
 }
 
+pub fn task_for_thread(id: u32) -> *mut c_void {
+    unsafe { _find_task_by_vpid(id) }
+}
+
 pub fn let_the_file_go(file: *mut c_void) {
     unsafe { super::processes::let_go_of(file) };
 }

@@ -97,6 +97,7 @@ SECTIONS {
     _get_user_pages_remote = .; . += 4;
     _user_mode_thread = .; . += 4;
     _fget_task = .; . += 4;
+    _find_task_by_vpid = .; . += 4;
     ___start_BTF = .; . += 4;
     ___stop_BTF = .; . += 4;
     _call_usermodehelper_setup = .; . += 4;

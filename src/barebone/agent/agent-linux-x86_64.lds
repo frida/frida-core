@@ -106,6 +106,7 @@ SECTIONS {
     __copy_from_user = .; . += 8;
     _access_process_vm = .; . += 8;
     _fget_task = .; . += 8;
+    _find_task_by_vpid = .; . += 8;
     _init_net = .; . += 8;
     _sock_create_kern = .; . += 8;
     _kernel_connect = .; . += 8;

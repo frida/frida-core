@@ -11,8 +11,9 @@ use crate::{
         _GumPageProtection_GUM_PAGE_WRITE, _GumRwxSupport_GUM_RWX_FULL,
         _GumRwxSupport_GUM_RWX_NONE, GArray,
         GumDebugSymbolDetails, GumFoundRangeFunc, GumFoundThreadFunc, GumMemoryRange,
-        GumModuleRegistry, GumPageProtection, GumRangeDetails, GumRwxSupport, GumThreadDetails,
-        GumThreadFlags, GumThreadId, GumThreadRegistry, gum_barebone_register_thread,
+        GumCpuContext, GumModuleRegistry, GumPageProtection, GumRangeDetails, GumRwxSupport,
+        GumThreadDetails, GumThreadFlags, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT, GumThreadId,
+        GumThreadRegistry, gum_barebone_register_thread,
         gum_barebone_unregister_thread,
         g_array_append_vals, g_array_new, g_object_unref, g_strdup, g_variant_get_boolean,
         g_variant_get_uint64, g_variant_new, g_variant_new_fixed_array, g_variant_type_free,
@@ -663,7 +664,7 @@ pub extern "C" fn gum_barebone_on_registry_deactivating(_registry: *mut GumModul
 pub extern "C" fn gum_barebone_on_thread_registry_activating(registry: *mut GumThreadRegistry) {
     unsafe { THREAD_REGISTRY = registry };
 
-    kernel::enumerate_threads(&mut |thread| announce_thread(thread.id));
+    kernel::enumerate_threads(&mut |thread| announce_thread(thread.id), false);
 }
 
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
@@ -706,17 +707,91 @@ static mut THREAD_REGISTRY: *mut GumThreadRegistry = ptr::null_mut();
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_enumerate_threads(func: GumFoundThreadFunc, user_data: gpointer,
-        _flags: GumThreadFlags) {
+        flags: GumThreadFlags) {
     let Some(emit) = func else {
         return;
     };
 
+    let with_registers = (flags & GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT) != 0;
     kernel::enumerate_threads(&mut |thread| {
         let mut details: GumThreadDetails = unsafe { core::mem::zeroed() };
         details.id = thread.id as GumThreadId;
 
+        if let Some(cpu) = thread.cpu_state {
+            details.flags |= GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT;
+            details.cpu_context = cpu_context_from(&cpu);
+        }
+
         unsafe { emit(&details, user_data) };
-    });
+    }, with_registers);
+}
+
+#[cfg(target_arch = "aarch64")]
+fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
+    GumCpuContext {
+        pc: state.pc,
+        sp: state.sp,
+        nzcv: state.nzcv,
+        x: state.x,
+        fp: state.fp,
+        lr: state.lr,
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
+    GumCpuContext {
+        rip: state.rip,
+        r15: state.r15,
+        r14: state.r14,
+        r13: state.r13,
+        r12: state.r12,
+        r11: state.r11,
+        r10: state.r10,
+        r9: state.r9,
+        r8: state.r8,
+        rdi: state.rdi,
+        rsi: state.rsi,
+        rbp: state.rbp,
+        rsp: state.rsp,
+        rbx: state.rbx,
+        rdx: state.rdx,
+        rcx: state.rcx,
+        rax: state.rax,
+        xmm: ptr::null_mut(),
+    }
+}
+
+#[cfg(target_arch = "x86")]
+fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
+    GumCpuContext {
+        eip: state.eip,
+        edi: state.edi,
+        esi: state.esi,
+        ebp: state.ebp,
+        esp: state.esp,
+        ebx: state.ebx,
+        edx: state.edx,
+        ecx: state.ecx,
+        eax: state.eax,
+        xmm: ptr::null_mut(),
+    }
+}
+
+#[cfg(target_arch = "arm")]
+fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
+    GumCpuContext {
+        cpsr: state.cpsr,
+        pc: state.pc,
+        sp: state.sp,
+        r8: state.r8,
+        r9: state.r9,
+        r10: state.r10,
+        r11: state.r11,
+        r12: state.r12,
+        lr: state.lr,
+        r: state.r,
+    }
 }
 
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]

@@ -1,3 +1,4 @@
+use core::mem::size_of;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 // What the kernel half and the copy leave for each other. Both reach it by its own address, so
@@ -155,6 +156,46 @@ impl Arena {
         self.word(EXEC_ACK).store(seq, Ordering::Release);
     }
 
+    pub fn request_registers(&self, thread: u32) -> u32 {
+        self.word(REG_TID).store(thread, Ordering::Release);
+        let seq = self.word(REG_SEQ).load(Ordering::Relaxed).wrapping_add(1).max(1);
+        self.word(REG_SEQ).store(seq, Ordering::Release);
+        seq
+    }
+
+    pub fn registers_settled(&self, seq: u32) -> bool {
+        self.word(REG_ACK).load(Ordering::Acquire) == seq
+    }
+
+    pub fn registers_were_captured(&self) -> bool {
+        self.word(REG_OK).load(Ordering::Acquire) != 0
+    }
+
+    pub fn captured_registers(&self, into: &mut [u64]) {
+        for (slot, word) in into.iter_mut().enumerate() {
+            *word = self.read_wide(REG_STATE + slot * size_of::<u64>());
+        }
+    }
+
+    pub fn wants_registers(&self) -> Option<u32> {
+        let seq = self.word(REG_SEQ).load(Ordering::Acquire);
+        if seq == 0 || seq == self.word(REG_ACK).load(Ordering::Acquire) {
+            return None;
+        }
+        Some(self.word(REG_TID).load(Ordering::Acquire))
+    }
+
+    pub fn deliver_registers(&self, state: Option<&[u64]>) {
+        if let Some(words) = state {
+            for (slot, word) in words.iter().enumerate() {
+                self.leave(REG_STATE + slot * size_of::<u64>(), *word);
+            }
+        }
+        self.word(REG_OK).store(state.is_some() as u32, Ordering::Release);
+        let seq = self.word(REG_SEQ).load(Ordering::Acquire);
+        self.word(REG_ACK).store(seq, Ordering::Release);
+    }
+
     fn read_wide(&self, offset: usize) -> u64 {
         unsafe { ((self.begins + offset) as *const u64).read_volatile() }
     }
@@ -191,3 +232,9 @@ const EXEC_ACK: usize = 436;
 const EXEC_ADDR: usize = 440;
 const EXEC_SIZE: usize = 448;
 const EXEC_OK: usize = 456;
+
+const REG_SEQ: usize = 460;
+const REG_ACK: usize = 464;
+const REG_TID: usize = 468;
+const REG_OK: usize = 472;
+const REG_STATE: usize = 480;

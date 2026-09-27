@@ -21,7 +21,7 @@ pub struct Primitives {
     pub page_size: fn() -> usize,
     pub cache_shape: fn() -> u64,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, usize, u32)),
-    pub enumerate_threads: fn(&mut dyn FnMut(crate::kernel::ThreadInfo)),
+    pub enumerate_threads: fn(&mut dyn FnMut(crate::kernel::ThreadInfo), bool),
     pub find_thread: fn(u32) -> Option<crate::kernel::ThreadInfo>,
     pub modify_thread: fn(u32, &mut dyn FnMut(&mut crate::kernel::CpuState)) -> bool,
 }
@@ -121,8 +121,8 @@ pub fn enumerate_ranges(found: &mut dyn FnMut(u64, usize, u32)) {
     (primitives().enumerate_ranges)(found);
 }
 
-pub fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {
-    (primitives().enumerate_threads)(found);
+pub fn enumerate_threads(found: &mut dyn FnMut(crate::kernel::ThreadInfo), with_registers: bool) {
+    (primitives().enumerate_threads)(found, with_registers);
 }
 
 pub fn find_thread(id: u32) -> Option<crate::kernel::ThreadInfo> {
@@ -141,7 +141,7 @@ fn kernel_protect(_address: u64, _size: usize, _may: u32) -> bool {
     false
 }
 
-fn kernel_enumerate_threads(_found: &mut dyn FnMut(crate::kernel::ThreadInfo)) {}
+fn kernel_enumerate_threads(_found: &mut dyn FnMut(crate::kernel::ThreadInfo), _with_registers: bool) {}
 
 fn kernel_find_thread(_id: u32) -> Option<crate::kernel::ThreadInfo> {
     None
