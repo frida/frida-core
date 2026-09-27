@@ -905,6 +905,11 @@ namespace Frida.BareboneTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Barebone/KernelImage/mines-symbols", () => {
+			var h = new Harness ((h) => kernel_image_mines_symbols.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Barebone/IA32/agent-runs-in-live-guest", () => {
 			var h = new Harness ((h) => linux_agent_runs_in_live_guest.begin (h as Harness, "LINUX_X86"));
 			h.run ();
@@ -6539,6 +6544,60 @@ FAIL: %s
 		return config;
 	}
 
+	private async void kernel_image_mines_symbols (Harness h) {
+		string? path = Environment.get_variable ("FRIDA_TEST_KERNEL_IMAGE");
+		if (path == null) {
+			h.done ();
+			return;
+		}
+
+		var timer = new Timer ();
+		LinuxKernelImage image;
+		try {
+			image = LinuxKernelImage.open (path);
+		} catch (GLib.Error e) {
+			printerr ("\n[mine] %s\n  FAIL: %s\n", path, e.message);
+			assert_not_reached ();
+		}
+		double elapsed = timer.elapsed ();
+
+		string[] wanted;
+		string? list_path = Environment.get_variable ("FRIDA_TEST_KERNEL_SYMBOLS");
+		if (list_path != null) {
+			string text;
+			try {
+				FileUtils.get_contents (list_path, out text);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+			var names = new Gee.ArrayList<string> ();
+			foreach (unowned string line in text.split ("\n")) {
+				string name = line.strip ();
+				if (name.length != 0)
+					names.add (name);
+			}
+			wanted = names.to_array ();
+		} else {
+			wanted = {
+				"_text", "do_exit", "memcpy", "vsnprintf", "schedule", "kfree", "mutex_lock", "panic"
+			};
+		}
+
+		uint resolved = 0;
+		var dump = new StringBuilder ();
+		foreach (unowned string name in wanted) {
+			uint64 address;
+			if (image.try_find_symbol (name, out address)) {
+				resolved++;
+				dump.append_printf ("%s 0x%016llx\n", name, address);
+			}
+		}
+		printerr ("\n[mine] %s open=%.3fs resolved=%u/%u\n%s", path, elapsed, resolved, wanted.length, dump.str);
+		assert_true (resolved >= 6);
+
+		h.done ();
+	}
+
 	private BareboneConfig? linux_config_from_environment (Frida.Test.AsyncHarness h, string prefix) {
 		string? agent_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_AGENT");
 		string? qmp_path = Environment.get_variable (@"FRIDA_TEST_$(prefix)_QMP");
@@ -6558,10 +6617,14 @@ FAIL: %s
 			config.connection.flavor = ANDROID_EMULATOR;
 		}
 		config.kernel = LINUX;
+		bool mine_image = Environment.get_variable (@"FRIDA_TEST_$(prefix)_MINE") != null;
 		try {
-			config.image = new BareboneLinuxKernelConfig () {
-				kernel = LinuxSystemMap.open (system_map),
-			};
+			var linux_kernel = new BareboneLinuxKernelConfig ();
+			if (mine_image)
+				linux_kernel.kernel = LinuxKernelImage.open (system_map);
+			else
+				linux_kernel.kernel = LinuxSystemMap.open (system_map);
+			config.image = linux_kernel;
 		} catch (Error e) {
 			h.done ();
 			return null;
