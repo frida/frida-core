@@ -56,6 +56,8 @@ namespace Frida.GDB {
 		private size_t max_packet_size = 1024;
 		private bool binary_writes_supported = false;
 		private AckMode ack_mode = SEND_ACKS;
+		public string? solo_thread_id = null;
+		public bool suppress_solo = false;
 		internal bool bulk_registers = true;
 		internal bool breakpoints_provided_externally = false;
 		internal string? selected_thread_id = null;
@@ -337,6 +339,15 @@ namespace Frida.GDB {
 			}
 
 			change_state (RUNNING);
+
+			if (solo_thread_id != null) {
+				var command = make_packet_builder_sized (1)
+					.append ("vCont;c:")
+					.append (solo_thread_id)
+					.build ();
+				write_bytes (command);
+				return;
+			}
 
 			var command = make_packet_builder_sized (1)
 				.append_c ('c')

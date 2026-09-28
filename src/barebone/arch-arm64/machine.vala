@@ -1024,7 +1024,16 @@ namespace Frida.Barebone {
 
 			yield thread.write_registers (regs, cancellable);
 
-			DebuggerThread landed = yield run_until_pc (landing_zone, cancellable);
+			var gdb = debugger as GDB.Client;
+			if (gdb != null && !gdb.suppress_solo)
+				gdb.solo_thread_id = thread.id;
+			DebuggerThread landed = thread;
+			try {
+				landed = yield run_until_pc (landing_zone, cancellable);
+			} finally {
+				if (gdb != null)
+					gdb.solo_thread_id = null;
+			}
 			uint64 retval = yield landed.read_register ("x0", cancellable);
 
 			yield restore_registers (thread, landed, saved_regs, cancellable);

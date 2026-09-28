@@ -108,19 +108,16 @@ namespace Frida.Barebone {
 
 		private Machine machine;
 		private uint64 kernel_base;
-		private Allocator allocator;
 		private SymbolInfo schedule;
 		private SymbolInfo? panic;
 		private Gee.Map<string, SymbolInfo> symbols;
-		private Allocation? current_probe_stub;
 		private Gee.Map<uint64?, Bytes> cfi_checks = new Gee.HashMap<uint64?, Bytes> (
 			Numeric.uint64_hash, Numeric.uint64_equal);
 
-		public LinuxKernelFlavor (Machine machine, uint64 kernel_base, Allocator allocator,
+		public LinuxKernelFlavor (Machine machine, uint64 kernel_base,
 				Gee.Map<string, SymbolInfo> symbols) throws Error {
 			this.machine = machine;
 			this.kernel_base = kernel_base;
-			this.allocator = allocator;
 			this.symbols = symbols;
 
 			schedule = symbols["schedule"];
@@ -184,10 +181,6 @@ namespace Frida.Barebone {
 				yield relax_cfi_enforcement (cancellable);
 		}
 
-		// The task caught at schedule() has set itself for sleep; a call made in its context that
-		// then sleeps (module_alloc, kmalloc reclaim) would be dequeued there and never resumed, so
-		// it is woken back to runnable first. current lives in SP_EL0, which the stub does not expose
-		// as a register, so it is read by invoking a two-instruction stub that moves it into x0.
 		private async void keep_current_runnable (Cancellable? cancellable) throws Error, IOError {
 			uint64 wake_up_process = symbol_address ("wake_up_process");
 			if (wake_up_process == 0)
@@ -213,37 +206,36 @@ namespace Frida.Barebone {
 
 		private async uint64 read_current_task (Cancellable? cancellable) throws Error, IOError {
 			if (machine is X64Machine)
-				return yield read_per_cpu_current (cancellable);
-			return yield probe_current (cancellable);
+				return yield read_per_cpu_task ("current_task", cancellable);
+			if (symbols["__entry_task"] != null)
+				return yield read_per_cpu_task ("__entry_task", cancellable);
+			return yield read_current_from_stack (cancellable);
 		}
 
-		private async uint64 read_per_cpu_current (Cancellable? cancellable) throws Error, IOError {
+		private async bool task_is_idle (uint64 task, Cancellable? cancellable) throws Error, IOError {
+			if (task == symbol_address ("init_task"))
+				return true;
+			if (symbols["idle_threads"] == null)
+				return false;
+			return task == yield read_per_cpu_task ("idle_threads", cancellable);
+		}
+
+		private async uint64 read_per_cpu_task (string symbol, Cancellable? cancellable) throws Error, IOError {
+			uint64 variable = (machine is X64Machine) ? percpu_offset (symbol) : symbol_address (symbol);
 			uint64 cpu = uint64.parse (machine.debugger.exception.thread.id, 16) - 1;
 			var slot = yield machine.read_virtual (symbol_address ("__per_cpu_offset") + cpu * 8, 8,
 				cancellable);
 			uint64 per_cpu_base = read_u64 (slot.get_data (), 0);
 
-			var task = yield machine.read_virtual (per_cpu_base + percpu_offset ("current_task"), 8,
-				cancellable);
+			var task = yield machine.read_virtual (per_cpu_base + variable, 8, cancellable);
 			return read_u64 (task.get_data (), 0);
 		}
 
-		private async uint64 probe_current (Cancellable? cancellable) throws Error, IOError {
-			current_probe_stub = yield allocator.allocate (8, 8, cancellable);
-			uint64 stub = current_probe_stub.virtual_address;
-			var code = new uint8[8];
-			write_u32 (code, 0, 0xd5384100u);	// mrs x0, sp_el0
-			write_u32 (code, 4, 0xd65f03c0u);	// ret
-			yield machine.write_virtual (stub, code, cancellable);
-
-			return yield machine.invoke (stub, {}, cancellable);
-		}
-
-		private static void write_u32 (uint8[] buffer, uint offset, uint32 value) {
-			buffer[offset + 0] = (uint8) (value >> 0);
-			buffer[offset + 1] = (uint8) (value >> 8);
-			buffer[offset + 2] = (uint8) (value >> 16);
-			buffer[offset + 3] = (uint8) (value >> 24);
+		private async uint64 read_current_from_stack (Cancellable? cancellable) throws Error, IOError {
+			uint64 sp = yield machine.debugger.exception.thread.read_register ("sp", cancellable);
+			uint64 thread_info = sp & ~(ARM64_THREAD_SIZE - 1);
+			var task = yield machine.read_virtual (thread_info + ARM64_THREAD_INFO_TASK_OFFSET, 8, cancellable);
+			return read_u64 (task.get_data (), 0);
 		}
 
 		private uint64 symbol_address (string name) {
@@ -292,7 +284,10 @@ namespace Frida.Barebone {
 					continue;
 				if (yield interrupts_masked (exception.thread, cancellable))
 					continue;
-				ready = yield system_is_running (system_state_address, cancellable);
+				if (!(yield system_is_running (system_state_address, cancellable)))
+					continue;
+				uint64 current = yield read_current_task (cancellable);
+				ready = !(yield task_is_idle (current, cancellable));
 			} while (!ready);
 
 			yield bp.remove (cancellable);
@@ -353,7 +348,7 @@ namespace Frida.Barebone {
 			uint32 state = 0;
 			for (uint i = 0; i != 4; i++)
 				state |= ((uint32) data[i]) << (8 * i);
-			return state > SYSTEM_SCHEDULING;
+			return state > SYSTEM_BOOTING;
 		}
 
 		// Linux on arm64 runs with FIQ permanently masked, so only the IRQ mask distinguishes a
@@ -373,12 +368,14 @@ namespace Frida.Barebone {
 		private const uint8[] SPIN_IN_PLACE = { 0xeb, 0xfe };
 		private const uint PARK_MAX_ATTEMPTS = 200;
 		private const uint PARK_INTERVAL_MS = 10;
-		private const uint32 SYSTEM_SCHEDULING = 1;
+		private const uint32 SYSTEM_BOOTING = 0;
 		private const uint64 IRQ_MASK_BIT = 1ULL << 7;
 		private const uint64 INTERRUPT_ENABLE_BIT = 1ULL << 9;
 		private const uint LINUX_REGISTER_ARGUMENTS = 3;
 		private const uint64 TASK_VA_MIN = 0xffffffc000000000;
 		private const uint64 TASK_VA_MAX = 0xffffffc100000000;
+		private const uint64 ARM64_THREAD_SIZE = 0x4000;
+		private const uint64 ARM64_THREAD_INFO_TASK_OFFSET = 16;
 	}
 
 	internal sealed class Win9xKernelFlavor : Object, KernelFlavor {

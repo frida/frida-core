@@ -176,7 +176,7 @@ namespace Frida.Barebone {
 			} else if (kind == LINUX) {
 				if (kernel_base == 0)
 					throw new Error.NOT_SUPPORTED ("Missing kernel_base");
-				flavor = new LinuxKernelFlavor (machine, kernel_base, allocator, symbols);
+				flavor = new LinuxKernelFlavor (machine, kernel_base, symbols);
 			} else if (kind == WIN9X) {
 				flavor = new Win9xKernelFlavor (machine, symbols);
 			} else if (kind == WINNT) {
@@ -316,11 +316,19 @@ namespace Frida.Barebone {
 			}
 
 			progress ("Starting the agent", 0.75);
-			yield machine.invoke (start_address, {
-					config_allocation.virtual_address,
-					config_allocation.size
-				},
-				cancellable);
+			var start_gdb = machine.debugger as GDB.Client;
+			if (start_gdb != null)
+				start_gdb.suppress_solo = true;
+			try {
+				yield machine.invoke (start_address, {
+						config_allocation.virtual_address,
+						config_allocation.size
+					},
+					cancellable);
+			} finally {
+				if (start_gdb != null)
+					start_gdb.suppress_solo = false;
+			}
 
 			if (x64 != null)
 				x64.call_stack = 0;
