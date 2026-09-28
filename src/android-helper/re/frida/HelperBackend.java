@@ -645,7 +645,7 @@ public class HelperBackend {
 					"Unable to find application with identifier '" + pkgName + "'" +
 					((uid != 0) ? " belonging to uid " + uid : ""));
 		} catch (Throwable e) {
-			return error("NOT_SUPPORTED", e.toString());
+			return error("NOT_SUPPORTED", describe(e));
 		}
 	}
 
@@ -697,10 +697,13 @@ public class HelperBackend {
 				intent.setClassName(pkgName, activity);
 			}
 
-			if (mStartActivityAsUser != null)
-				startActivityViaAtm(intent, uid, pkgName);
-			else
-				startActivityViaAm(intent, uid, pkgName);
+			String callingPackage = ourCallingPackage();
+
+			int code = (mStartActivityAsUser != null)
+					? startActivityViaAtm(intent, uid, callingPackage)
+					: startActivityViaAm(intent, uid, callingPackage);
+			if (code < 0 || code > 3)
+				return error("NOT_SUPPORTED", "Activity launch was refused (start code " + code + ")");
 
 			return okVoid();
 		} catch (NameNotFoundException e) {
@@ -708,11 +711,18 @@ public class HelperBackend {
 					"Unable to find application with identifier '" + pkgName + "'" +
 					((uid != 0) ? " belonging to uid " + uid : ""));
 		} catch (Throwable e) {
-			return error("NOT_SUPPORTED", e.toString());
+			return error("NOT_SUPPORTED", describe(e));
 		}
 	}
 
-	private void startActivityViaAtm(Intent intent, int uid, String callingPackage) throws Exception {
+	private String ourCallingPackage() {
+		String[] packages = mPackageManager.getPackagesForUid(Process.myUid());
+		if (packages != null && packages.length > 0)
+			return packages[0];
+		return "com.android.shell";
+	}
+
+	private int startActivityViaAtm(Intent intent, int uid, String callingPackage) throws Exception {
 		if (mStartActivityAsUser == null)
 			throw new UnsupportedOperationException("startActivityAsUser unavailable");
 
@@ -729,10 +739,11 @@ public class HelperBackend {
 		args[mStartActivityCallingPackageIndex] = callingPackage;
 		args[mStartActivityUserIdIndex] = (uid != 0) ? uid : 0;
 
-		mStartActivityAsUser.invoke(mActivityTaskManager, args);
+		Object result = mStartActivityAsUser.invoke(mActivityTaskManager, args);
+		return (result instanceof Integer) ? (Integer) result : 0;
 	}
 
-	private void startActivityViaAm(Intent intent, int uid, String callingPackage) throws Exception {
+	private int startActivityViaAm(Intent intent, int uid, String callingPackage) throws Exception {
 		if (mStartActivityLegacy == null)
 			throw new UnsupportedOperationException("legacy startActivity unavailable");
 
@@ -753,7 +764,8 @@ public class HelperBackend {
 		if (mLegacyStartUserIdIndex != -1)
 			args[mLegacyStartUserIdIndex] = (uid != 0) ? uid : 0;
 
-		mStartActivityLegacy.invoke(mActivityManagerService, args);
+		Object result = mStartActivityLegacy.invoke(mActivityManagerService, args);
+		return (result instanceof Integer) ? (Integer) result : 0;
 	}
 
 	private JSONArray sendBroadcast(JSONArray request) throws JSONException {
@@ -782,7 +794,7 @@ public class HelperBackend {
 					"Unable to find application with identifier '" + pkgName + "'" +
 					((uid != 0) ? " belonging to uid " + uid : ""));
 		} catch (Throwable e) {
-			return error("NOT_SUPPORTED", e.toString());
+			return error("NOT_SUPPORTED", describe(e));
 		}
 	}
 
@@ -810,7 +822,7 @@ public class HelperBackend {
 					"Unable to find application with identifier '" + pkgName + "'" +
 					((uid != 0) ? " belonging to uid " + uid : ""));
 		} catch (Throwable e) {
-			return error("NOT_SUPPORTED", e.toString());
+			return error("NOT_SUPPORTED", describe(e));
 		}
 	}
 
@@ -837,7 +849,7 @@ public class HelperBackend {
 
 			return okBoolean(false);
 		} catch (Throwable e) {
-			return error("NOT_SUPPORTED", e.toString());
+			return error("NOT_SUPPORTED", describe(e));
 		}
 	}
 
@@ -867,6 +879,17 @@ public class HelperBackend {
 		r.put(code);
 		r.put(message);
 		return r;
+	}
+
+	private static String describe(Throwable t) {
+		Throwable cause = t;
+		while (cause instanceof InvocationTargetException && cause.getCause() != null)
+			cause = cause.getCause();
+
+		String message = cause.getMessage();
+		return (message != null)
+				? cause.getClass().getName() + ": " + message
+				: cause.getClass().getName();
 	}
 
 	private String getFrontmostPackageName() {

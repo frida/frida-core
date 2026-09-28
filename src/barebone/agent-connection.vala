@@ -26,6 +26,7 @@ namespace Frida.Barebone {
 		private uint64 kernel_base;
 		private Machine machine;
 		private Allocator allocator;
+		private Allocator data_allocator;
 		private Gee.List<ModuleInfo> kernel_modules;
 		private Gee.List<SymbolInfo> kernel_symbols;
 		private Gee.Map<string, uint64?> kernel_notes;
@@ -55,8 +56,8 @@ namespace Frida.Barebone {
 
 		public AgentConnection (BareboneInjectedAgentConfig agent_config, BareboneImageConfig? image_config,
 				BareboneKernelKind kernel_kind, KernelRelocation? relocation, uint64 kernel_base, Machine machine,
-				Allocator allocator, Gee.List<ModuleInfo> kernel_modules, Gee.List<SymbolInfo> kernel_symbols,
-				Gee.Map<string, uint64?> kernel_notes) {
+				Allocator allocator, Allocator? data_allocator, Gee.List<ModuleInfo> kernel_modules,
+				Gee.List<SymbolInfo> kernel_symbols, Gee.Map<string, uint64?> kernel_notes) {
 			this.agent_config = agent_config;
 			this.image_config = image_config;
 			this.kernel_kind = kernel_kind;
@@ -64,6 +65,7 @@ namespace Frida.Barebone {
 			this.kernel_base = kernel_base;
 			this.machine = machine;
 			this.allocator = allocator;
+			this.data_allocator = data_allocator ?? allocator;
 			this.kernel_modules = kernel_modules;
 			this.kernel_symbols = kernel_symbols;
 			this.kernel_notes = kernel_notes;
@@ -296,12 +298,12 @@ namespace Frida.Barebone {
 			config_builder.close ();
 
 			var config_blob = config_builder.end ().get_data_as_bytes ();
-			config_allocation = yield allocator.allocate (config_blob.get_size (), 8, cancellable);
+			config_allocation = yield data_allocator.allocate (config_blob.get_size (), 8, cancellable);
 
 			yield machine.write_virtual (config_allocation.virtual_address, config_blob.get_data (),
 				cancellable);
 
-			yield protect_unless_already (machine, allocator, config_allocation.virtual_address,
+			yield protect_unless_already (machine, data_allocator, config_allocation.virtual_address,
 				config_allocation.size, READ | WRITE, cancellable);
 
 			var ia32 = machine as IA32Machine;
@@ -739,6 +741,14 @@ namespace Frida.Barebone {
 			yield execute_command (Command.GATE_SPAWNS, new Variant.boolean (on), cancellable);
 		}
 
+		public async void arm_named_spawn (string name, Cancellable? cancellable) throws Error, IOError {
+			yield execute_command (Command.ARM_NAMED_SPAWN, new Variant.string (name), cancellable);
+		}
+
+		public async void disarm_named_spawn (string name, Cancellable? cancellable) throws Error, IOError {
+			yield execute_command (Command.DISARM_NAMED_SPAWN, new Variant.string (name), cancellable);
+		}
+
 		public async uint spawn_process (uint helper_pid, string command_line, Cancellable? cancellable)
 				throws Error, IOError {
 			return yield ask_for_a_spawn (helper_pid, new Variant.string (command_line), cancellable);
@@ -803,7 +813,7 @@ namespace Frida.Barebone {
 				selected.add ("u", pid);
 			var request = new Variant.tuple ({ new Variant.boolean (include_icons), selected.end () });
 			var response = yield execute_command (Command.ENUMERATE_PROCESSES, request, cancellable);
-			if (!response.check_format_string ("a(usssaay)", false))
+			if (!response.check_format_string ("a(usssusuxaay)", false))
 				throw new Error.PROTOCOL ("Invalid enumerate_processes response format");
 
 			var processes = new HostProcessInfo[response.n_children ()];
@@ -818,9 +828,21 @@ namespace Frida.Barebone {
 					unowned string command_line = entry.get_child_value (2).get_string ();
 					if (command_line != "")
 						parameters["argv"] = argv_from_command_line (command_line);
+
+					parameters["uid"] = new Variant.uint32 (entry.get_child_value (4).get_uint32 ());
+
+					unowned string user = entry.get_child_value (5).get_string ();
+					if (user != "")
+						parameters["user"] = user;
+
+					parameters["ppid"] = new Variant.int64 (entry.get_child_value (6).get_uint32 ());
+
+					int64 started = entry.get_child_value (7).get_int64 ();
+					if (started != 0)
+						parameters["started"] = new DateTime.from_unix_utc (started).format_iso8601 ();
 				}
 				if (include_icons)
-					parameters["icons"] = icons_from_resources (entry.get_child_value (4));
+					parameters["icons"] = icons_from_resources (entry.get_child_value (8));
 
 				unowned string description = entry.get_child_value (3).get_string ();
 				string name = (description != "") ? description : basename_of (path);
@@ -1350,6 +1372,8 @@ namespace Frida.Barebone {
 			GATE_SPAWNS = 17,
 			ENUMERATE_APPLICATIONS = 18,
 			ENUMERATE_SHORTCUTS = 19,
+			ARM_NAMED_SPAWN = 20,
+			DISARM_NAMED_SPAWN = 21,
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129,
 			SPAWN_ADDED = 130,

@@ -242,7 +242,6 @@ namespace Frida {
 		}
 
 		private Promise<AndroidHelperClient>? helper_client_request;
-		private Droidy.ShellSession? helper_shell;
 
 		private Gee.HashMap<uint, Droidy.Injector.GadgetDetails> gadgets =
 			new Gee.HashMap<uint, Droidy.Injector.GadgetDetails> ();
@@ -302,15 +301,9 @@ namespace Frida {
 			if (helper_client_request != null) {
 				AndroidHelperClient? helper = yield try_get_helper_client (cancellable);
 				if (helper != null) {
-					var transport = (AndroidHelperStreamTransport) helper.transport;
-					on_helper_stream_transport_closed (transport);
-					yield transport.close (cancellable);
+					on_helper_transport_closed (helper.transport);
+					yield helper.close (cancellable);
 				}
-			}
-
-			if (helper_shell != null) {
-				yield helper_shell.close (cancellable);
-				helper_shell = null;
 			}
 
 			io_cancellable.cancel ();
@@ -1026,78 +1019,14 @@ namespace Frida {
 			}
 			helper_client_request = new Promise<AndroidHelperClient> ();
 
-			Droidy.ShellSession? shell = null;
 			try {
-				string device_serial = device_details.serial;
-				string instance_id = Uuid.string_random ().replace ("-", "");
-				string helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
-
-				var helper_dex = new MemoryInputStream.from_bytes (
-					new Bytes.static (Frida.Data.Android.get_helper_dex_blob ().data));
-
-				var helper_meta = new Droidy.FileMetadata ();
-				helper_meta.mode = 0100644;
-				helper_meta.time_modified = new DateTime.now_utc ();
-
-				yield Droidy.FileSync.send (helper_dex, helper_meta, helper_path, device_serial, cancellable);
-
-				shell = new Droidy.ShellSession ();
-				var output = new StringBuilder ();
-				bool waiting = false;
-				var output_handler = shell.output.connect ((pipe, bytes) => {
-					if (pipe == STDOUT) {
-						unowned string str = (string) bytes.get_data ();
-						output.append (str);
-						if (waiting)
-							get_helper_client.callback ();
-					}
-				});
-				try {
-					yield shell.open (device_serial, cancellable);
-
-					shell.send_command (("CLASSPATH=%s app_process " +
-							"/data/local/tmp " +
-							"--nice-name=re.frida.helper " +
-							"re.frida.Helper " +
-							"%s; " +
-							"rm -f %s; " +
-							"echo BYE.").printf (helper_path, instance_id, helper_path));
-
-					while (!output.str.has_prefix ("READY.\n")) {
-						waiting = true;
-						yield;
-						waiting = false;
-
-						if (output.str.has_prefix ("BYE.\n"))
-							throw new Error.NOT_SUPPORTED ("Unable to start helper");
-					}
-				} finally {
-					shell.disconnect (output_handler);
-				}
-
-				var client = yield Droidy.Client.open (cancellable);
-				try {
-					yield client.request ("host:transport:" + device_serial, cancellable);
-					yield client.request_protocol_change ("localabstract:/frida-helper-" + instance_id, cancellable);
-				} catch (GLib.Error e) {
-					client.close.begin ();
-					throw e;
-				}
-
-				var transport = new AndroidHelperStreamTransport (client.stream);
-				transport.closed.connect (on_helper_stream_transport_closed);
-
-				var helper = new AndroidHelperClient (transport);
-
-				helper_shell = shell;
+				var helper = yield AndroidHelperClient.open (device_details.serial, cancellable);
+				helper.transport.closed.connect (on_helper_transport_closed);
 
 				helper_client_request.resolve (helper);
 
 				return helper;
 			} catch (GLib.Error e) {
-				if (shell != null)
-					shell.close.begin (io_cancellable);
-
 				var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
 
 				helper_client_request.reject (api_error);
@@ -1106,14 +1035,9 @@ namespace Frida {
 			}
 		}
 
-		private void on_helper_stream_transport_closed (AndroidHelperStreamTransport transport) {
-			transport.closed.disconnect (on_helper_stream_transport_closed);
+		private void on_helper_transport_closed (AndroidHelperTransport transport) {
+			transport.closed.disconnect (on_helper_transport_closed);
 			helper_client_request = null;
-
-			if (helper_shell != null) {
-				helper_shell.close.begin (io_cancellable);
-				helper_shell = null;
-			}
 		}
 
 		private class GadgetEntry : Object {

@@ -307,11 +307,21 @@ namespace Frida {
 					arm_machine.kernel_page_table = kernel_base + swapper.offset;
 			}
 
+			Barebone.Allocator? data_allocator = null;
+			if (config.kernel == LINUX) {
+				BareboneTargetFunctionsAllocatorConfig? dac = infer_linux_data_allocator_config (kernel_symbols,
+					kernel_base);
+				if (dac != null)
+					data_allocator = new Barebone.TargetFunctionsAllocator (machine, page_size,
+						Gum.PageProtection.READ | Gum.PageProtection.WRITE, dac,
+						dac.alloc_function.address, dac.free_function.address);
+			}
+
 			Barebone.AgentConnection? agent_connection = null;
 			var agent_config = config.agent as BareboneInjectedAgentConfig;
 			if (agent_config != null) {
 				agent_connection = new Barebone.AgentConnection (agent_config, config.image, config.kernel, relocation,
-					kernel_base, machine, allocator, kernel_modules, kernel_symbols, kernel_notes);
+					kernel_base, machine, allocator, data_allocator, kernel_modules, kernel_symbols, kernel_notes);
 				agent_connection.progress.connect ((status, fraction) => connecting (status, 0.2 + 0.8 * fraction));
 				yield agent_connection.open (cancellable);
 			}
@@ -320,7 +330,11 @@ namespace Frida {
 
 			var services = new Barebone.Services (machine, allocator, interceptor);
 
-			return new BareboneHostSession (agent_connection, services);
+			uint emulator_process = (config.connection.flavor == BareboneStubFlavor.ANDROID_EMULATOR)
+				? config.connection.pid
+				: 0;
+
+			return new BareboneHostSession (agent_connection, services, emulator_process);
 		}
 
 		private async BareboneHostSession attach_to_resident_agent (BareboneResidentTransportConfig transport,
@@ -347,7 +361,7 @@ namespace Frida {
 
 			var connection = yield Barebone.AgentConnection.open_resident (stream, cancellable);
 
-			return new BareboneHostSession (connection, null);
+			return new BareboneHostSession (connection, null, 0);
 #endif
 		}
 
@@ -401,6 +415,29 @@ namespace Frida {
 			return new BareboneTargetFunctionsAllocatorConfig () {
 				alloc_function = new BareboneNonNullMemoryAddress ("allocator.alloc_function", kernel_base + alloc.offset),
 				free_function = new BareboneNonNullMemoryAddress ("allocator.free_function", kernel_base + free.offset),
+				alloc_arguments = alloc_arguments,
+				free_arguments = free_arguments,
+			};
+		}
+
+		private static BareboneTargetFunctionsAllocatorConfig? infer_linux_data_allocator_config (
+				Gee.List<Barebone.SymbolInfo> kernel_symbols, uint64 kernel_base) {
+			Barebone.SymbolInfo? alloc = find_symbol (kernel_symbols, "vmalloc");
+			Barebone.SymbolInfo? free = find_symbol (kernel_symbols, "vfree");
+			if (alloc == null || free == null)
+				return null;
+
+			var alloc_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			alloc_arguments.add (new BareboneCallArgument (SIZE, 0));
+
+			var free_arguments = new Gee.ArrayList<BareboneCallArgument> ();
+			free_arguments.add (new BareboneCallArgument (ADDRESS, 0));
+
+			return new BareboneTargetFunctionsAllocatorConfig () {
+				alloc_function = new BareboneNonNullMemoryAddress ("data_allocator.alloc_function",
+					kernel_base + alloc.offset),
+				free_function = new BareboneNonNullMemoryAddress ("data_allocator.free_function",
+					kernel_base + free.offset),
 				alloc_arguments = alloc_arguments,
 				free_arguments = free_arguments,
 			};
@@ -521,6 +558,16 @@ namespace Frida {
 			construct;
 		}
 
+		public uint android_emulator_pid {
+			get;
+			construct;
+		}
+
+		private ProcessEnumerator? host_processes;
+		private Promise<AndroidHelperClient>? android_helper_request;
+		private Gee.HashMap<string, Variant>? android_app_icons;
+		private Gee.HashMap<string, Promise<uint>> android_spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
+
 		private Gee.Map<uint, uint> injected_agents = new Gee.HashMap<uint, uint> ();
 		private uint spawn_helper_pid = 0;
 		private Gee.HashMap<uint, HeldSpawn> pending_spawn = new Gee.HashMap<uint, HeldSpawn> ();
@@ -540,8 +587,9 @@ namespace Frida {
 		private Gee.Map<AgentSessionId?, BareboneAgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, BareboneAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
-		public BareboneHostSession (Barebone.AgentConnection? connection, Barebone.Services? services) {
-			Object (connection: connection, services: services);
+		public BareboneHostSession (Barebone.AgentConnection? connection, Barebone.Services? services,
+				uint android_emulator_pid) {
+			Object (connection: connection, services: services, android_emulator_pid: android_emulator_pid);
 		}
 
 		construct {
@@ -562,6 +610,15 @@ namespace Frida {
 				}
 
 				yield release_injected_agent (session.pid);
+			}
+
+			if (android_helper_request != null) {
+				try {
+					var helper = yield android_helper_request.future.wait_async (cancellable);
+					on_android_helper_closed (helper.transport);
+					yield helper.close (cancellable);
+				} catch (GLib.Error e) {
+				}
 			}
 
 			if (connection != null)
@@ -598,6 +655,12 @@ namespace Frida {
 				throw_not_supported ();
 
 			var query = ApplicationQueryOptions._deserialize (options);
+
+			if (android_emulator_pid != 0) {
+				var helper = yield get_android_helper (cancellable);
+				return yield helper.enumerate_applications (query, cancellable);
+			}
+
 			var selected = new Gee.HashSet<string> ();
 			query.enumerate_selected_identifiers (identifier => {
 				selected.add (identifier);
@@ -679,7 +742,112 @@ namespace Frida {
 			query.enumerate_selected_pids (pid => {
 				pids += pid;
 			});
-			return yield connection.enumerate_processes (query.scope, pids, cancellable);
+			var processes = yield connection.enumerate_processes (query.scope, pids, cancellable);
+
+			if (query.scope == FULL && android_emulator_pid != 0)
+				yield attach_app_icons (processes, cancellable);
+
+			return processes;
+		}
+
+		private async void attach_app_icons (HostProcessInfo[] processes, Cancellable? cancellable) throws IOError {
+			Gee.HashMap<string, Variant> icons;
+			try {
+				icons = yield resolve_app_icons (cancellable);
+			} catch (Error e) {
+				return;
+			}
+
+			for (int i = 0; i != processes.length; i++) {
+				Variant? icon = icons[processes[i].name];
+				if (icon != null)
+					processes[i].parameters["icons"] = icon;
+			}
+		}
+
+		private async Gee.HashMap<string, Variant> resolve_app_icons (Cancellable? cancellable) throws Error, IOError {
+			if (android_app_icons == null) {
+				var helper = yield get_android_helper (cancellable);
+
+				var options = new ApplicationQueryOptions ();
+				options.scope = FULL;
+
+				var icons = new Gee.HashMap<string, Variant> ();
+				foreach (var app in yield helper.enumerate_applications (options, cancellable)) {
+					Variant? icon = app.parameters["icons"];
+					if (icon != null)
+						icons[app.identifier] = icon;
+				}
+
+				android_app_icons = icons;
+			}
+
+			return android_app_icons;
+		}
+
+		private async AndroidHelperClient get_android_helper (Cancellable? cancellable) throws Error, IOError {
+			while (android_helper_request != null) {
+				try {
+					return yield android_helper_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			android_helper_request = new Promise<AndroidHelperClient> ();
+
+			try {
+				string serial = yield resolve_emulator_serial (cancellable);
+				var helper = yield AndroidHelperClient.open (serial, cancellable);
+				helper.transport.closed.connect (on_android_helper_closed);
+
+				android_helper_request.resolve (helper);
+
+				return helper;
+			} catch (Error e) {
+				android_helper_request.reject (e);
+				android_helper_request = null;
+				throw e;
+			} catch (IOError e) {
+				android_helper_request.reject (e);
+				android_helper_request = null;
+				throw e;
+			}
+		}
+
+		private void on_android_helper_closed (AndroidHelperTransport transport) {
+			transport.closed.disconnect (on_android_helper_closed);
+			android_helper_request = null;
+			android_app_icons = null;
+		}
+
+		private async string resolve_emulator_serial (Cancellable? cancellable) throws Error, IOError {
+			if (host_processes == null)
+				host_processes = new ProcessEnumerator ();
+
+			var options = new ProcessQueryOptions ();
+			options.scope = FULL;
+			options.select_pid (android_emulator_pid);
+
+			var found = yield host_processes.enumerate_processes (options);
+			if (found.length == 0)
+				throw new Error.INVALID_OPERATION ("Emulator process %u is gone", android_emulator_pid);
+
+			Variant? argv = found[0].parameters["argv"];
+			if (argv == null)
+				throw new Error.NOT_SUPPORTED ("Emulator command line is unavailable");
+
+			return "emulator-" + console_port_from_argv (argv);
+		}
+
+		private static string console_port_from_argv (Variant argv) throws Error {
+			string[] args = argv.dup_strv ();
+			for (int i = 0; i + 1 < args.length; i++) {
+				if (args[i] == "-ports")
+					return args[i + 1].split (",")[0];
+			}
+			throw new Error.NOT_SUPPORTED ("Emulator console port is unavailable");
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
@@ -726,6 +894,9 @@ namespace Frida {
 			if (connection == null)
 				throw_not_supported ();
 
+			if (android_emulator_pid != 0 && program[0] != '/')
+				return yield spawn_android_app (program, options, cancellable);
+
 			if (connection.spawns_by_itself)
 				return yield connection.spawn_program (words_of (program, options), cancellable);
 
@@ -734,6 +905,55 @@ namespace Frida {
 			return yield connection.spawn_process (helper,
 				command_line_of (yield file_of (program, cancellable), options), cancellable);
 		}
+
+		private async uint spawn_android_app (string package, HostSpawnOptions options, Cancellable? cancellable)
+				throws Error, IOError {
+			var entrypoint = PackageEntrypoint.parse (package, options);
+
+			var helper = yield get_android_helper (cancellable);
+
+			string process_name = yield helper.get_process_name (package, entrypoint.uid, cancellable);
+			string held_name = held_name_of (process_name);
+
+			if (android_spawn_requests.has_key (held_name))
+				throw new Error.INVALID_OPERATION ("Spawn already in progress for %s", package);
+
+			var request = new Promise<uint> ();
+			android_spawn_requests[held_name] = request;
+
+			try {
+				yield connection.arm_named_spawn (process_name, cancellable);
+
+				yield helper.stop_package (package, entrypoint.uid, cancellable);
+				yield helper.start_package (package, entrypoint, cancellable);
+
+				var timeout = new TimeoutSource.seconds (20);
+				timeout.set_callback (() => {
+					request.reject (new Error.TIMED_OUT ("Timed out while waiting for %s to launch", package));
+					return Source.REMOVE;
+				});
+				timeout.attach (MainContext.get_thread_default ());
+				try {
+					return yield request.future.wait_async (cancellable);
+				} finally {
+					timeout.destroy ();
+				}
+			} catch (GLib.Error e) {
+				android_spawn_requests.unset (held_name);
+				try {
+					yield connection.disarm_named_spawn (process_name, cancellable);
+				} catch (GLib.Error de) {
+				}
+				throw_api_error (e);
+			}
+		}
+
+		private static string held_name_of (string process_name) {
+			int length = process_name.length;
+			return (length > TASK_COMM_MAX) ? process_name[length - TASK_COMM_MAX:] : process_name;
+		}
+
+		private const int TASK_COMM_MAX = 15;
 
 		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			throw_not_supported ();
@@ -864,6 +1084,14 @@ namespace Frida {
 		// Only ring 3 can make a process. Thus one process holds a copy of the agent, and that copy
 		// makes each new process and holds it.
 		private void on_spawn_added (uint pid, string command_line, uint holder_pid) {
+			Promise<uint>? request = android_spawn_requests[command_line];
+			if (request != null) {
+				android_spawn_requests.unset (command_line);
+				pending_spawn[pid] = new HeldSpawn (command_line, holder_pid);
+				request.resolve (pid);
+				return;
+			}
+
 			var identifier = program_of (command_line);
 			pending_spawn[pid] = new HeldSpawn (identifier, holder_pid);
 			watchdog.arm (pid);

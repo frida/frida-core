@@ -5,8 +5,90 @@ namespace Frida {
 			construct;
 		}
 
+		private Droidy.ShellSession? shell;
+
 		public AndroidHelperClient (AndroidHelperTransport transport) {
 			Object (transport: transport);
+		}
+
+		public static async AndroidHelperClient open (string serial, Cancellable? cancellable) throws Error, IOError {
+			string instance_id = Uuid.string_random ().replace ("-", "");
+			string helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
+
+			var helper_dex = new MemoryInputStream.from_bytes (
+				new Bytes.static (Frida.Data.Android.get_helper_dex_blob ().data));
+			var helper_meta = new Droidy.FileMetadata ();
+			helper_meta.mode = 0100644;
+			helper_meta.time_modified = new DateTime.now_utc ();
+			yield Droidy.FileSync.send (helper_dex, helper_meta, helper_path, serial, cancellable);
+
+			var shell = new Droidy.ShellSession ();
+			try {
+				var output = new StringBuilder ();
+				bool waiting = false;
+				var output_handler = shell.output.connect ((pipe, bytes) => {
+					if (pipe == STDOUT) {
+						output.append ((string) bytes.get_data ());
+						if (waiting)
+							open.callback ();
+					}
+				});
+				try {
+					yield shell.open (serial, cancellable);
+
+					shell.send_command (("CLASSPATH=%s app_process /data/local/tmp " +
+							"--nice-name=re.frida.helper re.frida.Helper %s; rm -f %s; echo BYE.")
+						.printf (helper_path, instance_id, helper_path));
+
+					while (!output.str.has_prefix ("READY.\n")) {
+						waiting = true;
+						yield;
+						waiting = false;
+
+						if (output.str.has_prefix ("BYE.\n"))
+							throw new Error.NOT_SUPPORTED ("Unable to start helper");
+					}
+				} finally {
+					shell.disconnect (output_handler);
+				}
+
+				var client = yield Droidy.Client.open (cancellable);
+				try {
+					yield client.request ("host:transport:" + serial, cancellable);
+					yield client.request_protocol_change ("localabstract:/frida-helper-" + instance_id,
+						cancellable);
+				} catch (GLib.Error e) {
+					client.close.begin ();
+					throw e;
+				}
+
+				var helper = new AndroidHelperClient (new AndroidHelperStreamTransport (client.stream));
+				helper.shell = shell;
+				helper.transport.closed.connect (helper.release_shell);
+
+				return helper;
+			} catch (GLib.Error e) {
+				shell.close.begin ();
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			yield transport.close (cancellable);
+
+			if (shell != null) {
+				yield shell.close (cancellable);
+				shell = null;
+			}
+		}
+
+		private void release_shell () {
+			if (shell != null) {
+				shell.close.begin ();
+				shell = null;
+			}
 		}
 
 		public async HostApplicationInfo get_frontmost_application (FrontmostQueryOptions options,
@@ -408,13 +490,13 @@ namespace Frida {
 	}
 
 	public interface AndroidHelperTransport : Object {
+		public signal void closed ();
+
 		public abstract async void close (Cancellable? cancellable) throws IOError;
 		public abstract async Json.Node request (Json.Node stanza, Cancellable? cancellable) throws Error, IOError;
 	}
 
 	public sealed class AndroidHelperStreamTransport : Object, AndroidHelperTransport {
-		public signal void closed ();
-
 		public IOStream stream {
 			get;
 			construct;
