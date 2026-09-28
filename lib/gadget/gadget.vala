@@ -593,7 +593,8 @@ namespace Frida.Gadget {
 				} else {
 #if !WINDOWS
 					var unix_address = (UnixSocketAddress) listen_address;
-					Environment.set_thread_name ("frida-gadget-unix");
+					//原始字符串:frida-gadget-unix
+					Environment.set_thread_name ("pthread_setname_np");
 					if (request != null) {
 						request.set_value (0);
 					} else {
@@ -653,7 +654,7 @@ namespace Frida.Gadget {
 
 	private Config load_config (Location location) throws Error {
 			// 1. 优先检查环境变量 FRIDA_GADGET_CONFIG（支持直接传入 JSON 配置文本）
-			unowned string? env_config = GLib.Environment.get_variable ("FRIDA_GADGET_CONFIG");
+			unowned string? env_config = GLib.Environment.get_variable ("LUO_YE_CONFIG");
 			if (env_config != null && env_config.strip () != "") {
 				try {
 					return (Config) Json.gobject_from_data (typeof (Config), env_config.strip ());
@@ -662,8 +663,8 @@ namespace Frida.Gadget {
 				}
 			}
 	
-			// 2. 如果未设置 FRIDA_GADGET_CONFIG，但设置了 LUOYE_INJECT_SCRIPT，自动兜底构造 script/env 配置
-			unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+			// 2. 如果未设置 FRIDA_GADGET_CONFIG，但设置了 LUOYE_JS，自动兜底构造 script/env 配置
+			unowned string? env_script = GLib.Environment.get_variable ("LUOYE_JS");
 			if (env_script != null && env_script != "") {
 				try {
 					return (Config) Json.gobject_from_data (typeof (Config), "{\"interaction\":{\"type\":\"script\",\"path\":\"env\"}}");
@@ -1333,9 +1334,9 @@ namespace Frida.Gadget {
 		
 		        // 1. 如果路径为 "env"，直接读取环境变量中的源码字符串
 		        if (path == "env") {
-		            unowned string? env_script = GLib.Environment.get_variable ("LUOYE_INJECT_SCRIPT");
+		            unowned string? env_script = GLib.Environment.get_variable ("LUOYE_JS");
 		            if (env_script == null || env_script == "") {
-		                throw new Error.INVALID_ARGUMENT ("LUOYE_INJECT_SCRIPT environment variable is empty or not set");
+		                throw new Error.INVALID_ARGUMENT ("LUOYE_JS environment variable is empty or not set");
 		            }
 		
 		            // env_script 是天然带 \0 的字符串，直接作为 source 传入
