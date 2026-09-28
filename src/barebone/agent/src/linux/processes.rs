@@ -1,3 +1,5 @@
+use alloc::format;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int, c_long, c_void};
 use core::ptr;
@@ -7,6 +9,10 @@ pub struct ProcessInfo {
     pub name: *const u8,
     pub path: *const u8,
     pub command_line: *const u8,
+    pub uid: u32,
+    pub user: *const u8,
+    pub ppid: u32,
+    pub started: i64,
 }
 
 pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
@@ -18,15 +24,26 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
     path.resize(PATH_MAX, 0u8);
     let mut cmdline = Vec::new();
     cmdline.resize(CMDLINE_MAX, 0u8);
+    let mut label = Vec::new();
+    label.resize(NAME_MAX, 0u8);
+    let mut owner = Vec::new();
+    owner.resize(NAME_MAX, 0u8);
+
+    let (now_boottime, now_realtime) = current_time();
 
     for task in take_task_snapshot(layout) {
         if !task.memory.is_null() {
-            let name = program_name(task.memory, &mut cmdline).unwrap_or(task.name.as_ptr());
+            let (name, command_line) = describe(task.memory, &mut cmdline, &mut label)
+                .unwrap_or((task.name.as_ptr(), ptr::null()));
             found(ProcessInfo {
                 id: task.id,
                 name,
                 path: path_of(task.executable, &mut path),
-                command_line: ptr::null(),
+                command_line,
+                uid: task.uid,
+                user: format_user(task.uid, &mut owner),
+                ppid: task.ppid,
+                started: wall_time(task.started, now_boottime, now_realtime),
             });
             unsafe { _mmput(task.memory) };
         }
@@ -76,6 +93,9 @@ struct Task {
     name: [u8; NAME_SIZE + 1],
     executable: *mut c_void,
     memory: *mut c_void,
+    uid: u32,
+    ppid: u32,
+    started: u64,
 }
 
 fn take_task_snapshot(layout: &Layout) -> Vec<Task> {
@@ -102,18 +122,60 @@ fn read_task(task: usize, layout: &Layout) -> Task {
         name,
         executable: unsafe { _get_task_exe_file(task as *mut c_void) },
         memory: unsafe { _get_task_mm(task as *mut c_void) },
+        uid: read_uid(task, layout),
+        ppid: read_ppid(task, layout),
+        started: layout.started.and_then(|at| read_kernel_word(task + at)).unwrap_or(0) as u64,
     }
 }
 
-fn read_id(task: usize, layout: &Layout) -> u32 {
-    let mut id = [0u8; 4];
-    read_kernel(task + layout.id, &mut id);
+fn read_uid(task: usize, layout: &Layout) -> u32 {
+    let (Some(credentials), Some(uid)) = (layout.credentials, layout.uid) else {
+        return 0;
+    };
+    let Some(cred) = read_kernel_word(task + credentials) else {
+        return 0;
+    };
+    read_kernel_u32(cred + uid)
+}
 
-    u32::from_ne_bytes(id)
+fn read_ppid(task: usize, layout: &Layout) -> u32 {
+    let (Some(parent), Some(group)) = (layout.parent, layout.group) else {
+        return 0;
+    };
+    let Some(task) = read_kernel_word(task + parent) else {
+        return 0;
+    };
+    read_kernel_u32(task + group)
+}
+
+fn read_id(task: usize, layout: &Layout) -> u32 {
+    read_kernel_u32(task + layout.id)
+}
+
+fn read_kernel_u32(address: usize) -> u32 {
+    let mut bytes = [0u8; 4];
+    if !read_kernel(address, &mut bytes) {
+        return 0;
+    }
+
+    u32::from_ne_bytes(bytes)
 }
 
 #[cfg(target_arch = "aarch64")]
-fn program_name(memory: *mut c_void, buffer: &mut [u8]) -> Option<*const u8> {
+fn describe(memory: *mut c_void, cmdline: &mut [u8], label: &mut [u8]) -> Option<(*const u8, *const u8)> {
+    let read = read_cmdline(memory, cmdline)?;
+    let name = base_name(&cmdline[..read], label);
+    let command_line = join_arguments(cmdline, read);
+    Some((name, command_line))
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn describe(_memory: *mut c_void, _cmdline: &mut [u8], _label: &mut [u8]) -> Option<(*const u8, *const u8)> {
+    None
+}
+
+#[cfg(target_arch = "aarch64")]
+fn read_cmdline(memory: *mut c_void, buffer: &mut [u8]) -> Option<usize> {
     let start = read_kernel_word(memory as usize + super::layout::field_offset("mm_struct", "arg_start")?)?;
     if start == 0 {
         return None;
@@ -127,17 +189,93 @@ fn program_name(memory: *mut c_void, buffer: &mut [u8]) -> Option<*const u8> {
     unsafe { _kthread_unuse_mm(memory) };
 
     let read = room - missed;
-    let end = buffer[..read].iter().position(|byte| *byte == 0)?;
-    if end == 0 {
-        return None;
-    }
-
-    Some(buffer.as_ptr())
+    (read != 0).then_some(read)
 }
 
-#[cfg(not(target_arch = "aarch64"))]
-fn program_name(_memory: *mut c_void, _buffer: &mut [u8]) -> Option<*const u8> {
-    None
+#[cfg(target_arch = "aarch64")]
+fn base_name(arguments: &[u8], label: &mut [u8]) -> *const u8 {
+    let first = &arguments[..arguments.iter().position(|byte| *byte == 0).unwrap_or(arguments.len())];
+    let start = first.iter().rposition(|byte| *byte == b'/').map_or(0, |slash| slash + 1);
+    let name = &first[start..];
+
+    let taken = name.len().min(label.len() - 1);
+    label[..taken].copy_from_slice(&name[..taken]);
+    label[taken] = 0;
+
+    label.as_ptr()
+}
+
+#[cfg(target_arch = "aarch64")]
+fn join_arguments(cmdline: &mut [u8], read: usize) -> *const u8 {
+    for byte in &mut cmdline[..read] {
+        if *byte == 0 {
+            *byte = b' ';
+        }
+    }
+    cmdline[read] = 0;
+
+    cmdline.as_ptr()
+}
+
+fn format_user(uid: u32, buffer: &mut [u8]) -> *const u8 {
+    let text = user_label(uid);
+    let bytes = text.as_bytes();
+
+    let taken = bytes.len().min(buffer.len() - 1);
+    buffer[..taken].copy_from_slice(&bytes[..taken]);
+    buffer[taken] = 0;
+
+    buffer.as_ptr()
+}
+
+fn user_label(uid: u32) -> String {
+    let user = uid / AID_USER_OFFSET;
+    let app = uid % AID_USER_OFFSET;
+
+    if (AID_APP_START..AID_APP_END).contains(&app) {
+        return format!("u{}_a{}", user, app - AID_APP_START);
+    }
+
+    match app {
+        0 => "root".into(),
+        1000 => "system".into(),
+        1001 => "radio".into(),
+        2000 => "shell".into(),
+        _ => format!("{}", uid),
+    }
+}
+
+fn wall_time(started: u64, now_boottime: u64, now_realtime: u64) -> i64 {
+    if started == 0 || started > now_boottime {
+        return 0;
+    }
+    let age = now_boottime - started;
+    if age > now_realtime {
+        return 0;
+    }
+
+    ((now_realtime - age) / 1_000_000_000) as i64
+}
+
+#[cfg(not(target_arch = "x86"))]
+fn current_time() -> (u64, u64) {
+    let mut wall = Timespec { seconds: 0, nanoseconds: 0 };
+    unsafe { _ktime_get_real_ts64(&mut wall) };
+    let wallclock = (wall.seconds as u64) * 1_000_000_000 + (wall.nanoseconds as u64);
+    let uptime = unsafe { _ktime_get_mono_fast_ns() };
+
+    (uptime, wallclock)
+}
+
+#[cfg(target_arch = "x86")]
+fn current_time() -> (u64, u64) {
+    (0, 0)
+}
+
+#[repr(C)]
+struct Timespec {
+    seconds: i64,
+    nanoseconds: i64,
 }
 
 fn path_of(executable: *mut c_void, buffer: &mut [u8]) -> *const u8 {
@@ -211,6 +349,11 @@ struct Layout {
     list: usize,
     name: usize,
     id: usize,
+    credentials: Option<usize>,
+    uid: Option<usize>,
+    parent: Option<usize>,
+    group: Option<usize>,
+    started: Option<usize>,
 }
 
 fn discover_layout() -> Option<Layout> {
@@ -225,16 +368,32 @@ fn discover_layout() -> Option<Layout> {
     let name = find(&image, IDLE_TASK_NAME)?;
     let (list, id) = find_task_list(init, &image, name)?;
 
-    Some(Layout { init, list, name, id })
+    Some(Layout {
+        init,
+        list,
+        name,
+        id,
+        credentials: None,
+        uid: None,
+        parent: None,
+        group: None,
+        started: None,
+    })
 }
 
 fn described_layout(init: usize) -> Option<Layout> {
+    use super::layout::field_offset;
 
     Some(Layout {
         init,
-        list: super::layout::field_offset("task_struct", "tasks")?,
-        name: super::layout::field_offset("task_struct", "comm")?,
-        id: super::layout::field_offset("task_struct", "pid")?,
+        list: field_offset("task_struct", "tasks")?,
+        name: field_offset("task_struct", "comm")?,
+        id: field_offset("task_struct", "pid")?,
+        credentials: field_offset("task_struct", "real_cred"),
+        uid: field_offset("cred", "uid"),
+        parent: field_offset("task_struct", "real_parent"),
+        group: field_offset("task_struct", "tgid"),
+        started: field_offset("task_struct", "start_time"),
     })
 }
 
@@ -540,6 +699,10 @@ const IDLE_TASK_NAME: &[u8] = b"swapper";
 const NAME_SIZE: usize = 16;
 const PATH_MAX: usize = 4096;
 const CMDLINE_MAX: usize = 512;
+const NAME_MAX: usize = 256;
+const AID_USER_OFFSET: u32 = 100000;
+const AID_APP_START: u32 = 10000;
+const AID_APP_END: u32 = 20000;
 
 const MAX_TASK_SIZE: usize = 16 * 1024;
 const READ_CHUNK: usize = 64;
@@ -593,6 +756,10 @@ unsafe extern "C" {
     #[cfg(target_arch = "aarch64")]
     static ___arch_copy_from_user:
         unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
+    #[cfg(not(target_arch = "x86"))]
+    static _ktime_get_real_ts64: unsafe extern "C" fn(*mut Timespec);
+    #[cfg(not(target_arch = "x86"))]
+    static _ktime_get_mono_fast_ns: unsafe extern "C" fn() -> u64;
 }
 
 #[cfg(target_arch = "x86")]

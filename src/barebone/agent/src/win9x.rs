@@ -1862,6 +1862,10 @@ pub struct ProcessInfo {
     pub id: u32,
     pub path: *const u8,
     pub command_line: *const u8,
+    pub uid: u32,
+    pub user: *const u8,
+    pub ppid: u32,
+    pub started: i64,
 }
 
 // Win32 threads carry the process they belong to in VWIN32's per-thread block, so the
@@ -1886,6 +1890,10 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
                     id: process_id(pdb),
                     path: image_path(pdb),
                     command_line: command_line(pdb),
+                    uid: 0,
+                    user: core::ptr::null(),
+                    ppid: 0,
+                    started: 0,
                 });
             }
         }

@@ -6,6 +6,10 @@ pub struct ProcessInfo {
     pub name: *const u8,
     pub path: *const u8,
     pub command_line: *const u8,
+    pub uid: u32,
+    pub user: *const u8,
+    pub ppid: u32,
+    pub started: i64,
 }
 
 // The kernel walks its own list, and where a process keeps its number and its name is what the
@@ -33,6 +37,10 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
             name: name.as_ptr(),
             path: name.as_ptr(),
             command_line: core::ptr::null(),
+            uid: 0,
+            user: core::ptr::null(),
+            ppid: 0,
+            started: 0,
         });
     }
 }

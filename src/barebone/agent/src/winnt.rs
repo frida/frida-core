@@ -2163,6 +2163,10 @@ pub struct ProcessInfo {
     pub path: *const u8,
     pub command_line: *const u8,
     pub handle: *mut c_void,
+    pub uid: u32,
+    pub user: *const u8,
+    pub ppid: u32,
+    pub started: i64,
 }
 
 // Find only the head of the list. Read the other data with the accessors that the kernel
@@ -2190,6 +2194,10 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
                 path,
                 command_line,
                 handle: process,
+                uid: 0,
+                user: core::ptr::null(),
+                ppid: 0,
+                started: 0,
             });
         }
         entry = unsafe { (entry as *const usize).read_volatile() };
