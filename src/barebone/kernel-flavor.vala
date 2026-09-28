@@ -275,11 +275,14 @@ namespace Frida.Barebone {
 			Debugger debugger = machine.debugger;
 			var bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
 
-			DebuggerException? exception = null;
+			var gdb = debugger as GDB.Client;
+			Gee.List<string>? cpu_ids = (gdb != null) ? yield gdb.query_thread_ids (cancellable) : null;
+			if (gdb != null && cpu_ids != null && !cpu_ids.is_empty)
+				gdb.solo_thread_id = cpu_ids[0];
+
 			bool ready = false;
 			do {
-				exception = yield debugger.continue_until_exception (cancellable);
-				ready = false;
+				DebuggerException exception = yield debugger.continue_until_exception (cancellable);
 				if (exception.breakpoint != bp)
 					continue;
 				if (yield interrupts_masked (exception.thread, cancellable))
@@ -289,6 +292,9 @@ namespace Frida.Barebone {
 				uint64 current = yield read_current_task (cancellable);
 				ready = !(yield task_is_idle (current, cancellable));
 			} while (!ready);
+
+			if (gdb != null)
+				gdb.solo_thread_id = null;
 
 			yield bp.remove (cancellable);
 		}

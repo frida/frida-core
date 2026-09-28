@@ -393,6 +393,19 @@ namespace Frida.GDB {
 			return _exception;
 		}
 
+		public async Gee.List<string> query_thread_ids (Cancellable? cancellable = null) throws Error, IOError {
+			var ids = new Gee.ArrayList<string> ();
+			var response = yield query_simple ("qfThreadInfo", cancellable);
+			while (response.payload.length > 0 && response.payload[0] == 'm') {
+				foreach (var id in response.payload[1:].split (",")) {
+					if (id.length > 0)
+						ids.add (id);
+				}
+				response = yield query_simple ("qsThreadInfo", cancellable);
+			}
+			return ids;
+		}
+
 		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
 			if (state == STOPPED)
 				return;
