@@ -1424,7 +1424,6 @@ namespace Frida.GDB {
 				breakpoint = breakpoints[pc];
 			} else if (trapped_address != null) {
 				thread = new Thread (trapped_thread, null, this);
-				uint64 observed = yield thread.read_register ("rsp", io_cancellable);
 				breakpoint = breakpoints[trapped_address];
 				trapped_address = null;
 				trapped_thread = null;
