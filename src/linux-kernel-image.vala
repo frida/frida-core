@@ -1039,29 +1039,6 @@ namespace Frida {
 			return printable;
 		}
 
-		private static bool symbol_decodes (uint8[] raw, uint pos, bool[] printable, bool[] opens_a_symbol) {
-			uint n = raw.length;
-			if (pos >= n)
-				return false;
-			uint len = raw[pos];
-			uint p = pos + 1;
-			if ((len & 0x80) != 0) {
-				if (p >= n)
-					return false;
-				len = (len & 0x7f) | (raw[p] << 7);
-				p++;
-			}
-			if (len == 0 || len > 300 || p + len > n)
-				return false;
-			if (!opens_a_symbol[raw[p]])
-				return false;
-			for (uint i = 1; i != len; i++) {
-				if (!printable[raw[p + i]])
-					return false;
-			}
-			return true;
-		}
-
 		private static bool decodes_full_table (uint8[] raw, uint start, string[] tokens, uint num_syms) {
 			uint p = start;
 			for (uint i = 0; i != num_syms; i++) {
@@ -1073,16 +1050,6 @@ namespace Frida {
 			}
 			string tail;
 			return try_decode_symbol (raw, p, tokens, out tail) == 0;
-		}
-
-		private static uint symbol_size (uint8[] raw, uint pos) {
-			uint len = raw[pos];
-			uint adv = 1;
-			if ((len & 0x80) != 0) {
-				len = (len & 0x7f) | (raw[pos + 1] << 7);
-				adv = 2;
-			}
-			return adv + len;
 		}
 
 		private static bool find_percpu_layout (uint8[] raw, string[] tokens, out uint table_pos,
