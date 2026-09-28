@@ -162,6 +162,8 @@ pub enum FridaCommand {
     GateSpawns = 17,
     EnumerateApplications = 18,
     EnumerateShortcuts = 19,
+    ArmNamedSpawn = 20,
+    DisarmNamedSpawn = 21,
 
     Reply = 128,
     ScriptMessage = 129,
@@ -184,6 +186,8 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::RemapWritablePages => write!(f, "RemapWritablePages"),
             FridaCommand::MemoryProtect => write!(f, "MemoryProtect"),
             FridaCommand::PatchCode => write!(f, "PatchCode"),
+            FridaCommand::ArmNamedSpawn => write!(f, "ArmNamedSpawn"),
+            FridaCommand::DisarmNamedSpawn => write!(f, "DisarmNamedSpawn"),
             FridaCommand::EnumerateProcesses => write!(f, "EnumerateProcesses"),
             FridaCommand::InjectIntoProcess => write!(f, "InjectIntoProcess"),
             FridaCommand::AllocateShared => write!(f, "AllocateShared"),
@@ -1304,7 +1308,9 @@ fn kernel_half_has_work() -> bool {
     }
 
     #[cfg(feature = "linux-injected")]
-    if kernel::a_copy_has_something_to_say() || kernel::a_spawn_is_held() {
+    if kernel::a_copy_has_something_to_say() || kernel::a_spawn_is_held()
+        || kernel::a_pending_spawn_waits()
+    {
         return true;
     }
 
@@ -1322,6 +1328,9 @@ fn kernel_half_has_work() -> bool {
 fn serve_the_kernel_half() {
     #[cfg(feature = "xnu-core")]
     relay_frames_from_targets();
+
+    #[cfg(feature = "linux-injected")]
+    kernel::drain_pending_spawn();
 
     #[cfg(feature = "linux-injected")]
     kernel::tell_of_held_spawns(&mut |id, program| {
@@ -1593,6 +1602,10 @@ fn process_incoming_message(variant: *mut GVariant) {
             FridaCommand::PostScriptMessage => Some(handle_post_script_message(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu-core"))]
             FridaCommand::GateSpawns => Some(handle_gate_spawns(payload_variant)),
+            #[cfg(feature = "linux-injected")]
+            FridaCommand::ArmNamedSpawn => Some(handle_arm_named_spawn(payload_variant)),
+            #[cfg(feature = "linux-injected")]
+            FridaCommand::DisarmNamedSpawn => Some(handle_disarm_named_spawn(payload_variant)),
             #[cfg(any(feature = "win9x", feature = "winnt"))]
             FridaCommand::EnumerateApplications => Some(handle_enumerate_applications(payload_variant)),
             #[cfg(feature = "xnu-core")]
@@ -2016,6 +2029,22 @@ fn handle_gate_spawns(payload: *mut GVariant) -> HandlerResponse {
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }
 
+#[cfg(feature = "linux-injected")]
+fn handle_arm_named_spawn(payload: *mut GVariant) -> HandlerResponse {
+    let name = unsafe { core::ffi::CStr::from_ptr(g_variant_get_string(payload, ptr::null_mut())) };
+    kernel::arm_named_spawn(name.to_bytes());
+
+    HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
+}
+
+#[cfg(feature = "linux-injected")]
+fn handle_disarm_named_spawn(payload: *mut GVariant) -> HandlerResponse {
+    let name = unsafe { core::ffi::CStr::from_ptr(g_variant_get_string(payload, ptr::null_mut())) };
+    kernel::disarm_named_spawn(name.to_bytes());
+
+    HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
+}
+
 #[cfg(any(feature = "win9x", feature = "linux-injected", feature = "xnu-core"))]
 pub(crate) fn tell_the_host_of_a_spawn(pid: u32, command_line: *const u8) {
     unsafe {
@@ -2050,8 +2079,8 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
         let selection = g_variant_get_child_value(payload, 1);
         let wanted = SelectedPids::from(selection);
 
-        let list_type = g_variant_type_new(c"a(usssaay)".as_ptr() as *const gchar);
-        let process_type = g_variant_type_new(c"(usssaay)".as_ptr() as *const gchar);
+        let list_type = g_variant_type_new(c"a(usssusuxaay)".as_ptr() as *const gchar);
+        let process_type = g_variant_type_new(c"(usssusuxaay)".as_ptr() as *const gchar);
         let icons_type = g_variant_type_new(c"aay".as_ptr() as *const gchar);
         let byte_type = g_variant_type_new(c"y".as_ptr() as *const gchar);
         let builder = g_variant_builder_new(list_type);
@@ -2062,6 +2091,10 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
             g_variant_builder_add(builder, c"s".as_ptr(), c"".as_ptr());
             g_variant_builder_add(builder, c"s".as_ptr(), c"".as_ptr());
             g_variant_builder_add(builder, c"s".as_ptr(), kernel_name());
+            g_variant_builder_add(builder, c"u".as_ptr(), 0u32);
+            g_variant_builder_add(builder, c"s".as_ptr(), c"".as_ptr());
+            g_variant_builder_add(builder, c"u".as_ptr(), 0u32);
+            g_variant_builder_add(builder, c"x".as_ptr(), 0i64);
             g_variant_builder_open(builder, icons_type);
             g_variant_builder_close(builder);
             g_variant_builder_close(builder);
@@ -2083,6 +2116,10 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
                 c"s".as_ptr(),
                 text_or_empty(kernel::describe_process(&process)),
             );
+            g_variant_builder_add(builder, c"u".as_ptr(), process.uid);
+            g_variant_builder_add(builder, c"s".as_ptr(), text_or_empty(process.user));
+            g_variant_builder_add(builder, c"u".as_ptr(), process.ppid);
+            g_variant_builder_add(builder, c"x".as_ptr(), process.started);
 
             g_variant_builder_open(builder, icons_type);
             if include_icons && !process.path.is_null() {

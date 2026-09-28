@@ -91,6 +91,8 @@ SECTIONS {
     ___tracepoint_sched_process_fork = .; . += 8;
     ___tracepoint_sched_process_exit = .; . += 8;
     ___tracepoint_sched_process_exec = .; . += 8;
+    ___tracepoint_task_rename = .; . += 8;
+    ___set_task_comm = .; . += 8;
     _vunmap = .; . += 8;
     __copy_to_user = .; . += 8;
     _down_read = .; . += 8;

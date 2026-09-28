@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 use core::ffi::{c_int, c_void};
 use core::mem::size_of;
 use core::ptr;
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use super::layout::field_offset;
 use super::native;
@@ -76,6 +77,65 @@ pub fn holds_this_one(task: usize) -> bool {
 
     held != 0 && held == id
 }
+
+pub fn arm_named_spawn(name: &[u8]) {
+    let end = name.iter().position(|byte| *byte == 0).unwrap_or(name.len());
+    let name = &name[..end];
+    let start = name.len().saturating_sub(COMM_LEN);
+    let held = &name[start..];
+
+    unsafe { (&raw mut WANTED_COMM).as_mut().unwrap()[..held.len()].copy_from_slice(held) };
+    WANTED_LEN.store(held.len(), Ordering::Release);
+
+    super::injection::watch_for_named_spawns();
+}
+
+pub fn disarm_named_spawn(_name: &[u8]) {
+    WANTED_LEN.store(0, Ordering::Release);
+}
+
+// Runs in the rename tracepoint's atomic context: no allocation, no sleeping lock, no glib.
+pub fn claim_if_wanted(comm: &[u8]) -> bool {
+    let len = WANTED_LEN.load(Ordering::Acquire);
+    if len == 0 || comm.len() != len {
+        return false;
+    }
+    let wanted = unsafe { core::slice::from_raw_parts((&raw const WANTED_COMM) as *const u8, len) };
+    if comm != wanted {
+        return false;
+    }
+
+    WANTED_LEN.compare_exchange(len, 0, Ordering::AcqRel, Ordering::Acquire).is_ok()
+}
+
+pub fn note_pending_spawn(id: u32, comm: &[u8]) {
+    let len = comm.len().min(COMM_LEN);
+    unsafe { (&raw mut PENDING_COMM).as_mut().unwrap()[..len].copy_from_slice(&comm[..len]) };
+    PENDING_LEN.store(len, Ordering::Release);
+    PENDING_HELD.store(id, Ordering::Release);
+}
+
+pub fn a_pending_spawn_waits() -> bool {
+    PENDING_HELD.load(Ordering::Acquire) != 0
+}
+
+pub fn drain_pending_spawn() {
+    let id = PENDING_HELD.swap(0, Ordering::AcqRel);
+    if id == 0 {
+        return;
+    }
+
+    let len = PENDING_LEN.load(Ordering::Acquire);
+    let name = unsafe { core::slice::from_raw_parts((&raw const PENDING_COMM) as *const u8, len).to_vec() };
+    unsafe { held_spawns() }.push((id, name));
+}
+
+static mut WANTED_COMM: [u8; COMM_LEN] = [0; COMM_LEN];
+static WANTED_LEN: AtomicUsize = AtomicUsize::new(0);
+static mut PENDING_COMM: [u8; COMM_LEN] = [0; COMM_LEN];
+static PENDING_LEN: AtomicUsize = AtomicUsize::new(0);
+static PENDING_HELD: AtomicU32 = AtomicU32::new(0);
+const COMM_LEN: usize = 15;
 
 // A spawn is held in the kernel's own exec path, where telling the host is not this thread's
 // to do; the loop says it once it is back where sending a frame belongs.

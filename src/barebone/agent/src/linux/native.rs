@@ -307,14 +307,15 @@ pub fn patch_text(address: u64, data: *const u8, len: usize) -> bool {
 
     let count = len / 4;
 
-    let mut addrs = alloc::vec::Vec::with_capacity(count);
-    let mut insns = alloc::vec::Vec::with_capacity(count);
     for i in 0..count {
-        addrs.push((address as usize + (i * 4)) as *mut c_void);
-        insns.push(unsafe { (data as *const u32).add(i).read_unaligned() });
+        let insn = unsafe { (data as *const u32).add(i).read_unaligned() };
+        let at = (address as usize + (i * 4)) as *mut c_void;
+        if unsafe { _aarch64_insn_patch_text_nosync(at, insn) } != 0 {
+            return false;
+        }
     }
 
-    unsafe { _aarch64_insn_patch_text(addrs.as_mut_ptr(), insns.as_ptr(), count as c_int) == 0 }
+    true
 }
 
 #[cfg(target_arch = "arm")]
@@ -891,8 +892,7 @@ unsafe extern "C" {
     static _set_memory_x: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
     static _set_memory_nx: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
     #[cfg(target_arch = "aarch64")]
-    static _aarch64_insn_patch_text:
-        unsafe extern "C" fn(*mut *mut c_void, *const u32, c_int) -> c_int;
+    static _aarch64_insn_patch_text_nosync: unsafe extern "C" fn(*mut c_void, u32) -> c_int;
     // Addresses of kernel functions of the same C signature as our kthread and IRQ
     // callbacks; the kCFI type-id the kernel checks sits in the word before each.
     #[cfg(target_arch = "aarch64")]

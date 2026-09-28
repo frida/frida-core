@@ -4,6 +4,12 @@ use core::ptr;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
+#[cfg(not(target_arch = "x86"))]
+use crate::bindings::{
+    gum_interceptor_begin_transaction, gum_interceptor_end_transaction, gum_interceptor_obtain,
+    gum_interceptor_replace_fast,
+};
+
 use super::layout::{field_offset, struct_size};
 use super::STACK_SPAN;
 use super::native;
@@ -964,6 +970,49 @@ pub unsafe extern "C" fn frida_cb_exec(_data: *mut c_void, task: *mut c_void, _w
     native::wake(task as *const u8);
 }
 
+#[cfg(not(target_arch = "x86"))]
+pub fn watch_for_named_spawns() {
+    if RENAME_WATCHING.swap(true, core::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+
+    unsafe {
+        let interceptor = gum_interceptor_obtain();
+        gum_interceptor_begin_transaction(interceptor);
+        gum_interceptor_replace_fast(interceptor, ___set_task_comm as *mut c_void,
+            frida_replaced_set_task_comm as *mut c_void, &raw mut ORIGINAL_SET_TASK_COMM,
+            ptr::null());
+        gum_interceptor_end_transaction(interceptor);
+    }
+}
+
+#[cfg(target_arch = "x86")]
+pub fn watch_for_named_spawns() {
+}
+
+#[cfg(not(target_arch = "x86"))]
+static RENAME_WATCHING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+#[cfg(not(target_arch = "x86"))]
+static mut ORIGINAL_SET_TASK_COMM: *mut c_void = ptr::null_mut();
+
+#[cfg(not(target_arch = "x86"))]
+unsafe extern "C" fn frida_replaced_set_task_comm(task: *mut c_void, buf: *const core::ffi::c_char,
+        exec: c_int) {
+    let name = unsafe { core::ffi::CStr::from_ptr(buf) };
+    if super::spawn::claim_if_wanted(name.to_bytes()) {
+        if let Some(id) = id_of(task as usize) {
+            native::send_signal(STOP, task as usize);
+            super::spawn::note_pending_spawn(id, name.to_bytes());
+            native::wake(ptr::null());
+        }
+    }
+
+    let original: unsafe extern "C" fn(*mut c_void, *const core::ffi::c_char, c_int) =
+        unsafe { core::mem::transmute(ORIGINAL_SET_TASK_COMM) };
+    unsafe { original(task, buf, exec) };
+}
+
 static HOLDING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 const STOP: c_int = 19;
@@ -1178,6 +1227,8 @@ unsafe extern "C" {
     static ___tracepoint_sched_process_exit: *mut c_void;
     static ___tracepoint_sched_process_exec: *mut c_void;
     #[cfg(not(target_arch = "x86"))]
+    static ___set_task_comm: unsafe extern "C" fn(*mut c_void, *const core::ffi::c_char, c_int);
+    #[cfg(not(target_arch = "x86"))]
     static _vunmap: unsafe extern "C" fn(*mut c_void);
     #[cfg(not(any(target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
     static ___arch_copy_to_user: unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> usize;
@@ -1280,6 +1331,7 @@ const EXEC_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, c_int, *mut c_v
 #[cfg(not(target_arch = "x86"))]
 const EXEC_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, c_int, *mut c_void) =
     frida_cb_exec;
+
 
 #[cfg(target_arch = "x86")]
 const THREAD_APPEARED_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
