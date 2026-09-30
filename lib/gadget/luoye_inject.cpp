@@ -1,3 +1,12 @@
+#include <cstdlib>
+#include <cstdint>
+#include <cstdio>
+#include <android/log.h>
+#include <glib.h>
+
+#define LOG_TAG "LuoyeInject"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+
 extern "C" {
     void notify_luoye_unblock_bridge(void) {
         typedef void (*UnblockFunc)(void);
