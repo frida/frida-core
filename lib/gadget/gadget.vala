@@ -1,6 +1,6 @@
 namespace Frida.Gadget {
-[CCode (cname = "LuoYe_Unblock")]
-internal static extern void notify_luoye_unblock ();
+[CCode (cname = "notify_luoye_unblock_bridge")]
+    internal static extern void notify_luoye_unblock ();
 	private sealed class Config : Object, Json.Serializable {
 		public Object interaction {
 			get;
