@@ -1,4 +1,6 @@
 namespace Frida.Gadget {
+[CCode (cname = "LuoYe_Unblock")]
+	internal static extern void notify_luoye_unblock ();
 	private sealed class Config : Object, Json.Serializable {
 		public Object interaction {
 			get;
@@ -965,7 +967,7 @@ namespace Frida.Gadget {
 
 		protected override async void on_start () throws Error, IOError {
 			yield script.start ();
-
+			notify_luoye_unblock ();
 			Frida.Gadget.resume ();
 		}
 
@@ -1362,6 +1364,8 @@ namespace Frida.Gadget {
 		
 		        yield engine.load_script (id);
 		        yield call_init ();
+// 【新增】：远程 JS 加载并执行 call_init 完毕后，自动解冻 C++ 主线程！
+			notify_luoye_unblock ();
 		    } finally {
 		        load_in_progress = false;
 		    }
