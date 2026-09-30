@@ -166,6 +166,7 @@ function cModuleSource() {
 #define HV_REG_CPSR 34
 
 #define EC_WFX 0x01
+#define EC_SYSREG 0x18
 
 extern uint8_t frida_state[];
 
@@ -185,6 +186,7 @@ extern void resume_all_vcpus (void);
 static void disarm_breakpoint (int32_t fd);
 static void resume_benign (uint64_t * syndrome, uint64_t esr);
 static void reinject_to_guest (int32_t fd, uint64_t syndrome);
+static void emulate_debug_register (int32_t fd, uint64_t esr);
 static void arm_breakpoint (int32_t fd);
 
 void
@@ -228,6 +230,15 @@ on_handle_exception (GumInvocationContext * ic)
   {
     reinject_to_guest (fd, esr);
     *((uint32_t *) (cpu + CPU_STATE_EXIT_REQUEST)) = 1;
+    resume_benign (syndrome, esr);
+    return;
+  }
+
+  if (ec == EC_SYSREG)
+  {
+    emulate_debug_register (fd, esr);
+    if (BREAKPOINT_ARMED)
+      arm_breakpoint (fd);
     resume_benign (syndrome, esr);
     return;
   }
@@ -284,6 +295,39 @@ reinject_to_guest (int32_t fd, uint64_t syndrome)
 
   hv_set_reg (fd, HV_REG_PC, vbar + (((cpsr & 0xf) == 0) ? 0x400 : 0x200));
   hv_set_reg (fd, HV_REG_CPSR, PSTATE_EL1H_MASKED);
+}
+
+static void
+emulate_debug_register (int32_t fd, uint64_t esr)
+{
+  uint32_t iss = esr & 0x1ffffff;
+  uint32_t op0 = (iss >> 20) & 0x3;
+  uint32_t op2 = (iss >> 17) & 0x7;
+  uint32_t op1 = (iss >> 14) & 0x7;
+  uint32_t crn = (iss >> 10) & 0xf;
+  uint32_t rt = (iss >> 5) & 0x1f;
+  uint32_t crm = (iss >> 1) & 0xf;
+  uint32_t is_read = iss & 1;
+  uint32_t sysreg = (op0 << 14) | (op1 << 11) | (crn << 7) | (crm << 3) | op2;
+
+  if (is_read)
+  {
+    uint64_t value = 0;
+    hv_get_sys_reg (fd, sysreg, &value);
+    if (rt != 31)
+      hv_set_reg (fd, rt, value);
+  }
+  else
+  {
+    uint64_t value = 0;
+    if (rt != 31)
+      hv_get_reg (fd, rt, &value);
+    hv_set_sys_reg (fd, sysreg, value);
+  }
+
+  uint64_t pc = 0;
+  hv_get_reg (fd, HV_REG_PC, &pc);
+  hv_set_reg (fd, HV_REG_PC, pc + 4);
 }
 
 static void
