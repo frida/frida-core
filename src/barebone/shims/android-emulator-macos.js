@@ -1,34 +1,5 @@
-// Injected into the Android emulator's QEMU by the barebone backend to make its
-// HVF-backed gdbstub usable: commit gdb register writes the resume path would
-// otherwise clobber, emulate the breakpoints HVF cannot insert, and keep the
-// vcpu's unknown exits from aborting QEMU. Synchronous exceptions the guest
-// should see are reinjected into its own EL1 vector. The offsets are for one
-// build (QEMU 2.12 fork, Runtime 13.3) and are verified before patching.
-
-const HV_REG_PC = 31;
-const HV_REG_CPSR = 34;
-
-const ELR_EL1 = 0xc201;
-const SPSR_EL1 = 0xc200;
-const ESR_EL1 = 0xc290;
-const VBAR_EL1 = 0xc600;
-const MDSCR_EL1 = 0x8012;
-const DBGBVR0_EL1 = 0x8004;
-const DBGBCR0_EL1 = 0x8005;
-const DBGBCR_ENABLE_EL0_EL1 = uint64('0x1e7');
-const MDSCR_MDE = uint64('0xa000');
-const PSTATE_EL1H_MASKED = uint64('0x3c5');
-
 const CPU_STATE_DIRTY = 0x82b3;
 const CPU_STATE_FD = 0x82b4;
-const CPU_STATE_EXIT_REQUEST = 0x82a4;
-const CPU_STATE_EXIT = 0x82c8;
-
-const HV_EXIT_REASON_UNKNOWN = 3;
-const HV_EXIT_REASON_CANCELED = 0;
-
-const breakpointClasses = new Set([0x30, 0x31]);
-const guestDebugClasses = new Set([0x3c, 0x32, 0x33, 0x34, 0x35]);
 
 const cpuGdbWriteRegister = Module.getGlobalExportByName('aarch64_cpu_gdb_write_register');
 const hvfPutRegisters = Module.getGlobalExportByName('hvf_put_registers');
@@ -42,21 +13,16 @@ const slide = cpuBreakpointInsert.sub(0x100024a6c);
 const reasonCompare = slide.add(0x10012bfe8);
 const breakpointInvalidate = slide.add(0x100024b2c);
 
-const setSysReg = new NativeFunction(Module.getGlobalExportByName('hv_vcpu_set_sys_reg'), 'int', ['uint64', 'uint32', 'uint64']);
-const getSysReg = new NativeFunction(Module.getGlobalExportByName('hv_vcpu_get_sys_reg'), 'int', ['uint64', 'uint32', 'pointer']);
-const setReg = new NativeFunction(Module.getGlobalExportByName('hv_vcpu_set_reg'), 'int', ['uint64', 'uint32', 'uint64']);
-const getReg = new NativeFunction(Module.getGlobalExportByName('hv_vcpu_get_reg'), 'int', ['uint64', 'uint32', 'pointer']);
-const setTrapDebugExceptions = new NativeFunction(Module.getGlobalExportByName('hv_vcpu_set_trap_debug_exceptions'), 'int', ['uint64', 'uint32']);
-const setStopCpu = new NativeFunction(Module.getGlobalExportByName('gdb_set_stop_cpu'), 'void', ['pointer']);
-const requestDebug = new NativeFunction(Module.getGlobalExportByName('qemu_system_debug_request'), 'void', []);
+const STATE_VCPU_FD = 0;
+const STATE_BREAKPOINT_ARMED = 4;
+const STATE_BREAKPOINT_ADDRESS = 8;
+const state = Memory.alloc(16);
+state.add(STATE_VCPU_FD).writeS32(-1);
 
-const scratch = Memory.alloc(8);
-
-let vcpuFd = -1;
-let hardwareBreakpoint = null;
 let pendingRegisterCommit = null;
 
 verifyBuild();
+const cm = buildCModule();
 captureVcpuFd();
 commitGdbRegisterWrites();
 emulateHardwareBreakpoints();
@@ -78,11 +44,24 @@ function verifyBuild() {
   }
 }
 
+function buildCModule() {
+  return new CModule(cModuleSource(), {
+    frida_state: state,
+    hv_set_sys_reg: Module.getGlobalExportByName('hv_vcpu_set_sys_reg'),
+    hv_get_sys_reg: Module.getGlobalExportByName('hv_vcpu_get_sys_reg'),
+    hv_set_reg: Module.getGlobalExportByName('hv_vcpu_set_reg'),
+    hv_get_reg: Module.getGlobalExportByName('hv_vcpu_get_reg'),
+    hv_set_trap_debug_exceptions: Module.getGlobalExportByName('hv_vcpu_set_trap_debug_exceptions'),
+    gdb_set_stop_cpu: Module.getGlobalExportByName('gdb_set_stop_cpu'),
+    qemu_system_debug_request: Module.getGlobalExportByName('qemu_system_debug_request'),
+  });
+}
+
 function captureVcpuFd() {
   Interceptor.attach(hvfGetRegisters, {
     onEnter(args) {
-      if (vcpuFd < 0)
-        vcpuFd = args[0].add(CPU_STATE_FD).readU32();
+      if (state.add(STATE_VCPU_FD).readS32() < 0)
+        state.add(STATE_VCPU_FD).writeS32(args[0].add(CPU_STATE_FD).readU32());
     }
   });
 }
@@ -116,110 +95,152 @@ function emulateHardwareBreakpoints() {
 
   Interceptor.attach(cpuBreakpointInsert, {
     onEnter(args) {
-      hardwareBreakpoint = uint64(args[1].toString());
+      state.add(STATE_BREAKPOINT_ADDRESS).writeU64(uint64(args[1].toString()));
+      state.add(STATE_BREAKPOINT_ARMED).writeU32(1);
     }
   });
 
   Interceptor.attach(cpuBreakpointRemoveAll, {
     onEnter() {
-      hardwareBreakpoint = null;
+      state.add(STATE_BREAKPOINT_ARMED).writeU32(0);
     }
   });
 
-  Interceptor.attach(hvfVcpuExec, {
-    onEnter() {
-      programHardwareBreakpoint(hardwareBreakpoint !== null);
-    }
-  });
+  Interceptor.attach(hvfVcpuExec, { onEnter: cm.on_vcpu_exec });
 }
 
 function rewriteUnknownVcpuExits() {
-  // The reason is in x8 at the compare; context registers are NativePointer, so
-  // read them with toUInt32().
   Interceptor.attach(reasonCompare, {
     onEnter() {
-      if (this.context.x8.toUInt32() === HV_EXIT_REASON_UNKNOWN)
-        this.context.x8 = ptr(HV_EXIT_REASON_CANCELED);
+      if (this.context.x8.toUInt32() === 3)
+        this.context.x8 = ptr(0);
     }
   });
 }
 
 function handleDebugExceptions() {
-  Interceptor.attach(hvfHandleException, {
-    onEnter(args) {
-      const cpuState = args[0];
-      const syndrome = cpuState.add(CPU_STATE_EXIT).readPointer().add(8);
-      const exceptionClass = syndrome.readU64().shr(26).and(0x3f).toNumber();
-
-      if (breakpointClasses.has(exceptionClass))
-        reportBreakpointStop(cpuState);
-      else if (guestDebugClasses.has(exceptionClass))
-        reinjectToGuest(syndrome.readU64());
-      else
-        return;
-
-      cpuState.add(CPU_STATE_EXIT_REQUEST).writeU32(1);
-      neutralizeSyndrome(syndrome);
-    }
-  });
-}
-
-function reportBreakpointStop(cpuState) {
-  programHardwareBreakpoint(false);
-  setStopCpu(cpuState);
-  requestDebug();
-}
-
-function reinjectToGuest(syndrome) {
-  if (vcpuFd < 0)
-    return;
-
-  const pc = readReg(HV_REG_PC);
-  const cpsr = readReg(HV_REG_CPSR);
-  const vbar = readSysReg(VBAR_EL1);
-
-  setSysReg(vcpuFd, ELR_EL1, pc);
-  setSysReg(vcpuFd, SPSR_EL1, cpsr);
-  setSysReg(vcpuFd, ESR_EL1, syndrome.and(uint64('0xffffffff')));
-
-  const fromEl0 = cpsr.and(uint64('0xf')).toNumber() === 0;
-  setReg(vcpuFd, HV_REG_PC, vbar.add(fromEl0 ? 0x400 : 0x200));
-  setReg(vcpuFd, HV_REG_CPSR, PSTATE_EL1H_MASKED);
-}
-
-function readReg(index) {
-  if (getReg(vcpuFd, index, scratch) === 0)
-    return scratch.readU64();
-  return uint64(0);
-}
-
-function readSysReg(encoding) {
-  if (getSysReg(vcpuFd, encoding, scratch) === 0)
-    return scratch.readU64();
-  return uint64(0);
-}
-
-function programHardwareBreakpoint(enable) {
-  if (vcpuFd < 0)
-    return;
-
-  if (enable && hardwareBreakpoint !== null) {
-    setSysReg(vcpuFd, DBGBVR0_EL1, hardwareBreakpoint);
-    setSysReg(vcpuFd, DBGBCR0_EL1, DBGBCR_ENABLE_EL0_EL1);
-    setSysReg(vcpuFd, MDSCR_EL1, MDSCR_MDE);
-    setTrapDebugExceptions(vcpuFd, 1);
-  } else {
-    setSysReg(vcpuFd, DBGBCR0_EL1, uint64(0));
-    setSysReg(vcpuFd, MDSCR_EL1, uint64(0));
-    setTrapDebugExceptions(vcpuFd, 0);
-  }
-}
-
-function neutralizeSyndrome(syndrome) {
-  syndrome.writeU64(syndrome.readU64().and(uint64('0x03ffffff')).or(uint64('0x04000000')));
+  Interceptor.attach(hvfHandleException, { onEnter: cm.on_handle_exception });
 }
 
 function allowPipePath(path) {
   const addAllowedPath = new NativeFunction(Module.getGlobalExportByName('android_unix_pipes_add_allowed_path'), 'void', ['pointer']);
   addAllowedPath(Memory.allocUtf8String(path));
+}
+
+function cModuleSource() {
+  return `
+#include <gum/guminterceptor.h>
+#include <stdint.h>
+
+#define CPU_STATE_EXIT 0x82c8
+#define CPU_STATE_EXIT_REQUEST 0x82a4
+
+#define STATE_VCPU_FD 0
+#define STATE_BREAKPOINT_ARMED 4
+#define STATE_BREAKPOINT_ADDRESS 8
+
+#define ELR_EL1 0xc201
+#define SPSR_EL1 0xc200
+#define ESR_EL1 0xc290
+#define VBAR_EL1 0xc600
+#define MDSCR_EL1 0x8012
+#define DBGBVR0_EL1 0x8004
+#define DBGBCR0_EL1 0x8005
+#define DBGBCR_ENABLE_EL0_EL1 0x1e7ULL
+#define MDSCR_MDE 0xa000ULL
+#define PSTATE_EL1H_MASKED 0x3c5ULL
+
+#define HV_REG_PC 31
+#define HV_REG_CPSR 34
+
+extern uint8_t frida_state[];
+
+extern int hv_set_sys_reg (uint64_t vcpu, uint32_t reg, uint64_t value);
+extern int hv_get_sys_reg (uint64_t vcpu, uint32_t reg, uint64_t * value);
+extern int hv_set_reg (uint64_t vcpu, uint32_t reg, uint64_t value);
+extern int hv_get_reg (uint64_t vcpu, uint32_t reg, uint64_t * value);
+extern int hv_set_trap_debug_exceptions (uint64_t vcpu, uint32_t enable);
+extern void gdb_set_stop_cpu (void * cpu);
+extern void qemu_system_debug_request (void);
+
+#define VCPU_FD (*(volatile int32_t *) (frida_state + STATE_VCPU_FD))
+#define BREAKPOINT_ARMED (*(volatile uint32_t *) (frida_state + STATE_BREAKPOINT_ARMED))
+#define BREAKPOINT_ADDRESS (*(volatile uint64_t *) (frida_state + STATE_BREAKPOINT_ADDRESS))
+
+static void
+program_hardware_breakpoint (int32_t fd, int enable)
+{
+  if (enable)
+  {
+    hv_set_sys_reg (fd, DBGBVR0_EL1, BREAKPOINT_ADDRESS);
+    hv_set_sys_reg (fd, DBGBCR0_EL1, DBGBCR_ENABLE_EL0_EL1);
+    hv_set_sys_reg (fd, MDSCR_EL1, MDSCR_MDE);
+    hv_set_trap_debug_exceptions (fd, 1);
+  }
+  else
+  {
+    hv_set_sys_reg (fd, DBGBCR0_EL1, 0);
+    hv_set_sys_reg (fd, MDSCR_EL1, 0);
+    hv_set_trap_debug_exceptions (fd, 0);
+  }
+}
+
+static void
+reinject_to_guest (int32_t fd, uint64_t syndrome)
+{
+  uint64_t pc = 0, cpsr = 0, vbar = 0;
+
+  hv_get_reg (fd, HV_REG_PC, &pc);
+  hv_get_reg (fd, HV_REG_CPSR, &cpsr);
+  hv_get_sys_reg (fd, VBAR_EL1, &vbar);
+
+  hv_set_sys_reg (fd, ELR_EL1, pc);
+  hv_set_sys_reg (fd, SPSR_EL1, cpsr);
+  hv_set_sys_reg (fd, ESR_EL1, syndrome & 0xffffffff);
+
+  hv_set_reg (fd, HV_REG_PC, vbar + (((cpsr & 0xf) == 0) ? 0x400 : 0x200));
+  hv_set_reg (fd, HV_REG_CPSR, PSTATE_EL1H_MASKED);
+}
+
+void
+on_vcpu_exec (GumInvocationContext * ic)
+{
+  int32_t fd = VCPU_FD;
+  if (fd < 0)
+    return;
+  program_hardware_breakpoint (fd, BREAKPOINT_ARMED != 0);
+}
+
+void
+on_handle_exception (GumInvocationContext * ic)
+{
+  uint8_t * cpu = gum_invocation_context_get_nth_argument (ic, 0);
+  uint64_t * syndrome = (uint64_t *) (*((uint8_t **) (cpu + CPU_STATE_EXIT)) + 8);
+  uint64_t esr = *syndrome;
+  uint32_t exception_class = (esr >> 26) & 0x3f;
+
+  int is_breakpoint = (exception_class == 0x30 || exception_class == 0x31);
+  int is_guest_debug = (exception_class == 0x3c || exception_class == 0x32 ||
+      exception_class == 0x33 || exception_class == 0x34 || exception_class == 0x35);
+  if (!is_breakpoint && !is_guest_debug)
+    return;
+
+  int32_t fd = VCPU_FD;
+
+  if (is_breakpoint)
+  {
+    if (fd >= 0)
+      program_hardware_breakpoint (fd, 0);
+    gdb_set_stop_cpu (cpu);
+    qemu_system_debug_request ();
+  }
+  else if (fd >= 0)
+  {
+    reinject_to_guest (fd, esr);
+  }
+
+  *((uint32_t *) (cpu + CPU_STATE_EXIT_REQUEST)) = 1;
+  *syndrome = (esr & 0x03ffffff) | 0x04000000;
+}
+`;
 }
