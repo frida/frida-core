@@ -30,6 +30,7 @@ backend_sources += files(
   'virtualbox-stub.vala',
   'virtualbox-console.vala',
   'virtualbox-debugger.vala',
+  'android-emulator-stub.vala',
   'arch-x86' / 'machine.vala',
   'arch-x86_64' / 'machine.vala',
   'arch-arm' / 'machine.vala',

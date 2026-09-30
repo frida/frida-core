@@ -250,14 +250,7 @@ namespace Frida.GDB {
 		}
 
 		protected virtual async void detect_vendor_features (Cancellable? cancellable) throws Error, IOError {
-			try {
-				string info = yield run_remote_command ("info", cancellable);
-				if ("Corellium" in info)
-					supported_features.add ("corellium");
-			} catch (GLib.Error e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
-			}
+			yield detect_corellium (cancellable);
 
 			try {
 				var response = yield query_simple ("vCont?", cancellable);
@@ -273,6 +266,17 @@ namespace Frida.GDB {
 				string response = yield query_property ("qemu.PhyMemMode", cancellable);
 				if (response.length == 1)
 					supported_features.add ("qemu-phy-mem-mode");
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+			}
+		}
+
+		protected virtual async void detect_corellium (Cancellable? cancellable) throws Error, IOError {
+			try {
+				string info = yield run_remote_command ("info", cancellable);
+				if ("Corellium" in info)
+					supported_features.add ("corellium");
 			} catch (GLib.Error e) {
 				if (e is IOError.CANCELLED)
 					throw (IOError) e;

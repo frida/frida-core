@@ -146,6 +146,9 @@ namespace Frida {
 				case BareboneStubFlavor.VIRTUALBOX:
 					debugger = yield Barebone.VirtualBoxStubClient.open (stream, cancellable);
 					break;
+				case BareboneStubFlavor.ANDROID_EMULATOR:
+					debugger = yield Barebone.AndroidEmulatorStubClient.open (stream, cancellable);
+					break;
 				default:
 					debugger = yield GDB.Client.open (stream, cancellable);
 					break;
