@@ -1,7 +1,6 @@
 gadget_sources = [
   'gadget.vala',
   'gadget-glue.c',
-'luoye_inject.cpp',
 ]
 
 if host_os_family == 'darwin'
