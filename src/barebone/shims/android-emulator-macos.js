@@ -9,6 +9,8 @@ const cpuBreakpointRemoveAll = Module.getGlobalExportByName('cpu_breakpoint_remo
 const hvfVcpuExec = Module.getGlobalExportByName('hvf_vcpu_exec');
 const hvfHandleException = Module.getGlobalExportByName('hvf_handle_exception');
 
+const cpuResume = Module.getGlobalExportByName('cpu_resume');
+
 const hvSetReg = new NativeFunction(Module.getGlobalExportByName('hv_vcpu_set_reg'), 'int', ['uint64', 'uint32', 'uint64']);
 const HV_REG_PC = 31;
 const HV_REG_CPSR = 34;
@@ -20,7 +22,8 @@ const breakpointInvalidate = slide.add(0x100024b2c);
 const STATE_VCPU_FD = 0;
 const STATE_BREAKPOINT_ARMED = 4;
 const STATE_BREAKPOINT_ADDRESS = 8;
-const state = Memory.alloc(16);
+const STATE_IN_RESUME = 16;
+const state = Memory.alloc(24);
 state.add(STATE_VCPU_FD).writeS32(-1);
 
 let pendingRegisterCommit = null;
@@ -32,6 +35,7 @@ commitGdbRegisterWrites();
 emulateHardwareBreakpoints();
 rewriteUnknownVcpuExits();
 handleDebugExceptions();
+resumeAllCoresOnContinue();
 rpc.exports.allowPipePath = allowPipePath;
 
 function verifyBuild() {
@@ -58,6 +62,7 @@ function buildCModule() {
     hv_set_trap_debug_exceptions: Module.getGlobalExportByName('hv_vcpu_set_trap_debug_exceptions'),
     gdb_set_stop_cpu: Module.getGlobalExportByName('gdb_set_stop_cpu'),
     qemu_system_debug_request: Module.getGlobalExportByName('qemu_system_debug_request'),
+    resume_all_vcpus: Module.getGlobalExportByName('resume_all_vcpus'),
   });
 }
 
@@ -139,6 +144,10 @@ function handleDebugExceptions() {
   Interceptor.attach(hvfHandleException, { onEnter: cm.on_handle_exception });
 }
 
+function resumeAllCoresOnContinue() {
+  Interceptor.attach(cpuResume, { onEnter: cm.on_cpu_resume });
+}
+
 function allowPipePath(path) {
   const addAllowedPath = new NativeFunction(Module.getGlobalExportByName('android_unix_pipes_add_allowed_path'), 'void', ['pointer']);
   addAllowedPath(Memory.allocUtf8String(path));
@@ -179,7 +188,10 @@ extern int hv_get_reg (uint64_t vcpu, uint32_t reg, uint64_t * value);
 extern int hv_set_trap_debug_exceptions (uint64_t vcpu, uint32_t enable);
 extern void gdb_set_stop_cpu (void * cpu);
 extern void qemu_system_debug_request (void);
+extern void resume_all_vcpus (void);
 
+#define STATE_IN_RESUME 16
+#define IN_RESUME (*(volatile uint32_t *) (frida_state + STATE_IN_RESUME))
 #define VCPU_FD (*(volatile int32_t *) (frida_state + STATE_VCPU_FD))
 #define BREAKPOINT_ARMED (*(volatile uint32_t *) (frida_state + STATE_BREAKPOINT_ARMED))
 #define BREAKPOINT_ADDRESS (*(volatile uint64_t *) (frida_state + STATE_BREAKPOINT_ADDRESS))
@@ -258,6 +270,16 @@ on_handle_exception (GumInvocationContext * ic)
 
   *((uint32_t *) (cpu + CPU_STATE_EXIT_REQUEST)) = 1;
   *syndrome = (esr & 0x03ffffff) | 0x04000000;
+}
+
+void
+on_cpu_resume (GumInvocationContext * ic)
+{
+  if (IN_RESUME != 0)
+    return;
+  IN_RESUME = 1;
+  resume_all_vcpus ();
+  IN_RESUME = 0;
 }
 `;
 }
