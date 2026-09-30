@@ -2,7 +2,7 @@
 #include <glib.h>
 
 // 这个函数会被编译进 gd.so，Vala 层调的就是它
-void notify_luoye_unblock_bridge(void) {
+void LuoYe_Unblock(void) {
     typedef void (*UnblockFunc)(void);
     
     // 运行时动态去整个进程里抓取 Zygisk 引导 SO 里的 LuoYe_Unblock 符号
