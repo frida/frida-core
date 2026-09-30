@@ -9,6 +9,10 @@ const cpuBreakpointRemoveAll = Module.getGlobalExportByName('cpu_breakpoint_remo
 const hvfVcpuExec = Module.getGlobalExportByName('hvf_vcpu_exec');
 const hvfHandleException = Module.getGlobalExportByName('hvf_handle_exception');
 
+const hvSetReg = new NativeFunction(Module.getGlobalExportByName('hv_vcpu_set_reg'), 'int', ['uint64', 'uint32', 'uint64']);
+const HV_REG_PC = 31;
+const HV_REG_CPSR = 34;
+
 const slide = cpuBreakpointInsert.sub(0x100024a6c);
 const reasonCompare = slide.add(0x10012bfe8);
 const breakpointInvalidate = slide.add(0x100024b2c);
@@ -70,10 +74,23 @@ function commitGdbRegisterWrites() {
   Interceptor.attach(cpuGdbWriteRegister, {
     onEnter(args) {
       this.cpuState = args[0];
+      this.memBuf = args[1];
       this.register = args[2].toInt32();
     },
     onLeave() {
-      if (this.register >= 31) {
+      const reg = this.register;
+      const fd = this.cpuState.add(CPU_STATE_FD).readS32();
+      let hvreg = -1;
+      if (reg >= 0 && reg <= 30)
+        hvreg = reg;
+      else if (reg === 32)
+        hvreg = HV_REG_PC;
+      else if (reg === 33)
+        hvreg = HV_REG_CPSR;
+      if (hvreg >= 0 && fd >= 0)
+        hvSetReg(uint64(fd), hvreg, this.memBuf.readU64());
+
+      if (reg >= 31) {
         this.cpuState.add(CPU_STATE_DIRTY).writeU8(1);
         pendingRegisterCommit = this.cpuState;
       }
