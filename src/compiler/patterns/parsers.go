@@ -1289,7 +1289,7 @@ func (p *parserEmitter) memberOwner(object Value) string {
 func (p *parserEmitter) builtin(call *Builtin) string {
 	arguments := []string{"$env"}
 	for i, argument := range call.Arguments {
-		if i == 0 && call.Name == "std::mem::copy_value_to_section" {
+		if i == 0 && builtinsReadingPatternBytes[call.Name] {
 			if denotesPattern(argument) {
 				location := p.targetLocation(argument)
 				arguments = append(arguments, fmt.Sprintf("{ base: %s, offset: %s, size: %s }", location.base, location.offset, p.targetSize(argument)))
@@ -1301,6 +1301,13 @@ func (p *parserEmitter) builtin(call *Builtin) string {
 		arguments = append(arguments, p.argument(argument))
 	}
 	return fmt.Sprintf("%s(%s)", p.helper(builtins[call.Name].js), strings.Join(arguments, ", "))
+}
+
+var builtinsReadingPatternBytes = map[string]bool{
+	"std::mem::copy_value_to_section": true,
+	"std::hash::crc32":                true,
+	"std::hash::crc16":                true,
+	"std::hash::crc8":                 true,
 }
 
 func denotesPattern(v Value) bool {

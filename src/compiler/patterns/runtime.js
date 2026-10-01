@@ -489,7 +489,7 @@ export function $std_hash_crc16(env, ...args) { return $std_hash_crc(env, 16, ..
 export function $std_hash_crc8(env, ...args) { return $std_hash_crc(env, 8, ...args); }
 
 function $std_hash_crc(env, width, pattern, init, poly, xorOut, reflectIn, reflectOut) {
-    const bytes = new Uint8Array(pattern.$address.readByteArray(pattern.$size));
+    const bytes = new Uint8Array(pattern.base.readByteArray(pattern.size, pattern.offset));
     const mask = (1n << BigInt(width)) - 1n;
     const top = 1n << BigInt(width - 1);
     const reflect = (value, bits) => { let r = 0n; for (let i = 0; i < bits; i++) if (value & (1n << BigInt(i))) r |= 1n << BigInt(bits - 1 - i); return r; };
