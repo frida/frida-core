@@ -631,6 +631,11 @@ func (f *frame) eval(v Value) (runtimeValue, error) {
 		}
 		return int64(node.Offset - f.cursorOwner().base), nil
 	case *SizeOfValue:
+		if local, isLocal := v.Target.(*LocalRef); isLocal {
+			if text, isString := f.locals[local.Local].(string); isString {
+				return int64(len(text)), nil
+			}
+		}
 		node, err := f.target(v.Target)
 		if err != nil {
 			return nil, err
