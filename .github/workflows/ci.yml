@@ -668,9 +668,17 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.msvc-arch }}
+      - name: Set up MSVC environment
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products * -latest -property installationPath
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvarsall.bat`" ${{ matrix.msvc-arch }} >nul && set" | ForEach-Object {
+            $name, $value = $_ -split '=', 2
+            if ($before[$name] -ne $value) {
+              "$name=$value" >> $env:GITHUB_ENV
+            }
+          }
 
       - uses: actions/setup-python@v6
         with:
