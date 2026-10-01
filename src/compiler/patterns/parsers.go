@@ -8,7 +8,7 @@ import (
 )
 
 func (e *jsEmitter) emitParser(out *strings.Builder, t Type) {
-	fmt.Fprintf(out, "    static parse(address, size = Infinity, inputs = {}) { return %s.$parse(ptr(address), %s(ptr(address), size, undefined, inputs), null); }\n", shortName(t.(NamedType).TypeName()), e.helper("$environment"))
+	fmt.Fprintf(out, "    static parse(address, size = Infinity, inputs = {}) { return %s.$parse(0, %s(ptr(address), size, undefined, inputs), null); }\n", shortName(t.(NamedType).TypeName()), e.helper("$environment"))
 	e.emitParseBody(out, t)
 }
 
@@ -16,15 +16,16 @@ func (e *jsEmitter) emitParseBody(out *strings.Builder, t Type) {
 	e.parsing = true
 	defer func() { e.parsing = false }()
 	p := &parserEmitter{jsEmitter: e, t: t, out: out}
-	out.WriteString("    static $parse(address, $env, $parent, $args = [], $startBit = 0) {\n")
+	out.WriteString("    static $parse($start, $env, $parent, $args = [], $startBit = 0) {\n")
 	for i, param := range typeParams(t) {
 		fmt.Fprintf(out, "        let %s = $args[%d];\n", localName(param), i)
 	}
 	if s, isStruct := t.(*Struct); isStruct && s.Global {
-		fmt.Fprintf(out, "        $env = %s(address, $env.limit, $env.sections, $env.inputs);\n", e.helper("$environment"))
+		fmt.Fprintf(out, "        $env = %s($env.base.add($start), $env.limit, $env.sections, $env.inputs);\n", e.helper("$environment"))
+		out.WriteString("        $start = 0;\n")
 	}
-	out.WriteString("        $env.cursor = address;\n")
-	out.WriteString("        const $this = { $address: address, $size: 0 };\n")
+	out.WriteString("        $env.cursor = $start;\n")
+	out.WriteString("        const $this = { $address: $env.base.add($start), $size: 0 };\n")
 	fmt.Fprintf(out, "        Object.defineProperty($this, \"$type\", { value: %s });\n", shortName(t.(NamedType).TypeName()))
 	out.WriteString("        Object.defineProperty($this, \"$args\", { value: $args });\n")
 	if s, isStruct := t.(*Struct); isStruct && s.Global {
@@ -42,14 +43,14 @@ func (e *jsEmitter) emitParseBody(out *strings.Builder, t Type) {
 		out.WriteString("        $body: {\n")
 		p.emitStatements(structBody(t), "            ")
 		out.WriteString("        }\n")
-		out.WriteString("        $this.$size = $offset(address, $env.cursor);\n")
+		out.WriteString("        $this.$size = $env.cursor - $start;\n")
 	case *Union:
 		p.abi = t.ABI
 		p.union = true
 		out.WriteString("        $body: {\n")
 		p.emitStatements(t.Body, "            ")
 		out.WriteString("        }\n")
-		out.WriteString("        $this.$size = Math.max(0, ...Object.values($this.$fields).map((f) => $offset(address, f.address) + f.size));\n")
+		out.WriteString("        $this.$size = Math.max(0, ...Object.values($this.$fields).map((f) => f.offset - $start + f.size));\n")
 	case *Bitfield:
 		p.bits = true
 		out.WriteString("        let $bit = $startBit;\n")
@@ -61,10 +62,9 @@ func (e *jsEmitter) emitParseBody(out *strings.Builder, t Type) {
 		}
 		out.WriteString("        $this.$bits = $bit - $startBit;\n")
 		out.WriteString("        $this.$size = Math.ceil($bit / 8);\n")
-		out.WriteString("        $this.$value = $readBitRange(address, 0, Math.min(64, $this.$size * 8));\n")
+		out.WriteString("        $this.$value = $readBitRange($env.base, $start, 0, Math.min(64, $this.$size * 8));\n")
 		e.helper("$readBitRange")
 	}
-	e.helper("$offset")
 	for _, typed := range attributedTypes(t) {
 		for _, use := range typed {
 			p.emitTypeAttribute(use, "        ")
@@ -174,7 +174,7 @@ func (p *parserEmitter) emitStatements(statements []Statement, indent string) {
 		case *Assignment:
 			switch target := s.Target.(type) {
 			case *Cursor:
-				fmt.Fprintf(p.out, "%s$env.cursor = $env.base.add(%s);\n", indent, p.expression(s.Value))
+				fmt.Fprintf(p.out, "%s$env.cursor = %s(%s);\n", indent, p.helper("$pointerDelta"), p.expression(s.Value))
 			case *LocalRef:
 				fmt.Fprintf(p.out, "%s%s = %s;\n", indent, p.localAccess(target.Local), p.expression(s.Value))
 			case *GlobalRef:
@@ -313,7 +313,7 @@ func (p *parserEmitter) emitHeapLocal(local *Local, indent string) {
 		fmt.Fprintf(p.out, "%s    $henv.base.section.write(0, new Uint8Array($source.$address.readByteArray($source.$size)));\n", indent)
 	}
 	fmt.Fprintf(p.out, "%s    %s($henv.base.section, () => { %s = (($env) => %s)($henv)[0]; });\n", indent, p.helper("$placeInSection"),
-		p.localAccess(local), p.reader(local.Type, "$env.base"))
+		p.localAccess(local), p.reader(local.Type, "0"))
 	fmt.Fprintf(p.out, "%s}\n", indent)
 }
 
@@ -357,7 +357,7 @@ func (p *parserEmitter) elementStore(target *Index, value string) string {
 	if primitive == nil {
 		return ""
 	}
-	address := fmt.Sprintf("%s.address.add(Number(%s) * %d)", metadata, p.expression(target.Index), primitive.Kind.Size())
+	address := location{base: metadata + ".base", offset: fmt.Sprintf("%s.offset + Number(%s) * %d", metadata, p.expression(target.Index), primitive.Kind.Size())}
 	return p.primitiveStore(primitive, address, fmt.Sprintf("%d", primitive.Kind.Size()), value)
 }
 
@@ -380,19 +380,19 @@ func (p *parserEmitter) memberStore(target *MemberOf, value string) string {
 		return ""
 	}
 	metadata := fmt.Sprintf("%s.$fields.%s", p.expression(target.Object), target.Name)
-	return p.primitiveStore(primitive, metadata+".address", metadata+".size", value)
+	return p.primitiveStore(primitive, location{base: metadata + ".base", offset: metadata + ".offset"}, metadata+".size", value)
 }
 
-func (p *parserEmitter) primitiveStore(primitive *Primitive, address string, size string, value string) string {
+func (p *parserEmitter) primitiveStore(primitive *Primitive, address location, size string, value string) string {
 	switch {
 	case primitive.Kind == Float || primitive.Kind == Double:
-		return fmt.Sprintf("%s(%s, 0, %s, %q, %s, %s)", p.helper("$writeScalar"), address, size, viewMethod(primitive.Kind, "set"), value, p.orderLiteral(primitive.Order))
+		return fmt.Sprintf("%s(%s, %s, %q, %s, %s)", p.helper("$writeScalar"), address.arguments(), size, viewMethod(primitive.Kind, "set"), value, p.orderLiteral(primitive.Order))
 	case primitive.Kind == Char || primitive.Kind == Char16:
-		return fmt.Sprintf("%s(%s, 0, %s, String(%s).charCodeAt(0), %s)", p.helper("$writeUint"), address, size, value, p.orderLiteral(primitive.Order))
+		return fmt.Sprintf("%s(%s, %s, String(%s).charCodeAt(0), %s)", p.helper("$writeUint"), address.arguments(), size, value, p.orderLiteral(primitive.Order))
 	case primitive.Kind == Bool:
-		return fmt.Sprintf("%s(%s, 0, %s, %s(%s) ? 1 : 0, %s)", p.helper("$writeUint"), address, size, p.helper("$truthy"), value, p.orderLiteral(primitive.Order))
+		return fmt.Sprintf("%s(%s, %s, %s(%s) ? 1 : 0, %s)", p.helper("$writeUint"), address.arguments(), size, p.helper("$truthy"), value, p.orderLiteral(primitive.Order))
 	}
-	return fmt.Sprintf("%s(%s, 0, %s, %s, %s)", p.helper("$writeUint"), address, size, value, p.orderLiteral(primitive.Order))
+	return fmt.Sprintf("%s(%s, %s, %s, %s)", p.helper("$writeUint"), address.arguments(), size, value, p.orderLiteral(primitive.Order))
 }
 
 func localName(local *Local) string {
@@ -432,7 +432,7 @@ func (p *parserEmitter) emitBitMember(member *BitfieldMember, indent string) {
 		return
 	}
 	t := p.t.(*Bitfield)
-	value := fmt.Sprintf("%s(address, $pos, $width, $big)", p.helper("$readBitRange"))
+	value := fmt.Sprintf("%s($env.base, $start, $pos, $width, $big)", p.helper("$readBitRange"))
 	switch {
 	case member.Bool:
 		value += " !== 0"
@@ -444,7 +444,7 @@ func (p *parserEmitter) emitBitMember(member *BitfieldMember, indent string) {
 	fmt.Fprintf(p.out, "%s    const $big = %s;\n", indent, p.bigEndian(t))
 	fmt.Fprintf(p.out, "%s    const $pos = %s;\n", indent, p.bitPosition(t))
 	fmt.Fprintf(p.out, "%s    $this.%s = %s;\n", indent, member.Name, value)
-	fmt.Fprintf(p.out, "%s    $this.$fields.%s = { address: address.add(Math.floor($pos / 8)), size: Math.ceil(($pos %% 8 + $width) / 8), bitOffset: $pos, bits: $width };\n", indent, member.Name)
+	fmt.Fprintf(p.out, "%s    $this.$fields.%s = new %s($env.base, $start + Math.floor($pos / 8), Math.ceil(($pos %% 8 + $width) / 8), $pos, $width);\n", indent, member.Name, p.helper("$BitSpan"))
 	fmt.Fprintf(p.out, "%s    $bit += $width;\n", indent)
 	fmt.Fprintf(p.out, "%s}\n", indent)
 }
@@ -471,22 +471,22 @@ func (p *parserEmitter) bitPosition(t *Bitfield) string {
 
 func (p *parserEmitter) emitNestedBitfield(field *Field, indent string) {
 	fmt.Fprintf(p.out, "%s{\n", indent)
-	fmt.Fprintf(p.out, "%s    const $start = $bit;\n", indent)
+	fmt.Fprintf(p.out, "%s    const $first = $bit;\n", indent)
 	switch t := Unalias(field.Type).(type) {
 	case *Bitfield:
-		fmt.Fprintf(p.out, "%s    const $value = %s.$parse(address.add(Math.floor($bit / 8)), $env, $this, [], $bit %% 8);\n", indent, p.typeRef(t.Name))
+		fmt.Fprintf(p.out, "%s    const $value = %s.$parse($start + Math.floor($bit / 8), $env, $this, [], $bit %% 8);\n", indent, p.typeRef(t.Name))
 		fmt.Fprintf(p.out, "%s    $bit += $value.$bits;\n", indent)
 	case *Array:
 		element := Unalias(t.Element).(*Bitfield)
 		fmt.Fprintf(p.out, "%s    const $value = [];\n", indent)
 		fmt.Fprintf(p.out, "%s    for (let $i = 0, $n = Number(%s); $i !== $n; $i++) {\n", indent, p.expression(t.Length))
-		fmt.Fprintf(p.out, "%s        const $item = %s.$parse(address.add(Math.floor($bit / 8)), $env, $this, [], $bit %% 8);\n", indent, p.typeRef(element.Name))
+		fmt.Fprintf(p.out, "%s        const $item = %s.$parse($start + Math.floor($bit / 8), $env, $this, [], $bit %% 8);\n", indent, p.typeRef(element.Name))
 		fmt.Fprintf(p.out, "%s        $value.push($item);\n", indent)
 		fmt.Fprintf(p.out, "%s        $bit += $item.$bits;\n", indent)
 		fmt.Fprintf(p.out, "%s    }\n", indent)
 	}
 	fmt.Fprintf(p.out, "%s    $this.%s = $value;\n", indent, field.Name)
-	fmt.Fprintf(p.out, "%s    $this.$fields.%s = { address: address.add(Math.floor($start / 8)), size: Math.ceil(($start %% 8 + $bit - $start) / 8), bitOffset: $start, bits: $bit - $start };\n", indent, field.Name)
+	fmt.Fprintf(p.out, "%s    $this.$fields.%s = new %s($env.base, $start + Math.floor($first / 8), Math.ceil(($first %% 8 + $bit - $first) / 8), $first, $bit - $first);\n", indent, field.Name, p.helper("$BitSpan"))
 	fmt.Fprintf(p.out, "%s}\n", indent)
 }
 
@@ -497,25 +497,25 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 	}
 	if p.bits {
 		fmt.Fprintf(p.out, "%s$bit = Math.ceil($bit / 8) * 8;\n", indent)
-		fmt.Fprintf(p.out, "%s$env.cursor = address.add($bit / 8);\n", indent)
+		fmt.Fprintf(p.out, "%s$env.cursor = $start + $bit / 8;\n", indent)
 	}
 	if p.union {
-		fmt.Fprintf(p.out, "%s$env.cursor = address;\n", indent)
+		fmt.Fprintf(p.out, "%s$env.cursor = $start;\n", indent)
 	}
 	address := "$env.cursor"
 	env := "$env"
 	if field.Section != nil {
 		env = "$senv"
-		address = fmt.Sprintf("$senv.base.add(%s)", p.expression(field.Address))
+		address = fmt.Sprintf("%s(%s)", p.helper("$pointerDelta"), p.expression(field.Address))
 	} else if field.Address != nil {
-		address = fmt.Sprintf("$env.base.add(%s)", p.expression(field.Address))
+		address = fmt.Sprintf("%s(%s)", p.helper("$pointerDelta"), p.expression(field.Address))
 	} else if sequential {
 		address = p.aligned("$env.cursor", field.Type)
 	}
 	advance := sequential && (field.Address == nil || p.global) && !field.NoUniqueAddress && field.Section == nil
 
 	if _, isPadding := field.Type.(*Padding); isPadding || field.Name == "" {
-		fmt.Fprintf(p.out, "%s$env.cursor = %s.add(%s);\n", indent, address, p.sizeOf(field.Type, address))
+		fmt.Fprintf(p.out, "%s$env.cursor = %s + %s;\n", indent, address, p.sizeOf(field.Type, address))
 		return
 	}
 
@@ -543,9 +543,9 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		fmt.Fprintf(p.out, "%s    $value = $value.add(%s($env, $this, $value));\n", indent, p.functionRef(field.PointerBase))
 	}
 	fmt.Fprintf(p.out, "%s    $this.%s = $value;\n", indent, field.Name)
-	fmt.Fprintf(p.out, "%s    $this.$fields.%s = { address: $at, size: $n };\n", indent, field.Name)
+	fmt.Fprintf(p.out, "%s    $this.$fields.%s = new %s(%s.base, $at, $n);\n", indent, field.Name, p.helper("$Span"), env)
 	if pointer, isPointer := Unalias(field.Type).(*Pointer); isPointer {
-		fmt.Fprintf(p.out, "%s    $this.$fields.%s.target = () => %s;\n", indent, field.Name, p.reader(pointer.Target, "$value"))
+		fmt.Fprintf(p.out, "%s    $this.$fields.%s.target = () => %s;\n", indent, field.Name, p.reader(pointer.Target, fmt.Sprintf("%s($env.base, $value)", p.helper("$offset"))))
 	}
 	uses := field.Attributes
 	if !isView(field.Type) {
@@ -563,9 +563,9 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		p.emitAttribute(use, indent+"    ", "$this."+field.Name, "$this.$fields."+field.Name)
 	}
 	if advance {
-		fmt.Fprintf(p.out, "%s    $env.cursor = $at.add($this.$fields.%s.size);\n", indent, field.Name)
+		fmt.Fprintf(p.out, "%s    $env.cursor = $at + $this.$fields.%s.size;\n", indent, field.Name)
 		if p.bits {
-			fmt.Fprintf(p.out, "%s    $bit = $offset(address, $env.cursor) * 8;\n", indent)
+			fmt.Fprintf(p.out, "%s    $bit = ($env.cursor - $start) * 8;\n", indent)
 		}
 	}
 	if field.Section != nil {
@@ -632,7 +632,7 @@ func (p *parserEmitter) aligned(cursor string, t Type) string {
 	if align == "1" {
 		return cursor
 	}
-	return fmt.Sprintf("%s($this.$address, %s, %s)", p.helper("$alignCursor"), cursor, align)
+	return fmt.Sprintf("%s($start, %s, %s)", p.helper("$alignCursor"), cursor, align)
 }
 
 func (p *parserEmitter) alignOf(t Type) string {
@@ -695,12 +695,12 @@ func (p *parserEmitter) sizeOf(t Type, address string) string {
 func (p *parserEmitter) reader(t Type, address string) string {
 	switch t := t.(type) {
 	case *Primitive:
-		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t, at(address)), t.Kind.Size())
+		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t, inEnvironment(address)), t.Kind.Size())
 	case *Enum:
 		if t.Encoding != nil {
 			return fmt.Sprintf("%s(%s)", p.helper("$patternReading"), p.reader(Unalias(t.Encoding), address))
 		}
-		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t.Underlying, at(address)), t.Underlying.Kind.Size())
+		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t.Underlying, inEnvironment(address)), t.Underlying.Kind.Size())
 	case *Struct, *Union:
 		arguments := make([]string, len(typeArgs(t)))
 		p.scoping = true
@@ -712,7 +712,7 @@ func (p *parserEmitter) reader(t Type, address string) string {
 	case *Bitfield:
 		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this))", p.helper("$parsed"), p.typeRef(t.Name), address)
 	case *Pointer:
-		return fmt.Sprintf("[%s, %s]", p.pointerReader(t, at(address)), p.sizeOf(t, address))
+		return fmt.Sprintf("[%s, %s]", p.pointerReader(t, inEnvironment(address)), p.sizeOf(t, address))
 	case *Array:
 		return p.arrayReader(t, address)
 	case *Alias:
@@ -729,16 +729,16 @@ func (p *parserEmitter) arrayReader(t *Array, address string) string {
 	}
 	if t.Length == nil {
 		if kind == Char16 {
-			return fmt.Sprintf("%s(%s)", p.helper("$parseCString16"), address)
+			return fmt.Sprintf("%s(%s)", p.helper("$parseCString16"), inEnvironment(address).arguments())
 		}
-		return fmt.Sprintf("%s(%s)", p.helper("$parseCString"), address)
+		return fmt.Sprintf("%s(%s)", p.helper("$parseCString"), inEnvironment(address).arguments())
 	}
 	length := p.expression(t.Length)
 	switch kind {
 	case Char:
-		return fmt.Sprintf("[%s(%s, 0, %s), %s]", p.helper("$readString"), address, length, length)
+		return fmt.Sprintf("[%s(%s, %s), %s]", p.helper("$readString"), inEnvironment(address).arguments(), length, length)
 	case Char16:
-		return fmt.Sprintf("[%s(%s, 0, %s), (%s) * 2]", p.helper("$readString16"), address, length, length)
+		return fmt.Sprintf("[%s(%s, %s), (%s) * 2]", p.helper("$readString16"), inEnvironment(address).arguments(), length, length)
 	}
 	return fmt.Sprintf("%s($env, %s, %s, (p) => %s)", p.helper("$parseArray"), address, length, p.reader(t.Element, "p"))
 }
@@ -798,9 +798,9 @@ func (p *parserEmitter) expression(v Value) string {
 	case *MemberOf:
 		return fmt.Sprintf("%s.%s", p.expression(v.Object), v.Name)
 	case *Cursor:
-		return fmt.Sprintf("%s($env.base, %s)", p.helper("$cursorOffset"), p.cursorVariable())
+		return fmt.Sprintf("%s(%s)", p.helper("$cursorOffset"), p.cursorVariable())
 	case *AddressOf:
-		return fmt.Sprintf("%s($env.base, %s)", p.helper("$offset"), p.targetAddress(v.Target))
+		return p.targetOffset(v.Target)
 	case *SizeOfValue:
 		return p.targetSize(v.Target)
 	case *ThisRef:
@@ -1028,24 +1028,36 @@ func (p *parserEmitter) ancestor(depth int) string {
 	return "$this" + strings.Repeat(".$parent", depth)
 }
 
-func (p *parserEmitter) targetAddress(target Value) string {
+func (p *parserEmitter) targetOffset(target Value) string {
+	location := p.targetLocation(target)
+	if location.offset == "0" {
+		return fmt.Sprintf("%s($env.base, %s)", p.helper("$offset"), location.base)
+	}
+	return location.offset
+}
+
+func (p *parserEmitter) targetLocation(target Value) location {
 	switch v := target.(type) {
 	case *FieldRef:
 		owner, last := p.fieldPath(v.Path[:len(v.Path)-1]), v.Path[len(v.Path)-1].Name
-		return fmt.Sprintf("%s.$fields.%s.address", owner, last)
+		return fieldLocation(fmt.Sprintf("%s.$fields.%s", owner, last))
 	case *ParentFieldRef:
-		return fmt.Sprintf("%s.$fields.%s.address", parentOwner(p.ancestor(v.Depth), v.Path), v.Path[len(v.Path)-1])
+		return fieldLocation(fmt.Sprintf("%s.$fields.%s", parentOwner(p.ancestor(v.Depth), v.Path), v.Path[len(v.Path)-1]))
 	case *ThisRef:
-		return p.ancestor(v.Depth) + ".$address"
+		return at(p.ancestor(v.Depth) + ".$address")
 	case *GlobalRef:
 		if v.Local != nil {
-			return p.globalAccess(v) + ".$address"
+			return at(p.globalAccess(v) + ".$address")
 		}
-		return fmt.Sprintf("%s.$fields.%s.address", parentOwner("$env.root", v.Path), v.Path[len(v.Path)-1])
+		return fieldLocation(fmt.Sprintf("%s.$fields.%s", parentOwner("$env.root", v.Path), v.Path[len(v.Path)-1]))
 	case *Index, *MemberOf, *LocalRef:
-		return p.expression(v) + ".$address"
+		return at(p.expression(v) + ".$address")
 	}
 	panic("unreachable")
+}
+
+func fieldLocation(metadata string) location {
+	return location{base: metadata + ".base", offset: metadata + ".offset"}
 }
 
 func parentOwner(ancestor string, path []string) string {
@@ -1068,7 +1080,7 @@ func (p *parserEmitter) targetSize(target Value) string {
 		return fmt.Sprintf("%s.$fields.%s.size", parentOwner(p.ancestor(v.Depth), v.Path), v.Path[len(v.Path)-1])
 	case *ThisRef:
 		if v.Depth == 0 {
-			return fmt.Sprintf("%s(address, %s)", p.helper("$offset"), p.cursorVariable())
+			return fmt.Sprintf("(%s - $start)", p.cursorVariable())
 		}
 		return p.ancestor(v.Depth) + ".$size"
 	case *GlobalRef:
@@ -1087,7 +1099,8 @@ func (p *parserEmitter) builtin(call *Builtin) string {
 	for i, argument := range call.Arguments {
 		if i == 0 && call.Name == "std::mem::copy_value_to_section" {
 			if denotesPattern(argument) {
-				arguments = append(arguments, fmt.Sprintf("{ address: %s, size: %s }", p.targetAddress(argument), p.targetSize(argument)))
+				location := p.targetLocation(argument)
+				arguments = append(arguments, fmt.Sprintf("{ base: %s, offset: %s, size: %s }", location.base, location.offset, p.targetSize(argument)))
 			} else {
 				arguments = append(arguments, fmt.Sprintf("%s(%s)", p.helper("$stringRef"), p.expression(argument)))
 			}

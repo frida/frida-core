@@ -1150,3 +1150,7 @@ func (l location) pointer() string {
 	}
 	return fmt.Sprintf("%s.add(%s)", l.base, l.offset)
 }
+
+func inEnvironment(offset string) location {
+	return location{base: "$env.base", offset: offset}
+}

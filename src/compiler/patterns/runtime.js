@@ -1,4 +1,4 @@
-export function $environment(base, limit, sections = [$mainSection(base, limit)], inputs = {}) { return { base, limit, cursor: base, root: null, globals: {}, littleEndian: true, arrayIndex: 0, breaks: false, continues: false, sections, inputs }; }
+export function $environment(base, limit, sections = [$mainSection(base, limit)], inputs = {}) { return { base, limit, cursor: 0, root: null, globals: {}, littleEndian: true, arrayIndex: 0, breaks: false, continues: false, sections, inputs }; }
 
 export function $heapEnvironment(env, size) {
     const section = new $Section(env.sections.length, "heap", true);
@@ -15,26 +15,40 @@ export function $cloneLocal(env, value) {
     section.write(0, new Uint8Array(value.$address.readByteArray(value.$size)));
     const henv = $sectionEnvironment(env, section.id);
     let clone = null;
-    $placeInSection(section, () => { clone = value.$type.$parse(henv.base, henv, null, value.$args); });
+    $placeInSection(section, () => { clone = value.$type.$parse(0, henv, null, value.$args); });
     return clone;
 }
 
 export function $sectionEnvironment(env, id) {
     const section = $sectionOf(env, id);
     const base = new $SectionPointer(section, 0);
-    return { base, get limit() { return section.size; }, cursor: base, root: env.root, globals: env.globals, littleEndian: env.littleEndian, arrayIndex: env.arrayIndex, breaks: false, continues: false, sections: env.sections };
+    return { base, get limit() { return section.size; }, cursor: 0, root: env.root, globals: env.globals, littleEndian: env.littleEndian, arrayIndex: env.arrayIndex, breaks: false, continues: false, sections: env.sections };
 }
 
-export function $check(env, address, size) {
-    if ($offset(env.base, address) + size > env.limit)
+export function $check(env, offset, size) {
+    if (offset + size > env.limit)
         throw new Error("the data ended before the value could be read");
 }
 
-export function $alignCursor(base, cursor, alignment) { return base.add(Math.ceil($offset(base, cursor) / alignment) * alignment); }
+export function $alignCursor(start, cursor, alignment) { return start + Math.ceil((cursor - start) / alignment) * alignment; }
 
-export function $cursorOffset(base, cursor) {
-    const offset = $offset(base, cursor);
-    return offset < 0 ? BigInt.asUintN(64, BigInt(offset)) : offset;
+export function $cursorOffset(cursor) { return cursor < 0 ? BigInt.asUintN(64, BigInt(cursor)) : cursor; }
+
+export class $Span {
+    constructor(base, offset, size) {
+        this.base = base;
+        this.offset = offset;
+        this.size = size;
+    }
+    get address() { return this.base.add(this.offset); }
+}
+
+export class $BitSpan extends $Span {
+    constructor(base, offset, size, bitOffset, bits) {
+        super(base, offset, size);
+        this.bitOffset = bitOffset;
+        this.bits = bits;
+    }
 }
 
 export function $snapshot(object, env) { return { cursor: env.cursor, fields: Object.keys(object.$fields) }; }
@@ -91,7 +105,7 @@ export function $patternInteger(value) {
 
 export function $pointee(metadata) {
     if (metadata.pointee === undefined) {
-        if (metadata.address.readPointer === undefined || metadata.target === undefined)
+        if (metadata.base.readPointer === undefined || metadata.target === undefined)
             throw new Error("pointer cannot be dereferenced here");
         metadata.pointee = metadata.target()[0];
     }
@@ -115,7 +129,7 @@ export function $std_mem_get_section_size(env, id) { return $sectionOf(env, id).
 export function $std_mem_set_section_size(env, id, size) { $sectionOf(env, id).resize(Number(size)); }
 
 export function $std_mem_copy_value_to_section(env, value, to, toAddress) {
-    $sectionOf(env, to).write(Number(toAddress), new Uint8Array(value.address.readByteArray(value.size)));
+    $sectionOf(env, to).write(Number(toAddress), new Uint8Array(value.base.readByteArray(value.size, value.offset)));
 }
 
 export function $std_mem_copy_section_to_section(env, from, fromAddress, to, toAddress, size) {
@@ -123,13 +137,13 @@ export function $std_mem_copy_section_to_section(env, from, fromAddress, to, toA
     $sectionOf(env, to).write(Number(toAddress), bytes);
 }
 
-export function $std_mem_eof(env) { return $offset(env.base, env.cursor) >= env.limit; }
+export function $std_mem_eof(env) { return env.cursor >= env.limit; }
 
 export function $std_mem_size(env) { return env.limit; }
 
 export function $std_mem_base_address(env) { return 0; }
 
-export function $std_mem_reached(env, address) { return $offset(env.base, env.cursor) >= Number(address); }
+export function $std_mem_reached(env, address) { return env.cursor >= Number(address); }
 
 export function $std_mem_align_to(env, alignment, value) { return alignment > 0 ? Math.ceil(Number(value) / Number(alignment)) * Number(alignment) : Number(value); }
 
@@ -454,14 +468,14 @@ function $std_hash_crc(env, width, pattern, init, poly, xorOut, reflectIn, refle
     return Number((remainder ^ BigInt(xorOut)) & mask);
 }
 
-export function $parseArray(env, address, length, read) {
+export function $parseArray(env, offset, length, read) {
     const result = [];
-    let cursor = address;
+    let cursor = offset;
     const outerIndex = env.arrayIndex;
     for (let i = 0; i !== length; i++) {
         env.arrayIndex = i;
         const [value, size] = read(cursor);
-        cursor = cursor.add(size);
+        cursor += size;
         if (env.continues) {
             env.continues = false;
             continue;
@@ -473,12 +487,12 @@ export function $parseArray(env, address, length, read) {
         }
     }
     env.arrayIndex = outerIndex;
-    return [result, $offset(address, cursor)];
+    return [result, cursor - offset];
 }
 
-export function $parseWhile(env, address, proceed, read) {
+export function $parseWhile(env, offset, proceed, read) {
     const result = [];
-    let cursor = address;
+    let cursor = offset;
     const saved = env.cursor;
     const outerIndex = env.arrayIndex;
     for (;;) {
@@ -489,7 +503,7 @@ export function $parseWhile(env, address, proceed, read) {
         if (!more)
             break;
         const [value, size] = read(cursor);
-        cursor = cursor.add(size);
+        cursor += size;
         if (env.continues) {
             env.continues = false;
             continue;
@@ -501,14 +515,14 @@ export function $parseWhile(env, address, proceed, read) {
         }
     }
     env.arrayIndex = outerIndex;
-    return [result, $offset(address, cursor)];
+    return [result, cursor - offset];
 }
 
-export function $padWhile(env, address, proceed) {
+export function $padWhile(env, offset, proceed) {
     let size = 0;
     const saved = env.cursor;
-    while ($offset(env.base, address) + size < env.limit) {
-        env.cursor = address.add(size);
+    while (offset + size < env.limit) {
+        env.cursor = offset + size;
         const more = proceed(env.cursor);
         env.cursor = saved;
         if (!more)
@@ -531,14 +545,14 @@ export function $padArray(elements, length) {
     return elements;
 }
 
-export function $parseCString(address) {
-    const value = address.readUtf8String();
-    return [value, $cStringSize(address, 0)];
+export function $parseCString(base, offset) {
+    const value = base.readUtf8String(-1, offset);
+    return [value, $cStringSize(base, offset)];
 }
 
-export function $parseCString16(address) {
-    const value = address.readUtf16String();
-    return [value, $cString16Size(address, 0)];
+export function $parseCString16(base, offset) {
+    const value = base.readUtf16String(-1, offset);
+    return [value, $cString16Size(base, offset)];
 }
 
 export function $cStringSize(base, offset) {
@@ -571,10 +585,10 @@ export function $readString16(base, offset, count) {
     return base.readUtf16String(length, offset);
 }
 
-export function $readBitRange(address, bitOffset, width, bigEndian = false) {
+export function $readBitRange(base, offset, bitOffset, width, bigEndian = false) {
     const first = Math.floor(bitOffset / 8);
     const last = Math.floor((bitOffset + width - 1) / 8);
-    const bytes = new Uint8Array(address.add(first).readByteArray(last - first + 1));
+    const bytes = new Uint8Array(base.readByteArray(last - first + 1, offset + first));
     let bits = 0n;
     if (bigEndian) {
         for (let i = 0; i !== width; i++) {
@@ -683,7 +697,7 @@ export function $packedString(value) {
 
 export function $stringRef(text) {
     const bytes = new Uint8Array(Array.from(text, (c) => c.charCodeAt(0) & 0xff));
-    return { address: { readByteArray() { return bytes.buffer; } }, size: bytes.length };
+    return { base: { readByteArray() { return bytes.buffer; } }, offset: 0, size: bytes.length };
 }
 
 export function $labelled(members, name, value) {
@@ -1052,7 +1066,7 @@ class $SectionPointer {
     }
 }
 
-function $pointerDelta(value) {
+export function $pointerDelta(value) {
     if (typeof value === "object" && value !== null)
         return value.offset;
     return typeof value === "bigint" ? Number(BigInt.asIntN(64, value)) : Number(value);
