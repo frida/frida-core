@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -1619,6 +1620,16 @@ func (d *decoder) encode(t *Primitive, value runtimeValue) ([]byte, error) {
 			code = uint64(number)
 		}
 		putInteger(bytes, code, order == binary.LittleEndian)
+	case t.Kind.Size() > 8:
+		number, err := toBig(value)
+		if err != nil {
+			return nil, err
+		}
+		modulus := new(big.Int).Lsh(big.NewInt(1), uint(len(bytes)*8))
+		new(big.Int).Mod(number, modulus).FillBytes(bytes)
+		if order == binary.LittleEndian {
+			slices.Reverse(bytes)
+		}
 	default:
 		number, err := toInt(value)
 		if err != nil {
