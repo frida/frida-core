@@ -1,15 +1,15 @@
-[CCode (gir_namespace = "FridaDroidy", gir_version = "1.0")]
-namespace Frida.Droidy {
-	public sealed class DeviceTracker : Object {
-		public signal void device_attached (DeviceDetails details);
+[CCode (gir_namespace = "FridaAdb", gir_version = "1.0")]
+namespace Frida {
+	public sealed class AdbDeviceTracker : Object {
+		public signal void device_attached (AdbDeviceDetails details);
 		public signal void device_detached (string serial);
 
-		private Client? client;
+		private AdbClient? client;
 		private Gee.HashMap<string, DeviceEntry> devices = new Gee.HashMap<string, DeviceEntry> ();
 		private Cancellable io_cancellable = new Cancellable ();
 
 		public async void open (Cancellable? cancellable = null) throws Error, IOError {
-			client = yield Client.open (cancellable);
+			client = yield AdbClient.open (cancellable);
 			client.message.connect (on_message);
 
 			try {
@@ -20,7 +20,7 @@ namespace Frida.Droidy {
 					client.message.disconnect (on_message);
 					client = null;
 
-					client = yield Client.open (cancellable);
+					client = yield AdbClient.open (cancellable);
 					var devices_encoded = yield client.request_data ("host:track-devices", cancellable);
 					yield update_devices (devices_encoded, cancellable);
 				}
@@ -117,12 +117,12 @@ namespace Frida.Droidy {
 			var still_attached = devices.has_key (entry.serial);
 			if (still_attached) {
 				entry.announced = true;
-				device_attached (new DeviceDetails (entry.serial, entry.name));
+				device_attached (new AdbDeviceDetails (entry.serial, entry.name));
 			}
 		}
 
 		private async string detect_name (string device_serial, Cancellable? cancellable) throws Error, IOError {
-			var output = yield ShellCommand.run ("getprop ro.product.model", device_serial, cancellable);
+			var output = yield AdbShellCommand.run ("getprop ro.product.model", device_serial, cancellable);
 			return output.chomp ();
 		}
 
@@ -149,7 +149,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public sealed class DeviceDetails : Object {
+	public sealed class AdbDeviceDetails : Object {
 		public string serial {
 			get;
 			construct;
@@ -160,16 +160,16 @@ namespace Frida.Droidy {
 			construct;
 		}
 
-		public DeviceDetails (string serial, string name) {
+		public AdbDeviceDetails (string serial, string name) {
 			Object (serial: serial, name: name);
 		}
 	}
 
-	namespace ShellCommand {
+	namespace AdbShellCommand {
 		private const int CHUNK_SIZE = 4096;
 
 		public static async string run (string command, string device_serial, Cancellable? cancellable = null) throws Error, IOError {
-			var client = yield Client.open (cancellable);
+			var client = yield AdbClient.open (cancellable);
 
 			try {
 				yield client.request ("host:transport:" + device_serial, cancellable);
@@ -205,8 +205,8 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public sealed class ShellSession : Object {
-		public signal void output (StdioPipe pipe, Bytes bytes);
+	public sealed class AdbShellSession : Object {
+		public signal void output (AdbStdioPipe pipe, Bytes bytes);
 		public signal void closed ();
 
 		private IOStream stream;
@@ -232,7 +232,7 @@ namespace Frida.Droidy {
 		public async void open (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
 			assert (state == CLOSED);
 
-			var client = yield Client.open (cancellable);
+			var client = yield AdbClient.open (cancellable);
 
 			try {
 				yield client.request ("host:transport:" + device_serial, cancellable);
@@ -285,7 +285,7 @@ namespace Frida.Droidy {
 			return result.stdout_text;
 		}
 
-		public async ShellCommandResult run (string command, Cancellable? cancellable) throws Error, IOError {
+		public async AdbShellCommandResult run (string command, Cancellable? cancellable) throws Error, IOError {
 			if (state == CLOSED)
 				throw new Error.INVALID_OPERATION ("Shell session is closed");
 
@@ -524,7 +524,7 @@ namespace Frida.Droidy {
 			public string command;
 			private SourceFunc? handler;
 
-			public ShellCommandResult? result;
+			public AdbShellCommandResult? result;
 			public GLib.Error? error;
 
 			public ByteArray stdout_buffer = new ByteArray ();
@@ -550,7 +550,7 @@ namespace Frida.Droidy {
 				Bytes stdout_bytes = new Bytes.take ((owned) stdout_terminated);
 				Bytes stderr_bytes = new Bytes.take ((owned) stderr_terminated);
 
-				result = new ShellCommandResult (status, stdout_bytes, stderr_bytes);
+				result = new AdbShellCommandResult (status, stdout_bytes, stderr_bytes);
 
 				handler ();
 				handler = null;
@@ -589,12 +589,12 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public enum StdioPipe {
+	public enum AdbStdioPipe {
 		STDOUT,
 		STDERR
 	}
 
-	public sealed class ShellCommandResult : Object {
+	public sealed class AdbShellCommandResult : Object {
 		public uint8 status {
 			get;
 			construct;
@@ -622,7 +622,7 @@ namespace Frida.Droidy {
 			construct;
 		}
 
-		public ShellCommandResult (uint8 status, Bytes stdout_bytes, Bytes stderr_bytes) {
+		public AdbShellCommandResult (uint8 status, Bytes stdout_bytes, Bytes stderr_bytes) {
 			Object (
 				status: status,
 				stdout_bytes: stdout_bytes,
@@ -631,12 +631,12 @@ namespace Frida.Droidy {
 		}
 	}
 
-	namespace FileSync {
+	namespace AdbFileSync {
 		private const size_t MAX_DATA_SIZE = 65536;
 
-		public static async void send (InputStream content, FileMetadata metadata, string remote_path, string device_serial,
+		public static async void send (InputStream content, AdbFileMetadata metadata, string remote_path, string device_serial,
 				Cancellable? cancellable = null) throws Error, IOError {
-			var client = yield Client.open (cancellable);
+			var client = yield AdbClient.open (cancellable);
 
 			try {
 				yield client.request ("host:transport:" + device_serial, cancellable);
@@ -686,7 +686,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public sealed class FileMetadata : Object {
+	public sealed class AdbFileMetadata : Object {
 		public uint32 mode {
 			get;
 			set;
@@ -700,16 +700,16 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public sealed class JDWPTracker : Object {
+	public sealed class AdbJDWPTracker : Object {
 		public signal void debugger_attached (uint pid);
 		public signal void debugger_detached (uint pid);
 
-		private Client? client;
+		private AdbClient? client;
 		private Gee.HashSet<uint> debugger_pids = new Gee.HashSet<uint> ();
 		private Cancellable io_cancellable = new Cancellable ();
 
 		public async void open (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
-			client = yield Client.open (cancellable);
+			client = yield AdbClient.open (cancellable);
 			client.message.connect (on_message);
 
 			try {
@@ -768,7 +768,7 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public sealed class Client : Object {
+	public sealed class AdbClient : Object {
 		public signal void closed ();
 		public signal void message (string payload);
 
@@ -793,7 +793,7 @@ namespace Frida.Droidy {
 		private const uint16 ADB_SERVER_DEFAULT_PORT = 5037;
 		private const size_t MAX_MESSAGE_LENGTH = 65536;
 
-		public static async Client open (Cancellable? cancellable = null) throws Error, IOError {
+		public static async AdbClient open (Cancellable? cancellable = null) throws Error, IOError {
 			SocketConnectable? connectable = null;
 			string? env_socket_address = Environment.get_variable ("ADB_SERVER_SOCKET");
 			string? env_server_address = Environment.get_variable ("ANDROID_ADB_SERVER_ADDRESS");
@@ -847,10 +847,10 @@ namespace Frida.Droidy {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 
-			return new Client (stream);
+			return new AdbClient (stream);
 		}
 
-		public Client (IOStream stream) {
+		public AdbClient (IOStream stream) {
 			Object (stream: stream);
 		}
 
@@ -896,10 +896,10 @@ namespace Frida.Droidy {
 			yield request_with_type (message, RequestType.PROTOCOL_CHANGE, cancellable);
 		}
 
-		public async SyncSession request_sync_session (Cancellable? cancellable = null) throws Error, IOError {
+		public async AdbSyncSession request_sync_session (Cancellable? cancellable = null) throws Error, IOError {
 			yield request ("sync:", cancellable);
 
-			var session = new SyncSession (this);
+			var session = new AdbSyncSession (this);
 
 			PendingResponse pending = null;
 			pending = new PendingResponse (RequestType.SYNC, () => {
@@ -1154,15 +1154,15 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public sealed class SyncSession : Object {
-		public Client client {
+	public sealed class AdbSyncSession : Object {
+		public AdbClient client {
 			get;
 			construct;
 		}
 
 		private Promise<bool> io_request = new Promise<bool> ();
 
-		public SyncSession (Client client) {
+		public AdbSyncSession (AdbClient client) {
 			Object (client: client);
 		}
 

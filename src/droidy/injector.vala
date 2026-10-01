@@ -87,14 +87,14 @@ namespace Frida.Droidy.Injector {
 			uint target_pid = 0;
 			JDWP.BreakpointEvent? breakpoint_event = null;
 
-			var shell = new Droidy.ShellSession ();
+			var shell = new AdbShellSession ();
 			yield shell.open (device_serial, cancellable);
 			try {
-				var so_meta = new Droidy.FileMetadata ();
+				var so_meta = new AdbFileMetadata ();
 				so_meta.mode = 0100755;
 				so_meta.time_modified = new DateTime.now_utc ();
 
-				yield Droidy.FileSync.send (gadget, so_meta, so_path_shared, device_serial, cancellable);
+				yield AdbFileSync.send (gadget, so_meta, so_path_shared, device_serial, cancellable);
 
 				var config = new Json.Builder ();
 				config
@@ -112,17 +112,17 @@ namespace Frida.Droidy.Injector {
 						.add_string_value ("full")
 					.end_object ();
 				string raw_config = Json.to_string (config.get_root (), false);
-				var config_meta = new Droidy.FileMetadata ();
+				var config_meta = new AdbFileMetadata ();
 				config_meta.mode = 0100644;
 				config_meta.time_modified = so_meta.time_modified;
-				yield Droidy.FileSync.send (new MemoryInputStream.from_data (raw_config.data), config_meta,
+				yield AdbFileSync.send (new MemoryInputStream.from_data (raw_config.data), config_meta,
 					config_path_shared, device_serial, cancellable);
 
 				yield shell.check_call ("am set-debug-app -w --persistent '%s'".printf (package), cancellable);
 
 				yield shell.check_call ("am force-stop '%s'".printf (package), cancellable);
 
-				var tracker = new Droidy.JDWPTracker ();
+				var tracker = new AdbJDWPTracker ();
 				yield tracker.open (device_serial, cancellable);
 
 				var attached_handler = tracker.debugger_attached.connect (pid => {
@@ -148,7 +148,7 @@ namespace Frida.Droidy.Injector {
 
 				JDWP.Client jdwp;
 				{
-					var c = yield Droidy.Client.open (cancellable);
+					var c = yield AdbClient.open (cancellable);
 					yield c.request ("host:transport:" + device_serial, cancellable);
 					yield c.request_protocol_change ("jdwp:%u".printf (target_pid), cancellable);
 
