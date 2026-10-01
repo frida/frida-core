@@ -550,6 +550,9 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		reader = fmt.Sprintf("(($env) => %s)($senv)", reader)
 	}
 	fmt.Fprintf(p.out, "%s{\n", indent)
+	if !advance {
+		fmt.Fprintf(p.out, "%s    const $resume = $env.cursor;\n", indent)
+	}
 	if field.Section != nil {
 		fmt.Fprintf(p.out, "%s    const $senv = %s($env, %s);\n", indent, p.helper("$sectionEnvironment"), p.expression(field.Section))
 		fmt.Fprintf(p.out, "%s    %s($senv.base.section, () => {\n", indent, p.helper("$placeInSection"))
@@ -592,6 +595,9 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 	if field.Section != nil {
 		indent = indent[4:]
 		fmt.Fprintf(p.out, "%s    });\n", indent)
+	}
+	if !advance {
+		fmt.Fprintf(p.out, "%s    $env.cursor = $resume;\n", indent)
 	}
 	fmt.Fprintf(p.out, "%s}\n", indent)
 }
