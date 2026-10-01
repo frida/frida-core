@@ -168,6 +168,7 @@ func TestReferenceSuiteUnderNode(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "gum-shim.mjs"), shim, 0644); err != nil {
 		t.Fatal(err)
 	}
+	writeRuntimeModules(t, dir)
 	runner := fmt.Sprintf(`
 import { install, allocate } from "./gum-shim.mjs";
 import { readFileSync } from "node:fs";
@@ -196,7 +197,7 @@ try {
 		if os.Getenv("PATTERN_LANGUAGE_VERBOSE") != "" {
 			fmt.Fprintln(os.Stderr, "emitting", c.name)
 		}
-		if err := os.WriteFile(filepath.Join(dir, c.name+".js"), []byte(EmitJavaScript(module, c.name+".hexpat")), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, c.name+".js"), []byte(nodeModule(module, c.name+".hexpat")), 0644); err != nil {
 			t.Fatal(err)
 		}
 		inputs, err := json.Marshal(c.inputs)

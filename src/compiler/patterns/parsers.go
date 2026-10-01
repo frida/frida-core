@@ -616,7 +616,7 @@ func (p *parserEmitter) emitAttribute(use *AttributeUse, indent string, target s
 
 func (p *parserEmitter) attributeCall(use *AttributeUse, argument string) string {
 	if use.Dynamic != nil {
-		return fmt.Sprintf("%s($env, $this, %s, %s)", p.helper("$callNamed"), p.expression(use.Dynamic), argument)
+		return fmt.Sprintf("%s($named, $env, $this, %s, %s)", p.helper("$callNamed"), p.expression(use.Dynamic), argument)
 	}
 	if use.Function != nil {
 		return fmt.Sprintf("%s($env, $this, %s)", functionName(use.Function), argument)

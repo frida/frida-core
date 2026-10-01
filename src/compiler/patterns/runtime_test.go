@@ -51,6 +51,18 @@ next=94
 pattern=00 00 c0 3f ?? ?? ?? ?? 00 00 40 40
 sizes=12,2`
 
+func nodeModule(module *Module, sourceName string) string {
+	return strings.ReplaceAll(EmitJavaScript(module, sourceName), `"`+RuntimeScheme+"/", `"./`)
+}
+
+func writeRuntimeModules(t *testing.T, dir string) {
+	for path, source := range RuntimeModules {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(*source), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestGeneratedModuleUnderNode(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -69,7 +81,7 @@ func TestGeneratedModuleUnderNode(t *testing.T) {
 	}
 	files := map[string]string{
 		"gum-shim.mjs": string(shim),
-		"player.js":    EmitJavaScript(module, "player.pat"),
+		"player.js":    nodeModule(module, "player.pat"),
 		"run.mjs":      runtimeScript,
 	}
 	for name, contents := range files {
@@ -77,6 +89,7 @@ func TestGeneratedModuleUnderNode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	writeRuntimeModules(t, dir)
 
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
@@ -133,7 +146,7 @@ func TestShapeUnderNode(t *testing.T) {
 	}
 	files := map[string]string{
 		"gum-shim.mjs": string(shim),
-		"shape.js":     EmitJavaScript(module, "shape.pat"),
+		"shape.js":     nodeModule(module, "shape.pat"),
 		"run.mjs":      shapeRuntimeScript,
 	}
 	for name, contents := range files {
@@ -141,6 +154,7 @@ func TestShapeUnderNode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	writeRuntimeModules(t, dir)
 
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
@@ -191,7 +205,7 @@ func TestIconUnderNode(t *testing.T) {
 	}
 	files := map[string]string{
 		"gum-shim.mjs": string(shim),
-		"icon.js":      EmitJavaScript(module, "icon.hexpat"),
+		"icon.js":      nodeModule(module, "icon.hexpat"),
 		"run.mjs":      iconRuntimeScript,
 	}
 	for name, contents := range files {
@@ -199,6 +213,7 @@ func TestIconUnderNode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	writeRuntimeModules(t, dir)
 
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
@@ -267,7 +282,7 @@ func TestDynamicBitfieldsUnderNode(t *testing.T) {
 	}
 	files := map[string]string{
 		"gum-shim.mjs": string(shim),
-		"record.js":    EmitJavaScript(module, "record.hexpat"),
+		"record.js":    nodeModule(module, "record.hexpat"),
 		"run.mjs":      dynamicBitfieldScript,
 	}
 	for name, contents := range files {
@@ -275,6 +290,7 @@ func TestDynamicBitfieldsUnderNode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	writeRuntimeModules(t, dir)
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node failed: %v\n%s\n%s", err, output, files["record.js"])
@@ -300,7 +316,7 @@ func TestSectionsUnderNode(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
 		"gum-shim.mjs": string(shim),
-		"sections.js":  EmitJavaScript(module, "sections.hexpat"),
+		"sections.js":  nodeModule(module, "sections.hexpat"),
 		"run.mjs": `
 import { install, allocate } from "./gum-shim.mjs";
 install();
@@ -316,6 +332,7 @@ console.log(JSON.stringify([root.blob.header, root.blob.peek, root.f, root.$fiel
 			t.Fatal(err)
 		}
 	}
+	writeRuntimeModules(t, dir)
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node failed: %v\n%s", err, output)
@@ -342,7 +359,7 @@ func TestInputsUnderNode(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
 		"gum-shim.mjs": string(shim),
-		"inputs.js":    EmitJavaScript(module, "inputs.hexpat"),
+		"inputs.js":    nodeModule(module, "inputs.hexpat"),
 		"run.mjs": `
 import { install, allocate } from "./gum-shim.mjs";
 install();
@@ -359,6 +376,7 @@ console.log(JSON.stringify([defaults.scaled, defaults.name, given.scaled, given.
 			t.Fatal(err)
 		}
 	}
+	writeRuntimeModules(t, dir)
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node failed: %v\n%s", err, output)

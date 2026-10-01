@@ -97,7 +97,7 @@ func TestAttributesUnderNode(t *testing.T) {
 	}
 	files := map[string]string{
 		"gum-shim.mjs": string(shim),
-		"entry.js":     EmitJavaScript(module, "entry.hexpat"),
+		"entry.js":     nodeModule(module, "entry.hexpat"),
 		"run.mjs":      attributesScript,
 	}
 	for name, contents := range files {
@@ -105,6 +105,7 @@ func TestAttributesUnderNode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	writeRuntimeModules(t, dir)
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node failed: %v\n%s\n%s", err, output, files["entry.js"])

@@ -15,7 +15,11 @@ import (
 	"github.com/frida/frida-core-compiler/patterns"
 )
 
-const patternFileFilter = `\.(hex)?pat$`
+const (
+	patternFileFilter    = `\.(hex)?pat$`
+	patternRuntimeFilter = `^frida-patterns:///`
+	patternNamespace     = "frida-patterns"
+)
 
 var patternFilePattern = regexp.MustCompile(patternFileFilter)
 
@@ -27,6 +31,23 @@ func makePatternPlugin(compiler *PatternCompiler) esbuild.Plugin {
 				compiler.ForgetReportedFailures()
 				return esbuild.OnStartResult{}, nil
 			})
+
+			build.OnResolve(esbuild.OnResolveOptions{Filter: patternRuntimeFilter},
+				func(args esbuild.OnResolveArgs) (esbuild.OnResolveResult, error) {
+					return esbuild.OnResolveResult{
+						Path:        strings.TrimPrefix(args.Path, patterns.RuntimeScheme),
+						Namespace:   patternNamespace,
+						SideEffects: esbuild.SideEffectsFalse,
+					}, nil
+				})
+
+			build.OnLoad(esbuild.OnLoadOptions{Filter: ".*", Namespace: patternNamespace},
+				func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
+					return esbuild.OnLoadResult{
+						Contents: patterns.RuntimeModules[args.Path],
+						Loader:   esbuild.LoaderJS,
+					}, nil
+				})
 
 			build.OnLoad(esbuild.OnLoadOptions{Filter: patternFileFilter, Namespace: "file"},
 				func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
