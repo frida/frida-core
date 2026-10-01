@@ -2,6 +2,7 @@ package patterns
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -510,12 +511,7 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		p.emitNestedBitfield(field, indent)
 		return
 	}
-	uses := field.Attributes
-	if !isView(field.Type) {
-		for _, typed := range attributedTypes(field.Type) {
-			uses = append(uses, typed...)
-		}
-	}
+	uses := slices.Concat(field.Attributes, typeAttributesApplyingToField(field.Type))
 	if size, align, isFixed := p.fixedLayout(field.Type); isFixed && p.staticCursor.known && sequential && field.Address == nil &&
 		field.Section == nil && !field.NoUniqueAddress && field.Order == NativeOrder && field.PointerBase == nil && len(uses) == 0 &&
 		field.Name != "" {
@@ -602,6 +598,20 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		fmt.Fprintf(p.out, "%s    $env.cursor = $resume;\n", indent)
 	}
 	fmt.Fprintf(p.out, "%s}\n", indent)
+}
+
+func typeAttributesApplyingToField(t Type) []*AttributeUse {
+	var uses []*AttributeUse
+	if isView(t) {
+		for alias, isAlias := t.(*Alias); isAlias; alias, isAlias = alias.Target.(*Alias) {
+			uses = append(uses, alias.Attributes...)
+		}
+		return uses
+	}
+	for _, typed := range attributedTypes(t) {
+		uses = append(uses, typed...)
+	}
+	return uses
 }
 
 func (p *parserEmitter) emitStaticField(field *Field, indent string, size int, align int) {
