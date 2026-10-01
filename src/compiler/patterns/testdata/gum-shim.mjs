@@ -51,14 +51,23 @@ export class NativePointer {
   readFloat(offset = 0) { return view(this.value + offset, 4).getFloat32(0, true); }
   readDouble(offset = 0) { return view(this.value + offset, 8).getFloat64(0, true); }
   readPointer(offset = 0) { return new NativePointer(Number(view(this.value + offset, 8).getBigUint64(0, true))); }
-  readByteArray(size, offset = 0) { const { bytes, offset: start } = locate(this.value + offset); return bytes.slice(start, start + size).buffer; }
+  readByteArray(size, offset = 0) {
+    if (size === 0)
+      return new ArrayBuffer(0);
+    const { bytes, offset: start } = locate(this.value + offset);
+    return bytes.slice(start, start + size).buffer;
+  }
   readUtf8String(length = -1, at = 0) {
+    if (length === 0)
+      return "";
     const { bytes, offset } = locate(this.value + at);
     let end = offset;
     if (length === -1) { while (bytes[end] !== 0) end++; } else { end = offset + length; }
     return new TextDecoder().decode(bytes.subarray(offset, end));
   }
   readUtf16String(length = -1, at = 0) {
+    if (length === 0)
+      return "";
     const { bytes, offset } = locate(this.value + at);
     let end = offset;
     if (length === -1) { while (bytes[end] !== 0 || bytes[end + 1] !== 0) end += 2; } else { end = offset + length * 2; }
