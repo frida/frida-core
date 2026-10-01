@@ -215,6 +215,7 @@ static void frida_stdio_unregister_stream (FILE * stream);
 static void frida_stdio_register_dir (DIR * dirp);
 static void frida_stdio_unregister_dir (DIR * dirp);
 #endif
+static void frida_stdio_ensure_registries (void);
 static void frida_flush_all_streams (int * result);
 
 static FridaFile * frida_file_get_impl (FILE * stream);
@@ -302,10 +303,7 @@ frida_libc_shim_init (void)
 
   G_LOCK (frida_stdio);
 
-  frida_streams = g_hash_table_new (g_direct_hash, g_direct_equal);
-#ifdef HAVE_FRIDA_DIR
-  frida_dirs = g_hash_table_new (g_direct_hash, g_direct_equal);
-#endif
+  frida_stdio_ensure_registries ();
 
   G_UNLOCK (frida_stdio);
 
@@ -1905,6 +1903,7 @@ frida_stdio_register_stream (FILE * stream)
 {
   G_LOCK (frida_stdio);
 
+  frida_stdio_ensure_registries ();
   g_hash_table_add (frida_streams, stream);
 
   G_UNLOCK (frida_stdio);
@@ -1927,6 +1926,7 @@ frida_stdio_register_dir (DIR * dirp)
 {
   G_LOCK (frida_stdio);
 
+  frida_stdio_ensure_registries ();
   g_hash_table_add (frida_dirs, dirp);
 
   G_UNLOCK (frida_stdio);
@@ -1943,6 +1943,18 @@ frida_stdio_unregister_dir (DIR * dirp)
 }
 
 #endif
+
+static void
+frida_stdio_ensure_registries (void)
+{
+  if (frida_streams != NULL)
+    return;
+
+  frida_streams = g_hash_table_new (g_direct_hash, g_direct_equal);
+#ifdef HAVE_FRIDA_DIR
+  frida_dirs = g_hash_table_new (g_direct_hash, g_direct_equal);
+#endif
+}
 
 static void
 frida_flush_all_streams (int * result)
