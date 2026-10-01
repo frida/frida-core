@@ -87,6 +87,7 @@ type parser struct {
 	scope       string
 	inBitfield  bool
 	angleGuard  int
+	alternative bool
 	constant    bool
 }
 
@@ -636,9 +637,9 @@ func (p *parser) parseMatchAlternative(subject Expr) Expr {
 		p.advance()
 		return &BoolLiteral{Value: true, Position: t.position}
 	}
-	first := p.parseBinary(binaryPrecedence["|"] + 1)
+	first := p.parseAlternativeBound()
 	if p.accept("...") {
-		last := p.parseBinary(binaryPrecedence["|"] + 1)
+		last := p.parseAlternativeBound()
 		return &Binary{Operator: "&&", Position: t.position,
 			Left:  &Binary{Operator: ">=", Left: subject, Right: first, Position: t.position},
 			Right: &Binary{Operator: "<=", Left: subject, Right: last, Position: t.position}}
@@ -996,9 +997,9 @@ func (p *parser) parseTypeArgExpr() Expr {
 }
 
 func (p *parser) parenthesised(parse func() Expr) Expr {
-	guard := p.angleGuard
-	p.angleGuard = 0
-	defer func() { p.angleGuard = guard }()
+	guard, alternative := p.angleGuard, p.alternative
+	p.angleGuard, p.alternative = 0, false
+	defer func() { p.angleGuard, p.alternative = guard, alternative }()
 	return parse()
 }
 
@@ -1080,15 +1081,21 @@ func (p *parser) parseTernary() Expr {
 	return condition
 }
 
+func (p *parser) parseAlternativeBound() Expr {
+	p.alternative = true
+	defer func() { p.alternative = false }()
+	return p.parseBinary(0)
+}
+
 var binaryPrecedence = map[string]int{
 	"||": 1,
 	"^^": 2,
 	"&&": 3,
-	"|":  4,
-	"^":  5,
-	"&":  6,
-	"==": 7, "!=": 7,
-	"<": 8, ">": 8, "<=": 8, ">=": 8,
+	"==": 4, "!=": 4,
+	"<": 5, ">": 5, "<=": 5, ">=": 5,
+	"|":  6,
+	"^":  7,
+	"&":  8,
 	"<<": 9, ">>": 9,
 	"+": 10, "-": 10,
 	"*": 11, "/": 11, "%": 11,
@@ -1106,6 +1113,9 @@ func (p *parser) parseBinary(minPrecedence int) Expr {
 			return left
 		}
 		if p.angleGuard > 0 && (t.text == "<" || t.text == ">" || t.text == ">>") {
+			return left
+		}
+		if p.alternative && t.text == "|" {
 			return left
 		}
 		p.advance()
