@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,45 +14,89 @@ func EmitJavaScript(module *Module, sourceName string) string {
 	e := &jsEmitter{
 		module:  module,
 		layouts: moduleLayouts(module),
-		helpers: map[string]bool{},
 	}
-	var body strings.Builder
-	for _, f := range module.Functions {
-		e.emitFunction(&body, f)
-	}
-	if module.DynamicAttributes {
-		e.emitNamedFunctions(&body, module)
-	}
-	for _, t := range module.TypesWithAliasesLast() {
-		switch t := t.(type) {
-		case *Struct:
-			e.emitComposite(&body, t.Name, allFields(t), t)
-		case *Union:
-			e.emitComposite(&body, t.Name, t.Fields, t)
-		case *Enum:
-			e.emitEnum(&body, t)
-		case *Bitfield:
-			e.emitBitfield(&body, t)
-		case *Alias:
-			e.emitAlias(&body, t)
-		}
-	}
-	if module.Root != nil {
-		fmt.Fprintf(&body, "export function parse(address, size, inputs) { return %s.parse(address, size, inputs); }\n", jsRef(module.Root.Name))
-	}
+	items := inNewspaperOrder(e.emitItems(module))
 
 	var out strings.Builder
 	fmt.Fprintf(&out, "// Generated from %s by frida-compile. Do not edit.\n", sourceName)
-	e.writeImports(&out)
-	emitNamespaceObjects(&out, module)
-	out.WriteString(body.String())
+	writeImports(&out, items)
+	emitNamespaceObjects(&out, items)
+	for _, item := range items {
+		out.WriteString(item.source)
+	}
 	return out.String()
+}
+
+func (e *jsEmitter) emitItems(module *Module) []*moduleItem {
+	var items []*moduleItem
+	if module.Root != nil {
+		items = append(items, e.emitItem(rootParseKey, exported, nil, func(out *strings.Builder) {
+			fmt.Fprintf(out, "export function parse(address, size, inputs) { return %s.parse(address, size, inputs); }\n", jsRef(module.Root.Name))
+		}))
+	}
+	for _, t := range module.TypesWithAliasesLast() {
+		item := e.emitItem(typeItemKey(t.TypeName()), exported, prerequisitesOf(t), func(out *strings.Builder) {
+			switch t := t.(type) {
+			case *Struct:
+				e.emitComposite(out, t.Name, allFields(t), t)
+			case *Union:
+				e.emitComposite(out, t.Name, t.Fields, t)
+			case *Enum:
+				e.emitEnum(out, t)
+			case *Bitfield:
+				e.emitBitfield(out, t)
+			case *Alias:
+				e.emitAlias(out, t)
+			}
+		})
+		item.typeName = t.TypeName()
+		items = append(items, item)
+	}
+	if module.DynamicAttributes {
+		items = append(items, e.emitItem(namedFunctionsKey, private, nil, func(out *strings.Builder) {
+			e.emitNamedFunctions(out, module)
+		}))
+	}
+	for _, f := range module.Functions {
+		items = append(items, e.emitItem(functionName(f), private, nil, func(out *strings.Builder) {
+			e.emitFunction(out, f)
+		}))
+	}
+	return items
+}
+
+const (
+	rootParseKey      = "parse()"
+	namedFunctionsKey = "$named"
+)
+
+func (e *jsEmitter) emitItem(key string, visibility itemVisibility, prerequisites []string, emit func(out *strings.Builder)) *moduleItem {
+	item := &moduleItem{key: key, visibility: visibility, prerequisites: prerequisites, helpers: map[string]bool{}}
+	e.current = item
+	var out strings.Builder
+	emit(&out)
+	item.source = out.String()
+	return item
+}
+
+func prerequisitesOf(t NamedType) []string {
+	var prerequisites []string
+	segments := scopeSegments(t.TypeName())
+	for depth := 1; depth < len(segments); depth++ {
+		prerequisites = append(prerequisites, typeItemKey(strings.Join(segments[:depth], "::")))
+	}
+	if alias, isAlias := t.(*Alias); isAlias {
+		if target, isNamed := Unalias(alias.Target).(NamedType); isNamed {
+			prerequisites = append(prerequisites, typeItemKey(target.TypeName()))
+		}
+	}
+	return prerequisites
 }
 
 func (e *jsEmitter) emitNamedFunctions(out *strings.Builder, module *Module) {
 	out.WriteString("const $named = {\n")
 	for _, f := range module.Functions {
-		fmt.Fprintf(out, "    %q: %s,\n", f.Name, functionName(f))
+		fmt.Fprintf(out, "    %q: %s,\n", f.Name, e.functionRef(f))
 	}
 	names := make([]string, 0, len(builtins))
 	for name := range builtins {
@@ -64,9 +109,9 @@ func (e *jsEmitter) emitNamedFunctions(out *strings.Builder, module *Module) {
 	out.WriteString("};\n")
 }
 
-func (e *jsEmitter) writeImports(out *strings.Builder) {
+func writeImports(out *strings.Builder, items []*moduleItem) {
 	namesByModule := map[string][]string{}
-	for name := range e.helpers {
+	for _, name := range helpersOf(items) {
 		module, isConstant := constantModules[name]
 		if !isConstant {
 			module = "/runtime.js"
@@ -79,19 +124,35 @@ func (e *jsEmitter) writeImports(out *strings.Builder) {
 	}
 	sort.Strings(modules)
 	for _, module := range modules {
-		names := namesByModule[module]
-		sort.Strings(names)
-		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(names, ", "), RuntimeScheme+module)
+		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(namesByModule[module], ", "), RuntimeScheme+module)
 	}
 }
 
-func emitNamespaceObjects(out *strings.Builder, module *Module) {
-	declared := map[string]bool{}
-	for _, t := range module.Types {
-		declared[t.TypeName()] = true
+func helpersOf(items []*moduleItem) []string {
+	used := map[string]bool{}
+	for _, item := range items {
+		for name := range item.helpers {
+			used[name] = true
+		}
 	}
-	for _, t := range module.Types {
-		segments := scopeSegments(t.TypeName())
+	names := make([]string, 0, len(used))
+	for name := range used {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func emitNamespaceObjects(out *strings.Builder, items []*moduleItem) {
+	declared := map[string]bool{}
+	for _, item := range items {
+		declared[item.typeName] = true
+	}
+	for _, item := range items {
+		if item.typeName == "" {
+			continue
+		}
+		segments := scopeSegments(item.typeName)
 		for depth := 1; depth < len(segments); depth++ {
 			path := strings.Join(segments[:depth], "::")
 			if declared[path] {
@@ -192,8 +253,8 @@ func moduleLayouts(module *Module) []*ModuleLayout {
 type jsEmitter struct {
 	module  *Module
 	layouts []*ModuleLayout
-	helpers map[string]bool
 	parsing bool
+	current *moduleItem
 }
 
 type variantTable struct {
@@ -211,11 +272,18 @@ func (e *jsEmitter) emitComposite(out *strings.Builder, qualifiedName string, fi
 	if hasView(t) {
 		c := &compositeEmitter{jsEmitter: e, name: name, t: t, fields: fields, table: table, expressionKeys: map[Value]string{}}
 		c.compute()
+		if !c.dynamic {
+			fmt.Fprintf(&class, "    static size = %s;\n", c.size)
+		}
 		fmt.Fprintf(&class, "    static $align = %s;\n", c.table.value("align", c.alignsOfComposite()))
 		fmt.Fprintf(&class, "    constructor(address, parent = null) { this.$address = ptr(address); this.$parent = parent; }\n")
 		fmt.Fprintf(&class, "    static at(address) { return new %s(address); }\n", name)
+		e.emitParser(&class, t)
 		if !c.dynamic {
-			fmt.Fprintf(&class, "    static size = %s;\n", c.size)
+			c.emitPattern(&class)
+		}
+		c.emitToJSON(&class)
+		if !c.dynamic {
 			fmt.Fprintf(&class, "    get $size() { return %s.size; }\n", name)
 		} else {
 			fmt.Fprintf(&class, "    get $size() { return %s; }\n", c.size)
@@ -223,15 +291,10 @@ func (e *jsEmitter) emitComposite(out *strings.Builder, qualifiedName string, fi
 		for _, f := range c.entries {
 			c.emitAccessors(&class, f)
 		}
-		c.emitToJSON(&class)
-		if !c.dynamic {
-			c.emitPattern(&class)
-		}
-	}
-	if !hasView(t) {
+	} else {
 		class.WriteString("    static $align = 1;\n")
+		e.emitParser(&class, t)
 	}
-	e.emitParser(&class, t)
 	closeClass(&class, qualifiedName)
 
 	e.emitTable(out, table)
@@ -535,7 +598,7 @@ func (c *compositeEmitter) reader(t Type, address string, entry *fieldEntry) str
 	case *Pointer:
 		pointer := c.pointerReader(t, address)
 		if isView(t.Target) {
-			return fmt.Sprintf("%s(%s, %s)", c.helper("$deref"), pointer, jsRef(Unalias(t.Target).(NamedType).TypeName()))
+			return fmt.Sprintf("%s(%s, %s)", c.helper("$deref"), pointer, c.typeRef(Unalias(t.Target).(NamedType).TypeName()))
 		}
 		return pointer
 	case *Array:
@@ -547,7 +610,7 @@ func (c *compositeEmitter) reader(t Type, address string, entry *fieldEntry) str
 }
 
 func (c *compositeEmitter) viewOf(t Type, address string) string {
-	return fmt.Sprintf("new %s(%s, this)", jsRef(Unalias(t).(NamedType).TypeName()), address)
+	return fmt.Sprintf("new %s(%s, this)", c.typeRef(Unalias(t).(NamedType).TypeName()), address)
 }
 
 func isView(t Type) bool {
@@ -756,7 +819,7 @@ func (c *compositeEmitter) encoder(t Type, offset string, value string, entry *f
 	case *Enum:
 		return c.primitiveEncoder(t.Underlying, offset, value)
 	case *Struct, *Union:
-		return fmt.Sprintf("%s.$encode(bytes, %s, %s)", jsRef(t.(NamedType).TypeName()), offset, value)
+		return fmt.Sprintf("%s.$encode(bytes, %s, %s)", c.typeRef(t.(NamedType).TypeName()), offset, value)
 	case *Bitfield:
 		return fmt.Sprintf("%s(bytes, %s, %s, %s, %s)", c.helper("$putInteger"), offset, c.sizeLiteral(t, entry), value, c.orderLiteral(t.Order))
 	case *Pointer:
@@ -967,12 +1030,25 @@ func (e *jsEmitter) emitBitfield(out *strings.Builder, t *Bitfield) {
 
 	name := shortName(t.Name)
 	openClass(out, t.Name)
+	fmt.Fprintf(out, "    static size = %d;\n", size)
 	fmt.Fprintf(out, "    constructor(address, parent = null) { this.$address = ptr(address); this.$parent = parent; }\n")
 	fmt.Fprintf(out, "    static at(address) { return new %s(address); }\n", name)
-	fmt.Fprintf(out, "    static size = %d;\n", size)
+	fmt.Fprintf(out, "    static parse(address) { const view = new %s(address); return { $address: view.$address, $size: %d, $value: view.$value, ...view.toJSON() }; }\n", name, size)
+	e.emitParseBody(out, t)
+	out.WriteString("    toJSON() {\n        return {")
+	first := true
+	for _, member := range t.Members {
+		if member.Name == "" {
+			continue
+		}
+		if !first {
+			out.WriteString(",")
+		}
+		first = false
+		fmt.Fprintf(out, "\n            %s: this.%s", member.Name, member.Name)
+	}
+	out.WriteString("\n        };\n    }\n")
 	fmt.Fprintf(out, "    get $size() { return %d; }\n", size)
-	fmt.Fprintf(out, "    get $value() { return %s(this.$address, %d, %s); }\n", e.helper(read), size, order)
-	fmt.Fprintf(out, "    set $value(value) { %s(this.$address, %d, value, %s); }\n", e.helper("$writeUint"), size, order)
 	for _, member := range t.Members {
 		if member.Name == "" {
 			continue
@@ -1003,32 +1079,45 @@ func (e *jsEmitter) emitBitfield(out *strings.Builder, t *Bitfield) {
 		fmt.Fprintf(out, "    get %s() { return %s; }\n", member.Name, value)
 		fmt.Fprintf(out, "    set %s(value) { this.$value = %s(this.$value, %d, %d, %s); }\n", member.Name, e.helper(insert), shift, member.Bits, stored)
 	}
-	out.WriteString("    toJSON() {\n        return {")
-	first := true
-	for _, member := range t.Members {
-		if member.Name == "" {
-			continue
-		}
-		if !first {
-			out.WriteString(",")
-		}
-		first = false
-		fmt.Fprintf(out, "\n            %s: this.%s", member.Name, member.Name)
-	}
-	out.WriteString("\n        };\n    }\n")
-	fmt.Fprintf(out, "    static parse(address) { const view = new %s(address); return { $address: view.$address, $size: %d, $value: view.$value, ...view.toJSON() }; }\n", name, size)
-	e.emitParseBody(out, t)
+	fmt.Fprintf(out, "    get $value() { return %s(this.$address, %d, %s); }\n", e.helper(read), size, order)
+	fmt.Fprintf(out, "    set $value(value) { %s(this.$address, %d, value, %s); }\n", e.helper("$writeUint"), size, order)
 	closeClass(out, t.Name)
 }
 
 func (e *jsEmitter) emitAlias(out *strings.Builder, t *Alias) {
 	if named, isNamed := Unalias(t.Target).(NamedType); isNamed {
 		openConstant(out, t.Name)
-		fmt.Fprintf(out, "%s;\n", jsRef(named.TypeName()))
+		fmt.Fprintf(out, "%s;\n", e.typeRef(named.TypeName()))
 	}
 }
 
 func (e *jsEmitter) helper(name string) string {
-	e.helpers[name] = true
+	e.current.helpers[name] = true
 	return name
+}
+
+func (e *jsEmitter) typeRef(name string) string {
+	e.reference(typeItemKey(name))
+	return jsRef(name)
+}
+
+func typeItemKey(name string) string {
+	return "type " + name
+}
+
+func (e *jsEmitter) functionRef(f *Function) string {
+	name := functionName(f)
+	e.reference(name)
+	return name
+}
+
+func (e *jsEmitter) namedFunctionsRef() string {
+	e.reference(namedFunctionsKey)
+	return namedFunctionsKey
+}
+
+func (e *jsEmitter) reference(key string) {
+	if !slices.Contains(e.current.references, key) {
+		e.current.references = append(e.current.references, key)
+	}
 }

@@ -474,13 +474,13 @@ func (p *parserEmitter) emitNestedBitfield(field *Field, indent string) {
 	fmt.Fprintf(p.out, "%s    const $start = $bit;\n", indent)
 	switch t := Unalias(field.Type).(type) {
 	case *Bitfield:
-		fmt.Fprintf(p.out, "%s    const $value = %s.$parse(address.add(Math.floor($bit / 8)), $env, $this, [], $bit %% 8);\n", indent, jsRef(t.Name))
+		fmt.Fprintf(p.out, "%s    const $value = %s.$parse(address.add(Math.floor($bit / 8)), $env, $this, [], $bit %% 8);\n", indent, p.typeRef(t.Name))
 		fmt.Fprintf(p.out, "%s    $bit += $value.$bits;\n", indent)
 	case *Array:
 		element := Unalias(t.Element).(*Bitfield)
 		fmt.Fprintf(p.out, "%s    const $value = [];\n", indent)
 		fmt.Fprintf(p.out, "%s    for (let $i = 0, $n = Number(%s); $i !== $n; $i++) {\n", indent, p.expression(t.Length))
-		fmt.Fprintf(p.out, "%s        const $item = %s.$parse(address.add(Math.floor($bit / 8)), $env, $this, [], $bit %% 8);\n", indent, jsRef(element.Name))
+		fmt.Fprintf(p.out, "%s        const $item = %s.$parse(address.add(Math.floor($bit / 8)), $env, $this, [], $bit %% 8);\n", indent, p.typeRef(element.Name))
 		fmt.Fprintf(p.out, "%s        $value.push($item);\n", indent)
 		fmt.Fprintf(p.out, "%s        $bit += $item.$bits;\n", indent)
 		fmt.Fprintf(p.out, "%s    }\n", indent)
@@ -540,7 +540,7 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 	}
 	fmt.Fprintf(p.out, "%s    %s(%s, $at, $n);\n", indent, p.helper("$check"), env)
 	if field.PointerBase != nil {
-		fmt.Fprintf(p.out, "%s    $value = $value.add(%s($env, $this, $value));\n", indent, functionName(field.PointerBase))
+		fmt.Fprintf(p.out, "%s    $value = $value.add(%s($env, $this, $value));\n", indent, p.functionRef(field.PointerBase))
 	}
 	fmt.Fprintf(p.out, "%s    $this.%s = $value;\n", indent, field.Name)
 	fmt.Fprintf(p.out, "%s    $this.$fields.%s = { address: $at, size: $n };\n", indent, field.Name)
@@ -616,10 +616,10 @@ func (p *parserEmitter) emitAttribute(use *AttributeUse, indent string, target s
 
 func (p *parserEmitter) attributeCall(use *AttributeUse, argument string) string {
 	if use.Dynamic != nil {
-		return fmt.Sprintf("%s($named, $env, $this, %s, %s)", p.helper("$callNamed"), p.expression(use.Dynamic), argument)
+		return fmt.Sprintf("%s(%s, $env, $this, %s, %s)", p.helper("$callNamed"), p.namedFunctionsRef(), p.expression(use.Dynamic), argument)
 	}
 	if use.Function != nil {
-		return fmt.Sprintf("%s($env, $this, %s)", functionName(use.Function), argument)
+		return fmt.Sprintf("%s($env, $this, %s)", p.functionRef(use.Function), argument)
 	}
 	return fmt.Sprintf("%s($env, %s)", p.helper(builtins[use.Builtin].js), argument)
 }
@@ -654,7 +654,7 @@ func (p *parserEmitter) alignOf(t Type) string {
 	case *Array:
 		return p.alignOf(t.Element)
 	case *Struct, *Union:
-		return jsRef(t.(NamedType).TypeName()) + ".$align"
+		return p.typeRef(t.(NamedType).TypeName()) + ".$align"
 	}
 	return "1"
 }
@@ -708,9 +708,9 @@ func (p *parserEmitter) reader(t Type, address string) string {
 			arguments[i] = p.expression(arg)
 		}
 		p.scoping = false
-		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this, [%s]))", p.helper("$parsed"), jsRef(t.(NamedType).TypeName()), address, strings.Join(arguments, ", "))
+		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this, [%s]))", p.helper("$parsed"), p.typeRef(t.(NamedType).TypeName()), address, strings.Join(arguments, ", "))
 	case *Bitfield:
-		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this))", p.helper("$parsed"), jsRef(t.Name), address)
+		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this))", p.helper("$parsed"), p.typeRef(t.Name), address)
 	case *Pointer:
 		return fmt.Sprintf("[%s, %s]", p.pointerReader(t, address), p.sizeOf(t, address))
 	case *Array:
@@ -810,7 +810,7 @@ func (p *parserEmitter) expression(v Value) string {
 	case *Builtin:
 		return p.builtin(v)
 	case *Labelled:
-		return fmt.Sprintf("%s(%s, %q, %s)", p.helper("$labelled"), jsRef(v.Enum.Name), v.Enum.Name, p.expression(v.Value))
+		return fmt.Sprintf("%s(%s, %q, %s)", p.helper("$labelled"), p.typeRef(v.Enum.Name), v.Enum.Name, p.expression(v.Value))
 	case *TemplateArgument:
 		return fmt.Sprintf("%s(%s)", p.helper("$templateArgument"), p.expression(v.Value))
 	case *PatternTypeName:
@@ -940,7 +940,7 @@ func (p *parserEmitter) functionCall(call *FunctionCall) string {
 	if call.Function.Variadic {
 		arguments = append(arguments, "["+strings.Join(pack, ", ")+"]")
 	}
-	return fmt.Sprintf("%s(%s)", functionName(call.Function), strings.Join(arguments, ", "))
+	return fmt.Sprintf("%s(%s)", p.functionRef(call.Function), strings.Join(arguments, ", "))
 }
 
 func (p *parserEmitter) argument(v Value) string {

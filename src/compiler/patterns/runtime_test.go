@@ -52,7 +52,11 @@ pattern=00 00 c0 3f ?? ?? ?? ?? 00 00 40 40
 sizes=12,2`
 
 func nodeModule(module *Module, sourceName string) string {
-	return strings.ReplaceAll(EmitJavaScript(module, sourceName), `"`+RuntimeScheme+"/", `"./`)
+	return nodeSource(EmitJavaScript(module, sourceName))
+}
+
+func nodeSource(javaScript string) string {
+	return strings.ReplaceAll(javaScript, `"`+RuntimeScheme+"/", `"./`)
 }
 
 func writeRuntimeModules(t *testing.T, dir string) {

@@ -51,6 +51,7 @@ if have_compiler_backend
       'patterns/langserver.go',
       'patterns/layout.go',
       'patterns/lexer.go',
+      'patterns/moduleitems.go',
       'patterns/parser.go',
       'patterns/parsers.go',
       'patterns/resolver.go',

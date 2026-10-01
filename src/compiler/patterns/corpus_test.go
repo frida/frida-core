@@ -43,6 +43,7 @@ func TestCorpus(t *testing.T) {
 	})
 	node, _ := exec.LookPath("node")
 	scratch := t.TempDir()
+	writeModuleLoader(t, scratch)
 	histogram := map[string]int{}
 	fail := func(file string, message string, detail string) {
 		words := strings.Fields(message)
@@ -66,7 +67,7 @@ func TestCorpus(t *testing.T) {
 		EmitDeclarations(module, sourceName)
 		javaScript := EmitJavaScript(module, sourceName)
 		if node != "" {
-			if problem := syntaxProblem(node, scratch, javaScript); problem != "" {
+			if problem := loadProblem(node, scratch, javaScript); problem != "" {
 				fail(file, problem, problem)
 				continue
 			}
@@ -88,12 +89,29 @@ func TestCorpus(t *testing.T) {
 	}
 }
 
-func syntaxProblem(node string, scratch string, javaScript string) string {
-	path := filepath.Join(scratch, "module.mjs")
-	if err := os.WriteFile(path, []byte(javaScript), 0644); err != nil {
+func writeModuleLoader(t *testing.T, dir string) {
+	shim, err := os.ReadFile("testdata/gum-shim.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader := `
+import { install } from "./gum-shim.mjs";
+install();
+await import("./module.mjs");
+`
+	for name, contents := range map[string]string{"gum-shim.mjs": string(shim), "load.mjs": loader} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRuntimeModules(t, dir)
+}
+
+func loadProblem(node string, scratch string, javaScript string) string {
+	if err := os.WriteFile(filepath.Join(scratch, "module.mjs"), []byte(nodeSource(javaScript)), 0644); err != nil {
 		return err.Error()
 	}
-	output, err := exec.Command(node, "--check", path).CombinedOutput()
+	output, err := exec.Command(node, filepath.Join(scratch, "load.mjs")).CombinedOutput()
 	if err == nil {
 		return ""
 	}
