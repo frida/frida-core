@@ -25,6 +25,24 @@ export function $sectionEnvironment(env, id) {
     return { base, get limit() { return section.size; }, cursor: 0, root: env.root, globals: env.globals, littleEndian: env.littleEndian, arrayIndex: env.arrayIndex, breaks: false, continues: false, sections: env.sections };
 }
 
+export class $Pattern {
+    #type;
+    #args;
+    #parent;
+    #fields = {};
+    constructor(type, address, parent, args) {
+        this.$address = address;
+        this.$size = 0;
+        this.#type = type;
+        this.#args = args;
+        this.#parent = parent;
+    }
+    get $type() { return this.#type; }
+    get $args() { return this.#args; }
+    get $parent() { return this.#parent; }
+    get $fields() { return this.#fields; }
+}
+
 export function $check(env, offset, size) {
     if (offset + size > env.limit)
         throw new Error("the data ended before the value could be read");

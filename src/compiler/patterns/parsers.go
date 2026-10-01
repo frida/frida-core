@@ -25,17 +25,13 @@ func (e *jsEmitter) emitParseBody(out *strings.Builder, t Type) {
 		out.WriteString("        $start = 0;\n")
 	}
 	out.WriteString("        $env.cursor = $start;\n")
-	out.WriteString("        const $this = { $address: $env.base.add($start), $size: 0 };\n")
-	fmt.Fprintf(out, "        Object.defineProperty($this, \"$type\", { value: %s });\n", shortName(t.(NamedType).TypeName()))
-	out.WriteString("        Object.defineProperty($this, \"$args\", { value: $args });\n")
+	fmt.Fprintf(out, "        const $this = new %s(%s, $env.base.add($start), $parent, $args);\n", e.helper("$Pattern"), shortName(t.(NamedType).TypeName()))
 	if s, isStruct := t.(*Struct); isStruct && s.Global {
 		out.WriteString("        $env.root = $this;\n")
 	}
-	out.WriteString("        Object.defineProperty($this, \"$parent\", { value: $parent });\n")
 	if naming := namingOf(t); hasDynamicNaming(t) {
 		fmt.Fprintf(out, "        Object.defineProperty($this, \"$typeName\", { value: %s });\n", e.instanceName(naming))
 	}
-	out.WriteString("        Object.defineProperty($this, \"$fields\", { value: {} });\n")
 	switch t := t.(type) {
 	case *Struct:
 		p.abi = t.ABI
