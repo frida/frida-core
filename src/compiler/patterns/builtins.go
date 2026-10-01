@@ -343,6 +343,7 @@ func defineCoreBuiltins() {
 	})
 	defineBuiltin("std::core::formatted_value", 1, "$std_core_formatted_value", func(f *frame, args []runtimeValue) (runtimeValue, error) {
 		if node, isPattern := args[0].(*DecodedValue); isPattern {
+			node.formatNow()
 			if node.Formatted != "" {
 				return node.Formatted, nil
 			}

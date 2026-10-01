@@ -1,4 +1,17 @@
-export function $environment(base, limit, sections = [$mainSection(base, limit)], inputs = {}) { return { base, limit, cursor: 0, root: null, globals: {}, littleEndian: true, arrayIndex: 0, breaks: false, continues: false, sections, inputs }; }
+export function $parseRoot(type, address, size, inputs) {
+    const env = $environment(address, size, undefined, inputs);
+    const result = type.$parse(0, env, null);
+    $applyFormatting(env);
+    return result;
+}
+
+export function $environment(base, limit, sections = [$mainSection(base, limit)], inputs = {}, formatting = []) { return { base, limit, cursor: 0, root: null, globals: {}, littleEndian: true, arrayIndex: 0, breaks: false, continues: false, sections, inputs, formatting }; }
+
+function $applyFormatting(env) {
+    for (const owner of env.formatting)
+        $formatNow(owner);
+    env.formatting.length = 0;
+}
 
 export function $heapEnvironment(env, size) {
     const section = new $Section(env.sections.length, "heap", true);
@@ -22,7 +35,7 @@ export function $cloneLocal(env, value) {
 export function $sectionEnvironment(env, id) {
     const section = $sectionOf(env, id);
     const base = new $SectionPointer(section, 0);
-    return { base, get limit() { return section.size; }, cursor: 0, root: env.root, globals: env.globals, littleEndian: env.littleEndian, arrayIndex: env.arrayIndex, breaks: false, continues: false, sections: env.sections };
+    return { base, get limit() { return section.size; }, cursor: 0, root: env.root, globals: env.globals, littleEndian: env.littleEndian, arrayIndex: env.arrayIndex, breaks: false, continues: false, sections: env.sections, formatting: env.formatting };
 }
 
 export class $Pattern {
@@ -47,6 +60,11 @@ export class $Pattern {
 export function $checked(env, offset, size, value) {
     $check(env, offset, size);
     return value;
+}
+
+export function $formatLater(env, owner, apply) {
+    Object.defineProperty(owner, "$pendingFormat", { value: apply, writable: true, configurable: true });
+    env.formatting.push(owner);
 }
 
 export function $check(env, offset, size) {
@@ -97,6 +115,18 @@ export function $callNamed(named, env, $this, name, value) {
 export function $copyPattern(span, value) { span.base.writeByteArray(value.$address.readByteArray(value.$size), span.offset); }
 
 export function $sizeOf(value) { return (typeof value === "string") ? value.length : value.$size; }
+
+function $formatNow(owner) {
+    const apply = owner.$pendingFormat;
+    if (apply === undefined)
+        return;
+    owner.$pendingFormat = undefined;
+    try {
+        apply();
+    } catch (e) {
+        Object.defineProperty(owner, "$formatError", { value: e.message, configurable: true });
+    }
+}
 
 export function $parsed(value) { return [value, value.$size]; }
 
@@ -239,7 +269,12 @@ export function $std_core_has_member(env, pattern, name) { return Object.prototy
 
 export function $std_core_set_display_name(env, pattern, name) { if (pattern !== null && typeof pattern === "object") Object.defineProperty(pattern, "$displayName", { value: String(name), configurable: true }); }
 
-export function $std_core_formatted_value(env, pattern) { return (pattern !== null && typeof pattern === "object" && pattern.$formatted !== undefined) ? pattern.$formatted : $display(pattern); }
+export function $std_core_formatted_value(env, pattern) {
+    if (pattern === null || typeof pattern !== "object")
+        return $display(pattern);
+    $formatNow(pattern);
+    return (pattern.$formatted !== undefined) ? pattern.$formatted : $display(pattern);
+}
 
 export function $std_core_set_endian(env, endian) { env.littleEndian = Number(endian) !== 1; }
 

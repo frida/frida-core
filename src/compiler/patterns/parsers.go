@@ -9,7 +9,7 @@ import (
 )
 
 func (e *jsEmitter) emitParser(out *strings.Builder, t Type) {
-	fmt.Fprintf(out, "    static parse(address, size = Infinity, inputs = {}) { return %s.$parse(0, %s(ptr(address), size, undefined, inputs), null); }\n", shortName(t.(NamedType).TypeName()), e.helper("$environment"))
+	fmt.Fprintf(out, "    static parse(address, size = Infinity, inputs = {}) { return %s(%s, ptr(address), size, inputs); }\n", e.helper("$parseRoot"), shortName(t.(NamedType).TypeName()))
 	e.emitParseBody(out, t)
 }
 
@@ -22,7 +22,7 @@ func (e *jsEmitter) emitParseBody(out *strings.Builder, t Type) {
 		fmt.Fprintf(out, "        let %s = $args[%d];\n", localName(param), i)
 	}
 	if s, isStruct := t.(*Struct); isStruct && s.Global {
-		fmt.Fprintf(out, "        $env = %s($env.base.add($start), $env.limit, $env.sections, $env.inputs);\n", e.helper("$environment"))
+		fmt.Fprintf(out, "        $env = %s($env.base.add($start), $env.limit, $env.sections, $env.inputs, $env.formatting);\n", e.helper("$environment"))
 		out.WriteString("        $start = 0;\n")
 	}
 	out.WriteString("        $env.cursor = $start;\n")
@@ -86,11 +86,7 @@ func (e *jsEmitter) instanceName(naming []NamePart) string {
 }
 
 func (p *parserEmitter) emitTypeAttribute(use *AttributeUse, indent string) {
-	fmt.Fprintf(p.out, "%s{\n", indent)
-	fmt.Fprintf(p.out, "%s    const $meta = {};\n", indent)
-	p.emitAttribute(use, indent+"    ", "$this", "$meta")
-	fmt.Fprintf(p.out, "%s    for (const key of Object.keys($meta)) Object.defineProperty($this, \"$\" + key, { value: $meta[key], configurable: true });\n", indent)
-	fmt.Fprintf(p.out, "%s}\n", indent)
+	p.emitAttribute(use, indent, attributeOwner{target: "$this", object: "$this", pattern: "$this", ofPattern: true})
 }
 
 func typeParams(t Type) []*Local {
@@ -580,8 +576,13 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 	fmt.Fprintf(p.out, "%s    $this.%s = $value;\n", indent, field.Name)
 	fmt.Fprintf(p.out, "%s    %s.%s = new %s(%s.base, $at, $n);\n", indent, p.fields(), field.Name, p.helper("$Span"), env)
 	p.emitFieldMetadata(field, indent+"    ", "$value")
+	owner := attributeOwner{target: "$this." + field.Name, object: p.fields() + "." + field.Name, pattern: "$this." + field.Name}
+	if hasFormat(uses) {
+		fmt.Fprintf(p.out, "%s    const $pattern = %s;\n", indent, owner.target)
+		owner.pattern = "$pattern"
+	}
 	for _, use := range uses {
-		p.emitAttribute(use, indent+"    ", "$this."+field.Name, p.fields()+"."+field.Name)
+		p.emitAttribute(use, indent+"    ", owner)
 	}
 	if advance {
 		if hasAttribute(uses, "fixed_size") {
@@ -702,6 +703,12 @@ func (p *parserEmitter) fixedReader(t Type, offset string) string {
 	panic("unreachable")
 }
 
+func hasFormat(uses []*AttributeUse) bool {
+	return slices.ContainsFunc(uses, func(use *AttributeUse) bool {
+		return strings.HasPrefix(use.Name, "format")
+	})
+}
+
 func hasAttribute(uses []*AttributeUse, name string) bool {
 	for _, use := range uses {
 		if use.Name == name {
@@ -711,43 +718,59 @@ func hasAttribute(uses []*AttributeUse, name string) bool {
 	return false
 }
 
-func (p *parserEmitter) emitAttribute(use *AttributeUse, indent string, target string, metadata string) {
+func (p *parserEmitter) emitAttribute(use *AttributeUse, indent string, owner attributeOwner) {
 	arguments := make([]string, len(use.Arguments))
 	for i, argument := range use.Arguments {
 		arguments[i] = p.expression(argument)
 	}
 	switch use.Name {
 	case "name":
-		fmt.Fprintf(p.out, "%s%s.displayName = %s(%s);\n", indent, metadata, p.helper("$display"), arguments[0])
+		fmt.Fprintf(p.out, "%s%s;\n", indent, owner.store("displayName", fmt.Sprintf("%s(%s)", p.helper("$display"), arguments[0])))
 	case "comment":
-		fmt.Fprintf(p.out, "%s%s.comment = %s(%s);\n", indent, metadata, p.helper("$display"), arguments[0])
+		fmt.Fprintf(p.out, "%s%s;\n", indent, owner.store("comment", fmt.Sprintf("%s(%s)", p.helper("$display"), arguments[0])))
 	case "color":
-		fmt.Fprintf(p.out, "%s%s.color = %s(%s);\n", indent, metadata, p.helper("$display"), arguments[0])
+		fmt.Fprintf(p.out, "%s%s;\n", indent, owner.store("color", fmt.Sprintf("%s(%s)", p.helper("$display"), arguments[0])))
 	case "hidden", "highlight_hidden", "tree_hidden":
-		fmt.Fprintf(p.out, "%s%s.hidden = true;\n", indent, metadata)
+		fmt.Fprintf(p.out, "%s%s;\n", indent, owner.store("hidden", "true"))
 	case "inline":
-		fmt.Fprintf(p.out, "%s%s.inline = true;\n", indent, metadata)
+		fmt.Fprintf(p.out, "%s%s;\n", indent, owner.store("inline", "true"))
 	case "sealed":
-		fmt.Fprintf(p.out, "%s%s.sealed = true;\n", indent, metadata)
+		fmt.Fprintf(p.out, "%s%s;\n", indent, owner.store("sealed", "true"))
 	case "format", "format_read":
-		fmt.Fprintf(p.out, "%s%s.formatted = %s(%s);\n", indent, metadata, p.helper("$display"), p.attributeCall(use, target))
+		formatted := fmt.Sprintf("%s(%s)", p.helper("$display"), p.attributeCall(use, owner.pattern))
+		fmt.Fprintf(p.out, "%s%s($env, %s, () => { %s; });\n", indent, p.helper("$formatLater"), owner.object, owner.store("formatted", formatted))
 	case "format_entries", "format_read_entries":
-		fmt.Fprintf(p.out, "%s%s.formattedEntries = %s.map((entry) => %s(%s));\n", indent, metadata, target, p.helper("$display"), p.attributeCall(use, "entry"))
+		formatted := fmt.Sprintf("%s.map((entry) => %s(%s))", owner.pattern, p.helper("$display"), p.attributeCall(use, "entry"))
+		fmt.Fprintf(p.out, "%s%s($env, %s, () => { %s; });\n", indent, p.helper("$formatLater"), owner.object, owner.store("formattedEntries", formatted))
 	case "fixed_size":
-		if target == "$this" {
+		if owner.ofPattern {
 			fmt.Fprintf(p.out, "%s$this.$size = Number(%s);\n", indent, arguments[0])
 		} else {
-			fmt.Fprintf(p.out, "%s%s.size = Number(%s);\n", indent, metadata, arguments[0])
+			fmt.Fprintf(p.out, "%s%s;\n", indent, owner.store("size", fmt.Sprintf("Number(%s)", arguments[0])))
 		}
 	case "transform":
-		if target == "$this" {
-			fmt.Fprintf(p.out, "%sObject.defineProperty($this, \"$transformed\", { value: %s, configurable: true });\n", indent, p.attributeCall(use, target))
+		if owner.ofPattern {
+			fmt.Fprintf(p.out, "%s%s;\n", indent, owner.store("transformed", p.attributeCall(use, owner.target)))
 		} else {
-			fmt.Fprintf(p.out, "%s%s = %s;\n", indent, target, p.attributeCall(use, target))
+			fmt.Fprintf(p.out, "%s%s = %s;\n", indent, owner.target, p.attributeCall(use, owner.target))
 		}
 	case "transform_entries":
-		fmt.Fprintf(p.out, "%s%s = %s.map((entry) => %s);\n", indent, target, target, p.attributeCall(use, "entry"))
+		fmt.Fprintf(p.out, "%s%s = %s.map((entry) => %s);\n", indent, owner.target, owner.target, p.attributeCall(use, "entry"))
 	}
+}
+
+type attributeOwner struct {
+	target    string
+	object    string
+	pattern   string
+	ofPattern bool
+}
+
+func (o attributeOwner) store(key string, value string) string {
+	if o.ofPattern {
+		return fmt.Sprintf("Object.defineProperty($this, %q, { value: %s, configurable: true })", "$"+key, value)
+	}
+	return fmt.Sprintf("%s.%s = %s", o.object, key, value)
 }
 
 func (p *parserEmitter) attributeCall(use *AttributeUse, argument string) string {

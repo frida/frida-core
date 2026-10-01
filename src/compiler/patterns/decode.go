@@ -43,12 +43,13 @@ type DecodedValue struct {
 	Section     int             `json:"section,omitempty"`
 	Visualizer  *Visualizer     `json:"visualizer,omitempty"`
 
-	raw     runtimeValue
-	frame   *frame
-	typ     Type
-	pointee *DecodedValue
-	ending  flow
-	storage storage
+	raw           runtimeValue
+	pendingFormat func()
+	frame         *frame
+	typ           Type
+	pointee       *DecodedValue
+	ending        flow
+	storage       storage
 }
 
 type storage int
@@ -102,7 +103,9 @@ func Decode(module *Module, target Target, t Type, data []byte, address uint64) 
 }
 
 func DecodeWith(module *Module, target Target, t Type, data []byte, address uint64, inputs map[string]any) *DecodedValue {
-	root := newDecoder(module, target, data, address, inputs).decode("", t, 0, nil)
+	d := newDecoder(module, target, data, address, inputs)
+	root := d.decode("", t, 0, nil)
+	d.format()
 	identify(root)
 	return root
 }
@@ -115,6 +118,7 @@ func CallFunction(module *Module, target Target, t Type, data []byte, address ui
 	}
 	d := newDecoder(module, target, data, address, inputs)
 	root := d.decode("", t, 0, nil)
+	d.format()
 	identify(root)
 	pattern := root.find(patternID)
 	if pattern == nil {
@@ -211,6 +215,7 @@ type decoder struct {
 	inputs       map[string]runtimeValue
 	log          []string
 	adopt        func(value *DecodedValue)
+	formatting   []*DecodedValue
 }
 
 type section struct {
@@ -1014,18 +1019,10 @@ func (f *frame) applyAttribute(node *DecodedValue, use *AttributeUse) error {
 		fixed := int(size)
 		node.Size = &fixed
 	case "format", "format_read":
-		result, err := f.invokeAttribute(use, node)
-		if err != nil {
-			return err
-		}
-		node.Formatted = display(result)
+		f.formatLater(use, node)
 	case "format_entries", "format_read_entries":
 		for _, element := range node.Elements {
-			result, err := f.invokeAttribute(use, element)
-			if err != nil {
-				return err
-			}
-			element.Formatted = display(result)
+			f.formatLater(use, element)
 		}
 	case "transform":
 		result, err := f.invokeAttribute(use, node)
@@ -1045,6 +1042,32 @@ func (f *frame) applyAttribute(node *DecodedValue, use *AttributeUse) error {
 		}
 	}
 	return nil
+}
+
+func (f *frame) formatLater(use *AttributeUse, node *DecodedValue) {
+	node.pendingFormat = func() {
+		result, err := f.invokeAttribute(use, node)
+		if err != nil {
+			node.fail(err)
+			return
+		}
+		node.Formatted = display(result)
+	}
+	f.decoder.formatting = append(f.decoder.formatting, node)
+}
+
+func (d *decoder) format() {
+	for _, node := range d.formatting {
+		node.formatNow()
+	}
+	d.formatting = nil
+}
+
+func (v *DecodedValue) formatNow() {
+	if format := v.pendingFormat; format != nil {
+		v.pendingFormat = nil
+		format()
+	}
 }
 
 type Visualizer struct {
