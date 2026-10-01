@@ -386,13 +386,13 @@ func (p *parserEmitter) memberStore(target *MemberOf, value string) string {
 func (p *parserEmitter) primitiveStore(primitive *Primitive, address string, size string, value string) string {
 	switch {
 	case primitive.Kind == Float || primitive.Kind == Double:
-		return fmt.Sprintf("%s(%s, %s, %q, %s, %s)", p.helper("$writeScalar"), address, size, viewMethod(primitive.Kind, "set"), value, p.orderLiteral(primitive.Order))
+		return fmt.Sprintf("%s(%s, 0, %s, %q, %s, %s)", p.helper("$writeScalar"), address, size, viewMethod(primitive.Kind, "set"), value, p.orderLiteral(primitive.Order))
 	case primitive.Kind == Char || primitive.Kind == Char16:
-		return fmt.Sprintf("%s(%s, %s, String(%s).charCodeAt(0), %s)", p.helper("$writeUint"), address, size, value, p.orderLiteral(primitive.Order))
+		return fmt.Sprintf("%s(%s, 0, %s, String(%s).charCodeAt(0), %s)", p.helper("$writeUint"), address, size, value, p.orderLiteral(primitive.Order))
 	case primitive.Kind == Bool:
-		return fmt.Sprintf("%s(%s, %s, %s(%s) ? 1 : 0, %s)", p.helper("$writeUint"), address, size, p.helper("$truthy"), value, p.orderLiteral(primitive.Order))
+		return fmt.Sprintf("%s(%s, 0, %s, %s(%s) ? 1 : 0, %s)", p.helper("$writeUint"), address, size, p.helper("$truthy"), value, p.orderLiteral(primitive.Order))
 	}
-	return fmt.Sprintf("%s(%s, %s, %s, %s)", p.helper("$writeUint"), address, size, value, p.orderLiteral(primitive.Order))
+	return fmt.Sprintf("%s(%s, 0, %s, %s, %s)", p.helper("$writeUint"), address, size, value, p.orderLiteral(primitive.Order))
 }
 
 func localName(local *Local) string {
@@ -695,12 +695,12 @@ func (p *parserEmitter) sizeOf(t Type, address string) string {
 func (p *parserEmitter) reader(t Type, address string) string {
 	switch t := t.(type) {
 	case *Primitive:
-		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t, address), t.Kind.Size())
+		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t, at(address)), t.Kind.Size())
 	case *Enum:
 		if t.Encoding != nil {
 			return fmt.Sprintf("%s(%s)", p.helper("$patternReading"), p.reader(Unalias(t.Encoding), address))
 		}
-		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t.Underlying, address), t.Underlying.Kind.Size())
+		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t.Underlying, at(address)), t.Underlying.Kind.Size())
 	case *Struct, *Union:
 		arguments := make([]string, len(typeArgs(t)))
 		p.scoping = true
@@ -712,7 +712,7 @@ func (p *parserEmitter) reader(t Type, address string) string {
 	case *Bitfield:
 		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this))", p.helper("$parsed"), p.typeRef(t.Name), address)
 	case *Pointer:
-		return fmt.Sprintf("[%s, %s]", p.pointerReader(t, address), p.sizeOf(t, address))
+		return fmt.Sprintf("[%s, %s]", p.pointerReader(t, at(address)), p.sizeOf(t, address))
 	case *Array:
 		return p.arrayReader(t, address)
 	case *Alias:
@@ -736,9 +736,9 @@ func (p *parserEmitter) arrayReader(t *Array, address string) string {
 	length := p.expression(t.Length)
 	switch kind {
 	case Char:
-		return fmt.Sprintf("[%s(%s, %s), %s]", p.helper("$readString"), address, length, length)
+		return fmt.Sprintf("[%s(%s, 0, %s), %s]", p.helper("$readString"), address, length, length)
 	case Char16:
-		return fmt.Sprintf("[%s(%s, %s), (%s) * 2]", p.helper("$readString16"), address, length, length)
+		return fmt.Sprintf("[%s(%s, 0, %s), (%s) * 2]", p.helper("$readString16"), address, length, length)
 	}
 	return fmt.Sprintf("%s($env, %s, %s, (p) => %s)", p.helper("$parseArray"), address, length, p.reader(t.Element, "p"))
 }

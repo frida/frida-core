@@ -136,16 +136,16 @@ export function $std_mem_align_to(env, alignment, value) { return alignment > 0 
 export function $std_mem_read_unsigned(env, address, size, endian = 0, section = undefined) {
     const littleEndian = endian === 0 ? (env.littleEndian ?? true) : endian === 2;
     const base = section === undefined ? env.base : new $SectionPointer($sectionOf(env, section), 0);
-    return size > 6 ? $readBigUint(base.add(address), size, littleEndian) : $readUint(base.add(address), size, littleEndian);
+    return size > 6 ? $readBigUint(base, $pointerDelta(address), size, littleEndian) : $readUint(base, $pointerDelta(address), size, littleEndian);
 }
 
 export function $std_mem_read_signed(env, address, size, endian = 0, section = undefined) {
     const littleEndian = endian === 0 ? (env.littleEndian ?? true) : endian === 2;
     const base = section === undefined ? env.base : new $SectionPointer($sectionOf(env, section), 0);
-    return size > 6 ? $readBigInt(base.add(address), size, littleEndian) : $readInt(base.add(address), size, littleEndian);
+    return size > 6 ? $readBigInt(base, $pointerDelta(address), size, littleEndian) : $readInt(base, $pointerDelta(address), size, littleEndian);
 }
 
-export function $std_mem_read_string(env, address, size) { return $readString(env.base.add(address), size); }
+export function $std_mem_read_string(env, address, size) { return $readString(env.base, $pointerDelta(address), size); }
 
 export function $std_mem_find_sequence(env, occurrence, ...bytes) { return $std_mem_find(env, occurrence, 0, env.limit, bytes.map(Number)); }
 
@@ -160,7 +160,7 @@ function $std_mem_find(env, occurrence, from, to, needle) {
     const end = Math.max(start, Math.min(to, env.limit));
     if (!Number.isFinite(end))
         throw new Error("searching needs a bounded size");
-    const haystack = new Uint8Array(env.base.add(start).readByteArray(end - start));
+    const haystack = new Uint8Array(env.base.readByteArray(end - start, start));
     let remaining = Number(occurrence);
     outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
         for (let j = 0; j !== needle.length; j++) {
@@ -303,7 +303,7 @@ export function $std_math_accumulate(env, start, end, width) {
     const size = Number(width);
     let sum = 0n;
     for (let address = Number(start); address + size <= Number(end); address += size) {
-        const bytes = new Uint8Array(env.base.add(address).readByteArray(size));
+        const bytes = new Uint8Array(env.base.readByteArray(size, address));
         let value = 0n;
         for (let i = size - 1; i >= 0; i--)
             value = (value << 8n) | BigInt(bytes[env.littleEndian ? i : size - 1 - i]);
@@ -518,10 +518,10 @@ export function $padWhile(env, address, proceed) {
     return size;
 }
 
-export function $readArray(address, length, stride, read) {
+export function $readArray(base, offset, length, stride, read) {
     const result = new Array(length);
     for (let i = 0; i !== length; i++)
-        result[i] = read(address.add(i * stride));
+        result[i] = read(offset + i * stride);
     return result;
 }
 
@@ -533,42 +533,42 @@ export function $padArray(elements, length) {
 
 export function $parseCString(address) {
     const value = address.readUtf8String();
-    return [value, $cStringSize(address)];
+    return [value, $cStringSize(address, 0)];
 }
 
 export function $parseCString16(address) {
     const value = address.readUtf16String();
-    return [value, $cString16Size(address)];
+    return [value, $cString16Size(address, 0)];
 }
 
-export function $cStringSize(address) {
+export function $cStringSize(base, offset) {
     let length = 0;
-    while (address.add(length).readU8() !== 0)
+    while (base.readU8(offset + length) !== 0)
         length++;
     return length + 1;
 }
 
-export function $cString16Size(address) {
+export function $cString16Size(base, offset) {
     let length = 0;
-    while (address.add(length).readU16() !== 0)
+    while (base.readU16(offset + length) !== 0)
         length += 2;
     return length + 2;
 }
 
-export function $readString(address, size) {
-    const bytes = new Uint8Array(address.readByteArray(size));
+export function $readString(base, offset, size) {
+    const bytes = new Uint8Array(base.readByteArray(size, offset));
     let length = bytes.indexOf(0);
     if (length === -1)
         length = size;
-    return address.readUtf8String(length);
+    return base.readUtf8String(length, offset);
 }
 
-export function $readString16(address, count) {
-    const units = new Uint16Array(address.readByteArray(count * 2));
+export function $readString16(base, offset, count) {
+    const units = new Uint16Array(base.readByteArray(count * 2, offset));
     let length = units.indexOf(0);
     if (length === -1)
         length = count;
-    return address.readUtf16String(length);
+    return base.readUtf16String(length, offset);
 }
 
 export function $readBitRange(address, bitOffset, width, bigEndian = false) {
@@ -803,44 +803,44 @@ export function $putInteger(bytes, offset, size, value, littleEndian) {
     }
 }
 
-export function $readU16LE(address) { return $readScalar(address, 2, "getUint16", true); }
+export function $readU16LE(base, offset) { return $readScalar(base, offset, 2, "getUint16", true); }
 
-export function $readU16BE(address) { return $readScalar(address, 2, "getUint16", false); }
+export function $readU16BE(base, offset) { return $readScalar(base, offset, 2, "getUint16", false); }
 
-export function $readS16LE(address) { return $readScalar(address, 2, "getInt16", true); }
+export function $readS16LE(base, offset) { return $readScalar(base, offset, 2, "getInt16", true); }
 
-export function $readS16BE(address) { return $readScalar(address, 2, "getInt16", false); }
+export function $readS16BE(base, offset) { return $readScalar(base, offset, 2, "getInt16", false); }
 
-export function $readU32LE(address) { return $readScalar(address, 4, "getUint32", true); }
+export function $readU32LE(base, offset) { return $readScalar(base, offset, 4, "getUint32", true); }
 
-export function $readU32BE(address) { return $readScalar(address, 4, "getUint32", false); }
+export function $readU32BE(base, offset) { return $readScalar(base, offset, 4, "getUint32", false); }
 
-export function $readS32LE(address) { return $readScalar(address, 4, "getInt32", true); }
+export function $readS32LE(base, offset) { return $readScalar(base, offset, 4, "getInt32", true); }
 
-export function $readS32BE(address) { return $readScalar(address, 4, "getInt32", false); }
+export function $readS32BE(base, offset) { return $readScalar(base, offset, 4, "getInt32", false); }
 
-export function $readU64LE(address) { return uint64($readScalar(address, 8, "getBigUint64", true).toString()); }
+export function $readU64LE(base, offset) { return uint64($readScalar(base, offset, 8, "getBigUint64", true).toString()); }
 
-export function $readU64BE(address) { return uint64($readScalar(address, 8, "getBigUint64", false).toString()); }
+export function $readU64BE(base, offset) { return uint64($readScalar(base, offset, 8, "getBigUint64", false).toString()); }
 
-export function $readS64LE(address) { return int64($readScalar(address, 8, "getBigInt64", true).toString()); }
+export function $readS64LE(base, offset) { return int64($readScalar(base, offset, 8, "getBigInt64", true).toString()); }
 
-export function $readS64BE(address) { return int64($readScalar(address, 8, "getBigInt64", false).toString()); }
+export function $readS64BE(base, offset) { return int64($readScalar(base, offset, 8, "getBigInt64", false).toString()); }
 
-export function $readFloatLE(address) { return $readScalar(address, 4, "getFloat32", true); }
+export function $readFloatLE(base, offset) { return $readScalar(base, offset, 4, "getFloat32", true); }
 
-export function $readFloatBE(address) { return $readScalar(address, 4, "getFloat32", false); }
+export function $readFloatBE(base, offset) { return $readScalar(base, offset, 4, "getFloat32", false); }
 
-export function $readDoubleLE(address) { return $readScalar(address, 8, "getFloat64", true); }
+export function $readDoubleLE(base, offset) { return $readScalar(base, offset, 8, "getFloat64", true); }
 
-export function $readDoubleBE(address) { return $readScalar(address, 8, "getFloat64", false); }
+export function $readDoubleBE(base, offset) { return $readScalar(base, offset, 8, "getFloat64", false); }
 
-export function $readScalar(address, size, method, littleEndian) { return new DataView(address.readByteArray(size))[method](0, littleEndian); }
+export function $readScalar(base, offset, size, method, littleEndian) { return new DataView(base.readByteArray(size, offset))[method](0, littleEndian); }
 
-export function $readInt(address, size, littleEndian) { return $signExtend($readUint(address, size, littleEndian), size * 8); }
+export function $readInt(base, offset, size, littleEndian) { return $signExtend($readUint(base, offset, size, littleEndian), size * 8); }
 
-export function $readUint(address, size, littleEndian) {
-    const bytes = new Uint8Array(address.readByteArray(size));
+export function $readUint(base, offset, size, littleEndian) {
+    const bytes = new Uint8Array(base.readByteArray(size, offset));
     let value = 0;
     for (let i = 0; i !== size; i++)
         value = value * 256 + bytes[littleEndian ? size - 1 - i : i];
@@ -849,62 +849,62 @@ export function $readUint(address, size, littleEndian) {
 
 export function $signExtend(value, bits) { return (value >= 2 ** (bits - 1)) ? value - 2 ** bits : value; }
 
-export function $readBigInt(address, size, littleEndian) { return BigInt.asIntN(size * 8, $readBigUint(address, size, littleEndian)); }
+export function $readBigInt(base, offset, size, littleEndian) { return BigInt.asIntN(size * 8, $readBigUint(base, offset, size, littleEndian)); }
 
-export function $readBigUint(address, size, littleEndian) {
-    const bytes = new Uint8Array(address.readByteArray(size));
+export function $readBigUint(base, offset, size, littleEndian) {
+    const bytes = new Uint8Array(base.readByteArray(size, offset));
     let value = 0n;
     for (let i = 0; i !== size; i++)
         value = (value << 8n) | BigInt(bytes[littleEndian ? size - 1 - i : i]);
     return value;
 }
 
-export function $writeU16LE(address, value) { $writeScalar(address, 2, "setUint16", value, true); }
+export function $writeU16LE(base, offset, value) { $writeScalar(base, offset, 2, "setUint16", value, true); }
 
-export function $writeU16BE(address, value) { $writeScalar(address, 2, "setUint16", value, false); }
+export function $writeU16BE(base, offset, value) { $writeScalar(base, offset, 2, "setUint16", value, false); }
 
-export function $writeS16LE(address, value) { $writeScalar(address, 2, "setInt16", value, true); }
+export function $writeS16LE(base, offset, value) { $writeScalar(base, offset, 2, "setInt16", value, true); }
 
-export function $writeS16BE(address, value) { $writeScalar(address, 2, "setInt16", value, false); }
+export function $writeS16BE(base, offset, value) { $writeScalar(base, offset, 2, "setInt16", value, false); }
 
-export function $writeU32LE(address, value) { $writeScalar(address, 4, "setUint32", value, true); }
+export function $writeU32LE(base, offset, value) { $writeScalar(base, offset, 4, "setUint32", value, true); }
 
-export function $writeU32BE(address, value) { $writeScalar(address, 4, "setUint32", value, false); }
+export function $writeU32BE(base, offset, value) { $writeScalar(base, offset, 4, "setUint32", value, false); }
 
-export function $writeS32LE(address, value) { $writeScalar(address, 4, "setInt32", value, true); }
+export function $writeS32LE(base, offset, value) { $writeScalar(base, offset, 4, "setInt32", value, true); }
 
-export function $writeS32BE(address, value) { $writeScalar(address, 4, "setInt32", value, false); }
+export function $writeS32BE(base, offset, value) { $writeScalar(base, offset, 4, "setInt32", value, false); }
 
-export function $writeU64LE(address, value) { $writeScalar(address, 8, "setBigUint64", BigInt(value.toString()), true); }
+export function $writeU64LE(base, offset, value) { $writeScalar(base, offset, 8, "setBigUint64", BigInt(value.toString()), true); }
 
-export function $writeU64BE(address, value) { $writeScalar(address, 8, "setBigUint64", BigInt(value.toString()), false); }
+export function $writeU64BE(base, offset, value) { $writeScalar(base, offset, 8, "setBigUint64", BigInt(value.toString()), false); }
 
-export function $writeS64LE(address, value) { $writeScalar(address, 8, "setBigInt64", BigInt(value.toString()), true); }
+export function $writeS64LE(base, offset, value) { $writeScalar(base, offset, 8, "setBigInt64", BigInt(value.toString()), true); }
 
-export function $writeS64BE(address, value) { $writeScalar(address, 8, "setBigInt64", BigInt(value.toString()), false); }
+export function $writeS64BE(base, offset, value) { $writeScalar(base, offset, 8, "setBigInt64", BigInt(value.toString()), false); }
 
-export function $writeFloatLE(address, value) { $writeScalar(address, 4, "setFloat32", value, true); }
+export function $writeFloatLE(base, offset, value) { $writeScalar(base, offset, 4, "setFloat32", value, true); }
 
-export function $writeFloatBE(address, value) { $writeScalar(address, 4, "setFloat32", value, false); }
+export function $writeFloatBE(base, offset, value) { $writeScalar(base, offset, 4, "setFloat32", value, false); }
 
-export function $writeDoubleLE(address, value) { $writeScalar(address, 8, "setFloat64", value, true); }
+export function $writeDoubleLE(base, offset, value) { $writeScalar(base, offset, 8, "setFloat64", value, true); }
 
-export function $writeDoubleBE(address, value) { $writeScalar(address, 8, "setFloat64", value, false); }
+export function $writeDoubleBE(base, offset, value) { $writeScalar(base, offset, 8, "setFloat64", value, false); }
 
-export function $writeScalar(address, size, method, value, littleEndian) {
+export function $writeScalar(base, offset, size, method, value, littleEndian) {
     const buffer = new ArrayBuffer(size);
     new DataView(buffer)[method](0, value, littleEndian);
-    address.writeByteArray(buffer);
+    base.writeByteArray(buffer, offset);
 }
 
-export function $writeUint(address, size, value, littleEndian) {
+export function $writeUint(base, offset, size, value, littleEndian) {
     const bytes = new Uint8Array(size);
     let v = BigInt.asUintN(size * 8, BigInt(value));
     for (let i = 0; i !== size; i++) {
         bytes[littleEndian ? i : size - 1 - i] = Number(v & 0xffn);
         v >>= 8n;
     }
-    address.writeByteArray(bytes.buffer);
+    base.writeByteArray(bytes.buffer, offset);
 }
 
 export function $extractBits(value, offset, bits) { return Math.floor(value / 2 ** offset) % 2 ** bits; }
@@ -926,7 +926,7 @@ function $mainSection(base, limit) {
         id: 0,
         name: "main",
         get size() { return limit; },
-        slice(offset, size) { return base.add(offset).readByteArray(size); },
+        slice(offset, size) { return base.readByteArray(size, offset); },
         write() { throw new Error("the main section is read-only"); },
     };
 }
@@ -1009,30 +1009,31 @@ class $SectionPointer {
     toString(radix = 16) { return radix === 16 ? "0x" + this.offset.toString(16) : this.offset.toString(radix); }
     toJSON() { return this.toString(); }
     toUInt32() { return this.offset >>> 0; }
-    readByteArray(size) { return this.section.slice(this.offset, size); }
-    view(size) { return new DataView(this.readByteArray(size)); }
-    readU8() { return this.view(1).getUint8(0); }
-    readS8() { return this.view(1).getInt8(0); }
-    readU16() { return this.view(2).getUint16(0, true); }
-    readS16() { return this.view(2).getInt16(0, true); }
-    readU32() { return this.view(4).getUint32(0, true); }
-    readS32() { return this.view(4).getInt32(0, true); }
-    readU64() { return uint64(this.view(8).getBigUint64(0, true).toString()); }
-    readS64() { return int64(this.view(8).getBigInt64(0, true).toString()); }
-    readFloat() { return this.view(4).getFloat32(0, true); }
-    readDouble() { return this.view(8).getFloat64(0, true); }
-    readPointer() { return ptr("0x" + this.view(Process.pointerSize)[Process.pointerSize === 8 ? "getBigUint64" : "getUint32"](0, true).toString(16)); }
-    readUtf8String(length = -1) {
-        const bytes = new Uint8Array(this.section.bytes.buffer, this.offset, length === -1 ? this.section.size - this.offset : length);
+    readByteArray(size, offset = 0) { return this.section.slice(this.offset + offset, size); }
+    view(size, offset) { return new DataView(this.readByteArray(size, offset)); }
+    readU8(offset = 0) { return this.view(1, offset).getUint8(0); }
+    readS8(offset = 0) { return this.view(1, offset).getInt8(0); }
+    readU16(offset = 0) { return this.view(2, offset).getUint16(0, true); }
+    readS16(offset = 0) { return this.view(2, offset).getInt16(0, true); }
+    readU32(offset = 0) { return this.view(4, offset).getUint32(0, true); }
+    readS32(offset = 0) { return this.view(4, offset).getInt32(0, true); }
+    readU64(offset = 0) { return uint64(this.view(8, offset).getBigUint64(0, true).toString()); }
+    readS64(offset = 0) { return int64(this.view(8, offset).getBigInt64(0, true).toString()); }
+    readFloat(offset = 0) { return this.view(4, offset).getFloat32(0, true); }
+    readDouble(offset = 0) { return this.view(8, offset).getFloat64(0, true); }
+    readPointer(offset = 0) { return ptr("0x" + this.view(Process.pointerSize, offset)[Process.pointerSize === 8 ? "getBigUint64" : "getUint32"](0, true).toString(16)); }
+    readUtf8String(length = -1, offset = 0) {
+        const start = this.offset + offset;
+        const bytes = new Uint8Array(this.section.bytes.buffer, start, length === -1 ? this.section.size - start : length);
         const end = length === -1 ? bytes.indexOf(0) : -1;
         let text = "";
         for (const byte of end === -1 ? bytes : bytes.subarray(0, end))
             text += String.fromCharCode(byte);
         return decodeURIComponent(escape(text));
     }
-    readUtf16String(length = -1) {
-        const units = length === -1 ? (this.section.size - this.offset) >>> 1 : length;
-        const view = this.view(units * 2);
+    readUtf16String(length = -1, offset = 0) {
+        const units = length === -1 ? (this.section.size - this.offset - offset) >>> 1 : length;
+        const view = this.view(units * 2, offset);
         let text = "";
         for (let i = 0; i !== units; i++) {
             const unit = view.getUint16(i * 2, true);
@@ -1042,12 +1043,12 @@ class $SectionPointer {
         }
         return text;
     }
-    writeU8(value) { this.section.write(this.offset, new Uint8Array([Number(value) & 0xff])); return this; }
-    writeByteArray(bytes) { this.section.write(this.offset, new Uint8Array(bytes)); return this; }
-    writePointer(value) {
+    writeU8(value, offset = 0) { this.section.write(this.offset + offset, new Uint8Array([Number(value) & 0xff])); return this; }
+    writeByteArray(bytes, offset = 0) { this.section.write(this.offset + offset, new Uint8Array(bytes)); return this; }
+    writePointer(value, offset = 0) {
         const buffer = new ArrayBuffer(Process.pointerSize);
         new DataView(buffer)[Process.pointerSize === 8 ? "setBigUint64" : "setUint32"](0, Process.pointerSize === 8 ? BigInt(value.toString()) : Number(value), true);
-        return this.writeByteArray(buffer);
+        return this.writeByteArray(buffer, offset);
     }
 }
 

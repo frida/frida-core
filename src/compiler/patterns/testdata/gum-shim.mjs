@@ -40,44 +40,44 @@ export class NativePointer {
   toString(radix = 16) { return radix === 16 ? "0x" + this.value.toString(16) : this.value.toString(radix); }
   toJSON() { return this.toString(); }
   toUInt32() { return this.value >>> 0; }
-  readU8() { return view(this.value, 1).getUint8(0); }
-  readS8() { return view(this.value, 1).getInt8(0); }
-  readU16() { return view(this.value, 2).getUint16(0, true); }
-  readS16() { return view(this.value, 2).getInt16(0, true); }
-  readU32() { return view(this.value, 4).getUint32(0, true); }
-  readS32() { return view(this.value, 4).getInt32(0, true); }
-  readU64() { return new UInt64(view(this.value, 8).getBigUint64(0, true)); }
-  readS64() { return new Int64(view(this.value, 8).getBigInt64(0, true)); }
-  readFloat() { return view(this.value, 4).getFloat32(0, true); }
-  readDouble() { return view(this.value, 8).getFloat64(0, true); }
-  readPointer() { return new NativePointer(Number(view(this.value, 8).getBigUint64(0, true))); }
-  readByteArray(size) { const { bytes, offset } = locate(this.value); return bytes.slice(offset, offset + size).buffer; }
-  readUtf8String(length = -1) {
-    const { bytes, offset } = locate(this.value);
+  readU8(offset = 0) { return view(this.value + offset, 1).getUint8(0); }
+  readS8(offset = 0) { return view(this.value + offset, 1).getInt8(0); }
+  readU16(offset = 0) { return view(this.value + offset, 2).getUint16(0, true); }
+  readS16(offset = 0) { return view(this.value + offset, 2).getInt16(0, true); }
+  readU32(offset = 0) { return view(this.value + offset, 4).getUint32(0, true); }
+  readS32(offset = 0) { return view(this.value + offset, 4).getInt32(0, true); }
+  readU64(offset = 0) { return new UInt64(view(this.value + offset, 8).getBigUint64(0, true)); }
+  readS64(offset = 0) { return new Int64(view(this.value + offset, 8).getBigInt64(0, true)); }
+  readFloat(offset = 0) { return view(this.value + offset, 4).getFloat32(0, true); }
+  readDouble(offset = 0) { return view(this.value + offset, 8).getFloat64(0, true); }
+  readPointer(offset = 0) { return new NativePointer(Number(view(this.value + offset, 8).getBigUint64(0, true))); }
+  readByteArray(size, offset = 0) { const { bytes, offset: start } = locate(this.value + offset); return bytes.slice(start, start + size).buffer; }
+  readUtf8String(length = -1, at = 0) {
+    const { bytes, offset } = locate(this.value + at);
     let end = offset;
     if (length === -1) { while (bytes[end] !== 0) end++; } else { end = offset + length; }
     return new TextDecoder().decode(bytes.subarray(offset, end));
   }
-  readUtf16String(length = -1) {
-    const { bytes, offset } = locate(this.value);
+  readUtf16String(length = -1, at = 0) {
+    const { bytes, offset } = locate(this.value + at);
     let end = offset;
     if (length === -1) { while (bytes[end] !== 0 || bytes[end + 1] !== 0) end += 2; } else { end = offset + length * 2; }
     return new TextDecoder("utf-16le").decode(bytes.subarray(offset, end));
   }
-  writeU8(v) { view(this.value, 1).setUint8(0, v); return this; }
-  writeS8(v) { view(this.value, 1).setInt8(0, v); return this; }
-  writeU16(v) { view(this.value, 2).setUint16(0, v, true); return this; }
-  writeS16(v) { view(this.value, 2).setInt16(0, v, true); return this; }
-  writeU32(v) { view(this.value, 4).setUint32(0, v, true); return this; }
-  writeS32(v) { view(this.value, 4).setInt32(0, v, true); return this; }
-  writeU64(v) { view(this.value, 8).setBigUint64(0, BigInt(v.toString()), true); return this; }
-  writeS64(v) { view(this.value, 8).setBigInt64(0, BigInt(v.toString()), true); return this; }
-  writeFloat(v) { view(this.value, 4).setFloat32(0, v, true); return this; }
-  writeDouble(v) { view(this.value, 8).setFloat64(0, v, true); return this; }
-  writePointer(v) { view(this.value, 8).setBigUint64(0, BigInt(new NativePointer(v).value), true); return this; }
-  writeByteArray(buffer) {
+  writeU8(v, offset = 0) { view(this.value + offset, 1).setUint8(0, v); return this; }
+  writeS8(v, offset = 0) { view(this.value + offset, 1).setInt8(0, v); return this; }
+  writeU16(v, offset = 0) { view(this.value + offset, 2).setUint16(0, v, true); return this; }
+  writeS16(v, offset = 0) { view(this.value + offset, 2).setInt16(0, v, true); return this; }
+  writeU32(v, offset = 0) { view(this.value + offset, 4).setUint32(0, v, true); return this; }
+  writeS32(v, offset = 0) { view(this.value + offset, 4).setInt32(0, v, true); return this; }
+  writeU64(v, offset = 0) { view(this.value + offset, 8).setBigUint64(0, BigInt(v.toString()), true); return this; }
+  writeS64(v, offset = 0) { view(this.value + offset, 8).setBigInt64(0, BigInt(v.toString()), true); return this; }
+  writeFloat(v, offset = 0) { view(this.value + offset, 4).setFloat32(0, v, true); return this; }
+  writeDouble(v, offset = 0) { view(this.value + offset, 8).setFloat64(0, v, true); return this; }
+  writePointer(v, offset = 0) { view(this.value + offset, 8).setBigUint64(0, BigInt(new NativePointer(v).value), true); return this; }
+  writeByteArray(buffer, at = 0) {
     const source = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : Uint8Array.from(buffer);
-    const { bytes, offset } = locate(this.value);
+    const { bytes, offset } = locate(this.value + at);
     bytes.set(source, offset);
     return this;
   }

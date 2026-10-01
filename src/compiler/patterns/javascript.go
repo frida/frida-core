@@ -503,9 +503,9 @@ func (c *compositeEmitter) dynamicSize(entry *fieldEntry) string {
 	case *Array:
 		if t.Length == nil {
 			if characterKind(t.Element) == Char16 {
-				return c.helper("$cString16Size") + "(" + address + ")"
+				return c.helper("$cString16Size") + "(" + address.arguments() + ")"
 			}
-			return c.helper("$cStringSize") + "(" + address + ")"
+			return c.helper("$cStringSize") + "(" + address.arguments() + ")"
 		}
 		elementSize := c.table.value(entry.accessor+"_stride", c.sizesOfType(t.Element))
 		return fmt.Sprintf("(%s) * %s", c.expression(t.Length), elementSize)
@@ -537,11 +537,8 @@ func (c *compositeEmitter) aligned(value string, key string, aligns []int) strin
 	return fmt.Sprintf("%s(%s, %s)", c.helper("$align"), value, c.table.value(key, aligns))
 }
 
-func (c *compositeEmitter) address(offset string) string {
-	if offset == "0" {
-		return "this.$address"
-	}
-	return fmt.Sprintf("this.$address.add(%s)", offset)
+func (c *compositeEmitter) address(offset string) location {
+	return location{base: "this.$address", offset: offset}
 }
 
 func (c *compositeEmitter) emitAccessors(out *strings.Builder, entry *fieldEntry) {
@@ -587,7 +584,7 @@ func (c *compositeEmitter) previousEntry(entry *fieldEntry) *fieldEntry {
 	panic("unreachable")
 }
 
-func (c *compositeEmitter) reader(t Type, address string, entry *fieldEntry) string {
+func (c *compositeEmitter) reader(t Type, address location, entry *fieldEntry) string {
 	switch t := t.(type) {
 	case *Primitive:
 		return c.primitiveReader(t, address)
@@ -609,8 +606,8 @@ func (c *compositeEmitter) reader(t Type, address string, entry *fieldEntry) str
 	panic("unreachable")
 }
 
-func (c *compositeEmitter) viewOf(t Type, address string) string {
-	return fmt.Sprintf("new %s(%s, this)", c.typeRef(Unalias(t).(NamedType).TypeName()), address)
+func (c *compositeEmitter) viewOf(t Type, address location) string {
+	return fmt.Sprintf("new %s(%s, this)", c.typeRef(Unalias(t).(NamedType).TypeName()), address.pointer())
 }
 
 func isView(t Type) bool {
@@ -621,29 +618,29 @@ func isView(t Type) bool {
 	return false
 }
 
-func (e *jsEmitter) primitiveReader(t *Primitive, address string) string {
+func (e *jsEmitter) primitiveReader(t *Primitive, address location) string {
 	switch t.Kind {
 	case Bool:
-		return fmt.Sprintf("(%s.readU8() !== 0)", address)
+		return fmt.Sprintf("(%s !== 0)", address.call("readU8"))
 	case Char:
-		return fmt.Sprintf("String.fromCharCode(%s.readU8())", address)
+		return fmt.Sprintf("String.fromCharCode(%s)", address.call("readU8"))
 	case Char16:
 		return fmt.Sprintf("String.fromCharCode(%s)", e.scalarReader(&Primitive{Kind: U16, Order: t.Order}, address))
 	}
 	return e.scalarReader(t, address)
 }
 
-func (e *jsEmitter) scalarReader(t *Primitive, address string) string {
+func (e *jsEmitter) scalarReader(t *Primitive, address location) string {
 	if isOddWidth(t.Kind) {
-		return fmt.Sprintf("%s(%s, %d, %s)", e.helper(oddWidthHelperName("$read", t.Kind)), address, t.Kind.Size(), e.orderLiteral(t.Order))
+		return fmt.Sprintf("%s(%s, %d, %s)", e.helper(oddWidthHelperName("$read", t.Kind)), address.arguments(), t.Kind.Size(), e.orderLiteral(t.Order))
 	}
 	if t.Order == NativeOrder && e.module.DynamicEndian && t.Kind.Size() > 1 && e.parsing {
-		return fmt.Sprintf("%s(%s, %d, %q, $env.littleEndian)", e.helper("$readScalar"), address, t.Kind.Size(), viewMethod(t.Kind, "get"))
+		return fmt.Sprintf("%s(%s, %d, %q, $env.littleEndian)", e.helper("$readScalar"), address.arguments(), t.Kind.Size(), viewMethod(t.Kind, "get"))
 	}
 	if t.Order == NativeOrder || t.Kind.Size() == 1 {
-		return fmt.Sprintf("%s.read%s()", address, nativeAccessorName(t.Kind))
+		return address.call("read" + nativeAccessorName(t.Kind))
 	}
-	return fmt.Sprintf("%s(%s)", e.helper(orderedHelperName("$read", t)), address)
+	return fmt.Sprintf("%s(%s)", e.helper(orderedHelperName("$read", t)), address.arguments())
 }
 
 func viewMethod(kind PrimitiveKind, prefix string) string {
@@ -701,30 +698,35 @@ func orderedHelperName(prefix string, t *Primitive) string {
 	return prefix + nativeAccessorName(t.Kind) + suffix
 }
 
-func (e *jsEmitter) pointerReader(t *Pointer, address string) string {
+func (e *jsEmitter) pointerReader(t *Pointer, address location) string {
 	if t.Width == nil {
-		return fmt.Sprintf("%s.readPointer()", address)
+		return address.call("readPointer")
 	}
 	return fmt.Sprintf("ptr(%s)", e.scalarReader(t.Width, address))
 }
 
-func (c *compositeEmitter) arrayReader(t *Array, address string, entry *fieldEntry) string {
+func (c *compositeEmitter) arrayReader(t *Array, address location, entry *fieldEntry) string {
 	kind := characterKind(t.Element)
 	if t.Length == nil {
+		method := "readUtf8String"
 		if kind == Char16 {
-			return fmt.Sprintf("%s.readUtf16String()", address)
+			method = "readUtf16String"
 		}
-		return fmt.Sprintf("%s.readUtf8String()", address)
+		if address.offset == "0" {
+			return address.call(method)
+		}
+		return address.call(method, "-1")
 	}
 	length := c.expression(t.Length)
 	switch kind {
 	case Char:
-		return fmt.Sprintf("%s(%s, %s)", c.helper("$readString"), address, length)
+		return fmt.Sprintf("%s(%s, %s)", c.helper("$readString"), address.arguments(), length)
 	case Char16:
-		return fmt.Sprintf("%s(%s, %s)", c.helper("$readString16"), address, length)
+		return fmt.Sprintf("%s(%s, %s)", c.helper("$readString16"), address.arguments(), length)
 	}
 	stride := c.table.value(entry.accessor+"_stride", c.sizesOfType(t.Element))
-	return fmt.Sprintf("%s(%s, %s, %s, (p) => %s)", c.helper("$readArray"), address, length, stride, c.reader(t.Element, "p", entry))
+	element := location{base: address.base, offset: "o"}
+	return fmt.Sprintf("%s(%s, %s, %s, (o) => %s)", c.helper("$readArray"), address.arguments(), length, stride, c.reader(t.Element, element, entry))
 }
 
 func characterKind(t Type) PrimitiveKind {
@@ -734,7 +736,7 @@ func characterKind(t Type) PrimitiveKind {
 	return -1
 }
 
-func (c *compositeEmitter) writer(t Type, address string, value string) string {
+func (c *compositeEmitter) writer(t Type, address location, value string) string {
 	switch t := t.(type) {
 	case *Primitive:
 		return c.primitiveWriter(t, address, value)
@@ -743,7 +745,7 @@ func (c *compositeEmitter) writer(t Type, address string, value string) string {
 	case *Pointer:
 		pointer := fmt.Sprintf("%s(%s)", c.helper("$pointerOf"), value)
 		if t.Width == nil {
-			return fmt.Sprintf("%s.writePointer(%s)", address, pointer)
+			return address.call("writePointer", pointer)
 		}
 		if t.Width.Kind.Size() == 8 {
 			return c.scalarWriter(t.Width, address, fmt.Sprintf("uint64(%s.toString())", pointer))
@@ -755,26 +757,26 @@ func (c *compositeEmitter) writer(t Type, address string, value string) string {
 	return ""
 }
 
-func (c *compositeEmitter) primitiveWriter(t *Primitive, address string, value string) string {
+func (c *compositeEmitter) primitiveWriter(t *Primitive, address location, value string) string {
 	switch t.Kind {
 	case Bool:
-		return fmt.Sprintf("%s.writeU8(%s ? 1 : 0)", address, value)
+		return address.call("writeU8", value+" ? 1 : 0")
 	case Char:
-		return fmt.Sprintf("%s.writeU8(%s.charCodeAt(0))", address, value)
+		return address.call("writeU8", value+".charCodeAt(0)")
 	case Char16:
 		return c.scalarWriter(&Primitive{Kind: U16, Order: t.Order}, address, value+".charCodeAt(0)")
 	}
 	return c.scalarWriter(t, address, value)
 }
 
-func (c *compositeEmitter) scalarWriter(t *Primitive, address string, value string) string {
+func (c *compositeEmitter) scalarWriter(t *Primitive, address location, value string) string {
 	if isOddWidth(t.Kind) {
-		return fmt.Sprintf("%s(%s, %d, %s, %s)", c.helper("$writeUint"), address, t.Kind.Size(), value, c.orderLiteral(t.Order))
+		return fmt.Sprintf("%s(%s, %d, %s, %s)", c.helper("$writeUint"), address.arguments(), t.Kind.Size(), value, c.orderLiteral(t.Order))
 	}
 	if t.Order == NativeOrder || t.Kind.Size() == 1 {
-		return fmt.Sprintf("%s.write%s(%s)", address, nativeAccessorName(t.Kind), value)
+		return address.call("write"+nativeAccessorName(t.Kind), value)
 	}
-	return fmt.Sprintf("%s(%s, %s)", c.helper(orderedHelperName("$write", t)), address, value)
+	return fmt.Sprintf("%s(%s, %s)", c.helper(orderedHelperName("$write", t)), address.arguments(), value)
 }
 
 func (c *compositeEmitter) emitToJSON(out *strings.Builder) {
@@ -1079,8 +1081,8 @@ func (e *jsEmitter) emitBitfield(out *strings.Builder, t *Bitfield) {
 		fmt.Fprintf(out, "    get %s() { return %s; }\n", member.Name, value)
 		fmt.Fprintf(out, "    set %s(value) { this.$value = %s(this.$value, %d, %d, %s); }\n", member.Name, e.helper(insert), shift, member.Bits, stored)
 	}
-	fmt.Fprintf(out, "    get $value() { return %s(this.$address, %d, %s); }\n", e.helper(read), size, order)
-	fmt.Fprintf(out, "    set $value(value) { %s(this.$address, %d, value, %s); }\n", e.helper("$writeUint"), size, order)
+	fmt.Fprintf(out, "    get $value() { return %s(this.$address, 0, %d, %s); }\n", e.helper(read), size, order)
+	fmt.Fprintf(out, "    set $value(value) { %s(this.$address, 0, %d, value, %s); }\n", e.helper("$writeUint"), size, order)
 	closeClass(out, t.Name)
 }
 
@@ -1120,4 +1122,31 @@ func (e *jsEmitter) reference(key string) {
 	if !slices.Contains(e.current.references, key) {
 		e.current.references = append(e.current.references, key)
 	}
+}
+
+type location struct {
+	base   string
+	offset string
+}
+
+func at(base string) location {
+	return location{base: base, offset: "0"}
+}
+
+func (l location) call(method string, arguments ...string) string {
+	if l.offset != "0" {
+		arguments = append(arguments, l.offset)
+	}
+	return fmt.Sprintf("%s.%s(%s)", l.base, method, strings.Join(arguments, ", "))
+}
+
+func (l location) arguments() string {
+	return l.base + ", " + l.offset
+}
+
+func (l location) pointer() string {
+	if l.offset == "0" {
+		return l.base
+	}
+	return fmt.Sprintf("%s.add(%s)", l.base, l.offset)
 }
