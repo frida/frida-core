@@ -809,7 +809,7 @@ func (c *compositeEmitter) arrayReader(t *Array, address location, entry *fieldE
 	}
 	stride := c.table.value(entry.accessor+"_stride", c.sizesOfType(t.Element))
 	element := location{base: address.base, offset: "o"}
-	return fmt.Sprintf("%s(%s, %s, %s, (o) => %s)", c.helper("$readArray"), address.arguments(), length, stride, c.reader(t.Element, element, entry))
+	return fmt.Sprintf("%s(%s, %s, %s, (o) => %s)", c.helper("$readArray"), address.offset, length, stride, c.reader(t.Element, element, entry))
 }
 
 func characterKind(t Type) PrimitiveKind {
@@ -1254,8 +1254,20 @@ func (l location) pointer() string {
 	return fmt.Sprintf("%s.add(%s)", l.base, l.offset)
 }
 
-func inEnvironment(offset string) location {
-	return location{base: "$env.base", offset: offset}
+func (p *parserEmitter) inEnvironment(offset string) location {
+	return location{base: p.base(), offset: offset}
+}
+
+func (p *parserEmitter) base() string {
+	p.usesBase = true
+	return "$base"
+}
+
+func (p *parserEmitter) envBase(env string) string {
+	if env == "$env" {
+		return p.base()
+	}
+	return env + ".base"
 }
 
 var integerLiteralPattern = regexp.MustCompile(`^[0-9]+$`)

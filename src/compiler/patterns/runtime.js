@@ -40,21 +40,26 @@ export function $sectionEnvironment(env, id) {
 
 export class $Pattern {
     #type;
+    #base;
+    #start;
     #args;
     #parent;
     #fields = {};
-    constructor(type, address, parent, args) {
-        this.$address = address;
+    constructor(type, base, start, parent, args) {
         this.$size = 0;
         this.#type = type;
+        this.#base = base;
+        this.#start = start;
         this.#args = args;
         this.#parent = parent;
     }
+    get $address() { return this.#base.add(this.#start); }
     get $type() { return this.#type; }
     get $args() { return this.#args; }
     get $parent() { return this.#parent; }
     get $fields() { return this.#fields; }
     valueOf() { return $patternInteger(this); }
+    toJSON() { return { $address: this.$address, ...this }; }
 }
 
 export function $formatLater(env, owner, apply) {
@@ -658,7 +663,9 @@ export function $padWhile(env, offset, proceed) {
     return size;
 }
 
-export function $readArray(base, offset, length, stride, read) {
+export function $parseFixedArray(offset, length, stride, read) { return [$readArray(offset, length, stride, read), length * stride]; }
+
+export function $readArray(offset, length, stride, read) {
     const result = new Array(length);
     for (let i = 0; i !== length; i++)
         result[i] = read(offset + i * stride);

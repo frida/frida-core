@@ -282,7 +282,7 @@ func TestSizeOfFieldInArrayLength(t *testing.T) {
 		t.Fatal(diagnostics)
 	}
 	js := EmitJavaScript(module, "a.pat").Main
-	if !strings.Contains(js, "$readArray(this.$address, 4, 8, 1") || !strings.Contains(js, "$readArray(this.$address, 12, 4, 1") {
+	if !strings.Contains(js, "$readArray(4, 8, 1") || !strings.Contains(js, "$readArray(12, 4, 1") {
 		t.Errorf("unexpected output:\n%s", js)
 	}
 }
