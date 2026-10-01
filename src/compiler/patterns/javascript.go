@@ -360,7 +360,7 @@ func (e *jsEmitter) emitComposite(out *strings.Builder, qualifiedName string, fi
 			fmt.Fprintf(&class, "    static size = %s;\n", c.size)
 		}
 		fmt.Fprintf(&class, "    static $align = %s;\n", c.table.value("align", c.alignsOfComposite()))
-		fmt.Fprintf(&class, "    constructor(address, parent = null) { this.$address = ptr(address); this.$parent = parent; }\n")
+		fmt.Fprintf(&class, "    constructor(address, parent = null) { this.$address = address; this.$parent = parent; }\n")
 		fmt.Fprintf(&class, "    static at(address) { return new %s(address); }\n", name)
 		e.emitParser(&class, t)
 		if !c.dynamic {
@@ -1116,7 +1116,7 @@ func (e *jsEmitter) emitBitfield(out *strings.Builder, t *Bitfield) {
 	name := shortName(t.Name)
 	openClass(out, t.Name)
 	fmt.Fprintf(out, "    static size = %d;\n", size)
-	fmt.Fprintf(out, "    constructor(address, parent = null) { this.$address = ptr(address); this.$parent = parent; }\n")
+	fmt.Fprintf(out, "    constructor(address, parent = null) { this.$address = address; this.$parent = parent; }\n")
 	fmt.Fprintf(out, "    static at(address) { return new %s(address); }\n", name)
 	fmt.Fprintf(out, "    static parse(address) { const view = new %s(address); return { $address: view.$address, $size: %d, $value: view.$value, ...view.toJSON() }; }\n", name, size)
 	e.emitParseBody(out, t)

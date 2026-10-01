@@ -170,7 +170,7 @@ export function $pointee(metadata) {
 
 export function $deref(pointer, type) { return pointer.isNull() ? null : new type(pointer); }
 
-export function $pointerOf(value) { return (value === null) ? NULL : (value.$address !== undefined) ? value.$address : ptr(value); }
+export function $pointerOf(value) { return (value === null) ? NULL : (value.$address !== undefined) ? value.$address : value; }
 
 export function $std_mem_create_section(env, name) {
     const section = new $Section(env.sections.length, String(name));

@@ -43,9 +43,9 @@ func EmitDeclarations(module *Module, sourceName string) string {
 				fmt.Fprintf(&out, "        %s?: %s;\n", input.Name, d.inputType(input))
 			}
 			out.WriteString("    }\n}\n")
-			fmt.Fprintf(&out, "\nexport declare function parse(address: NativePointerValue, size?: number, inputs?: %s.Inputs): %s.Parsed;\n", tsRef(module.Root.Name), tsRef(module.Root.Name))
+			fmt.Fprintf(&out, "\nexport declare function parse(address: NativePointer, size?: number, inputs?: %s.Inputs): %s.Parsed;\n", tsRef(module.Root.Name), tsRef(module.Root.Name))
 		} else {
-			fmt.Fprintf(&out, "\nexport declare function parse(address: NativePointerValue, size?: number): %s.Parsed;\n", tsRef(module.Root.Name))
+			fmt.Fprintf(&out, "\nexport declare function parse(address: NativePointer, size?: number): %s.Parsed;\n", tsRef(module.Root.Name))
 		}
 	}
 	return out.String()
@@ -105,14 +105,14 @@ func (d *declarationEmitter) emitComposite(out *strings.Builder, qualifiedName s
 	writeDoc(out, "", doc)
 	fmt.Fprintf(out, "export declare class %s {\n", name)
 	if view {
-		fmt.Fprintf(out, "    constructor(address: NativePointerValue);\n")
-		fmt.Fprintf(out, "    static at(address: NativePointerValue): %s;\n", name)
+		fmt.Fprintf(out, "    constructor(address: NativePointer);\n")
+		fmt.Fprintf(out, "    static at(address: NativePointer): %s;\n", name)
 		if !dynamic {
 			fmt.Fprintf(out, "    static readonly size: number;\n")
 			fmt.Fprintf(out, "    static pattern(fields: %s.Fields): string;\n", name)
 		}
 	}
-	fmt.Fprintf(out, "    static parse(address: NativePointerValue, size?: number): %s.Parsed;\n", name)
+	fmt.Fprintf(out, "    static parse(address: NativePointer, size?: number): %s.Parsed;\n", name)
 	if view {
 		fmt.Fprintf(out, "    readonly $address: NativePointer;\n")
 		fmt.Fprintf(out, "    readonly $size: number;\n")
@@ -215,10 +215,10 @@ func (d *declarationEmitter) emitFieldAccessor(out *strings.Builder, field *Fiel
 	case *Pointer:
 		if isView(t.Target) {
 			fmt.Fprintf(out, "    get %s(): %s | null%s;\n", field.Name, d.typeName(t.Target), absent)
-			fmt.Fprintf(out, "    set %s(value: %s | NativePointerValue | null);\n", field.Name, d.typeName(t.Target))
+			fmt.Fprintf(out, "    set %s(value: %s | NativePointer | null);\n", field.Name, d.typeName(t.Target))
 		} else {
 			fmt.Fprintf(out, "    get %s(): NativePointer%s;\n", field.Name, absent)
-			fmt.Fprintf(out, "    set %s(value: NativePointerValue);\n", field.Name)
+			fmt.Fprintf(out, "    set %s(value: NativePointer);\n", field.Name)
 		}
 	default:
 		fmt.Fprintf(out, "    readonly %s: %s%s;\n", field.Name, d.viewType(field.Type), absent)
@@ -267,9 +267,9 @@ func (d *declarationEmitter) fieldsType(t Type) string {
 		return d.fieldsType(t.Target)
 	case *Pointer:
 		if isView(t.Target) {
-			return d.typeName(t.Target) + " | NativePointerValue"
+			return d.typeName(t.Target) + " | NativePointer"
 		}
-		return "NativePointerValue"
+		return "NativePointer"
 	case *Array:
 		if characterKind(t.Element) != -1 {
 			return "string"
@@ -352,8 +352,8 @@ func (d *declarationEmitter) emitBitfield(out *strings.Builder, t *Bitfield) {
 	name := shortName(t.Name)
 	writeDoc(out, "", t.Doc)
 	fmt.Fprintf(out, "export declare class %s {\n", name)
-	fmt.Fprintf(out, "    constructor(address: NativePointerValue);\n")
-	fmt.Fprintf(out, "    static at(address: NativePointerValue): %s;\n", name)
+	fmt.Fprintf(out, "    constructor(address: NativePointer);\n")
+	fmt.Fprintf(out, "    static at(address: NativePointer): %s;\n", name)
 	fmt.Fprintf(out, "    static readonly size: number;\n")
 	fmt.Fprintf(out, "    readonly $address: NativePointer;\n")
 	fmt.Fprintf(out, "    readonly $size: number;\n")
@@ -370,7 +370,7 @@ func (d *declarationEmitter) emitBitfield(out *strings.Builder, t *Bitfield) {
 		fmt.Fprintf(out, "    %s: %s;\n", member.Name, bitfieldMemberType(member, big))
 	}
 	fmt.Fprintf(out, "    toJSON(): %s.Values;\n", name)
-	fmt.Fprintf(out, "    static parse(address: NativePointerValue): %s.Parsed;\n", name)
+	fmt.Fprintf(out, "    static parse(address: NativePointer): %s.Parsed;\n", name)
 	out.WriteString("}\n")
 
 	fmt.Fprintf(out, "export declare namespace %s {\n    interface Values {\n", name)
@@ -395,7 +395,7 @@ func (d *declarationEmitter) emitDynamicBitfield(out *strings.Builder, t *Bitfie
 	name := shortName(t.Name)
 	writeDoc(out, "", t.Doc)
 	fmt.Fprintf(out, "export declare class %s {\n", name)
-	fmt.Fprintf(out, "    static parse(address: NativePointerValue, size?: number): %s.Parsed;\n", name)
+	fmt.Fprintf(out, "    static parse(address: NativePointer, size?: number): %s.Parsed;\n", name)
 	out.WriteString("}\n")
 	fmt.Fprintf(out, "export declare namespace %s {\n    interface Parsed {\n", name)
 	out.WriteString("        readonly $address: NativePointer;\n")

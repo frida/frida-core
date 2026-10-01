@@ -9,7 +9,7 @@ import (
 )
 
 func (e *jsEmitter) emitParser(out *strings.Builder, t Type) {
-	fmt.Fprintf(out, "    static parse(address, size = Infinity, inputs = {}) { return %s(%s, ptr(address), size, inputs); }\n", e.helper("$parseRoot"), shortName(t.(NamedType).TypeName()))
+	fmt.Fprintf(out, "    static parse(address, size = Infinity, inputs = {}) { return %s(%s, address, size, inputs); }\n", e.helper("$parseRoot"), shortName(t.(NamedType).TypeName()))
 	e.emitParseBody(out, t)
 }
 
