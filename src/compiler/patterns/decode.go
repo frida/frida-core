@@ -1626,6 +1626,20 @@ func (d *decoder) addressOf(offset int) string {
 	return fmt.Sprintf("0x%x", d.base+uint64(offset))
 }
 
+func (d *decoder) bytesOrZeros(offset int, size int) []byte {
+	if bytes, available := d.bytes(offset, size); available {
+		return bytes
+	}
+	padded := make([]byte, size)
+	data := d.active.data
+	for i := range padded {
+		if at := offset + i; at >= 0 && at < len(data) {
+			padded[i] = data[at]
+		}
+	}
+	return padded
+}
+
 func (d *decoder) bytes(offset int, size int) ([]byte, bool) {
 	if offset < 0 || offset+size > len(d.active.data) {
 		return nil, false

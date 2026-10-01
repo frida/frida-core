@@ -564,12 +564,13 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		fmt.Fprintf(p.out, "%s    let $value, $n;\n", indent)
 		fmt.Fprintf(p.out, "%s    try { [$value, $n] = %s; } finally { %s.littleEndian = $order; }\n", indent, reader, env)
 	case isFixed && field.Section == nil:
-		fmt.Fprintf(p.out, "%s    let $value = %s;\n", indent, p.fixedReader(field.Type, "$at"))
 		fmt.Fprintf(p.out, "%s    const $n = %d;\n", indent, size)
+		fmt.Fprintf(p.out, "%s    %s(%s, $at, $n);\n", indent, p.helper("$check"), env)
+		fmt.Fprintf(p.out, "%s    let $value = %s;\n", indent, p.fixedReader(field.Type, "$at"))
 	default:
 		fmt.Fprintf(p.out, "%s    let [$value, $n] = %s;\n", indent, reader)
+		fmt.Fprintf(p.out, "%s    %s(%s, $at, $n);\n", indent, p.helper("$check"), env)
 	}
-	fmt.Fprintf(p.out, "%s    %s(%s, $at, $n);\n", indent, p.helper("$check"), env)
 	if field.PointerBase != nil {
 		fmt.Fprintf(p.out, "%s    $value = $value.add(%s($env, $this, $value));\n", indent, p.functionRef(field.PointerBase))
 	}
@@ -624,7 +625,8 @@ func (p *parserEmitter) emitStaticField(field *Field, indent string, size int, a
 	if offset != 0 {
 		at = fmt.Sprintf("$start + %d", offset)
 	}
-	value := fmt.Sprintf("%s($env, %s, %d, %s)", p.helper("$checked"), at, size, p.fixedReader(field.Type, at))
+	value := p.fixedReader(field.Type, at)
+	fmt.Fprintf(p.out, "%s%s($env, %s, %d);\n", indent, p.helper("$check"), at, size)
 	if _, isPointer := Unalias(field.Type).(*Pointer); isPointer {
 		fmt.Fprintf(p.out, "%s{\n", indent)
 		fmt.Fprintf(p.out, "%s    const $value = %s;\n", indent, value)

@@ -57,18 +57,13 @@ export class $Pattern {
     valueOf() { return $patternInteger(this); }
 }
 
-export function $checked(env, offset, size, value) {
-    $check(env, offset, size);
-    return value;
-}
-
 export function $formatLater(env, owner, apply) {
     Object.defineProperty(owner, "$pendingFormat", { value: apply, writable: true, configurable: true });
     env.formatting.push(owner);
 }
 
 export function $check(env, offset, size) {
-    if (offset + size > env.limit)
+    if ((offset < 0 || offset + size > env.limit) && env.base.section?.growable !== true)
         throw new Error("the data ended before the value could be read");
 }
 
@@ -222,17 +217,33 @@ export function $std_mem_align_to(env, alignment, value) { return alignment > 0 
 
 export function $std_mem_read_unsigned(env, address, size, endian = 0, section = undefined) {
     const littleEndian = endian === 0 ? (env.littleEndian ?? true) : endian === 2;
-    const base = section === undefined ? env.base : new $SectionPointer($sectionOf(env, section), 0);
-    return size > 6 ? $readBigUint(base, $pointerDelta(address), size, littleEndian) : $readUint(base, $pointerDelta(address), size, littleEndian);
+    const [base, offset] = $memoryAt(env, $pointerDelta(address), size, section);
+    return size > 6 ? $readBigUint(base, offset, size, littleEndian) : $readUint(base, offset, size, littleEndian);
 }
 
 export function $std_mem_read_signed(env, address, size, endian = 0, section = undefined) {
     const littleEndian = endian === 0 ? (env.littleEndian ?? true) : endian === 2;
-    const base = section === undefined ? env.base : new $SectionPointer($sectionOf(env, section), 0);
-    return size > 6 ? $readBigInt(base, $pointerDelta(address), size, littleEndian) : $readInt(base, $pointerDelta(address), size, littleEndian);
+    const [base, offset] = $memoryAt(env, $pointerDelta(address), size, section);
+    return size > 6 ? $readBigInt(base, offset, size, littleEndian) : $readInt(base, offset, size, littleEndian);
 }
 
-export function $std_mem_read_string(env, address, size) { return $readString(env.base, $pointerDelta(address), size); }
+export function $std_mem_read_string(env, address, size) {
+    const [base, offset] = $memoryAt(env, $pointerDelta(address), size, undefined);
+    return $readString(base, offset, size);
+}
+
+function $memoryAt(env, offset, size, section) {
+    if (section !== undefined)
+        return [new $SectionPointer($sectionOf(env, section), 0), offset];
+    if (offset >= 0 && offset + size <= env.limit)
+        return [env.base, offset];
+    const bytes = new Uint8Array(size);
+    const start = Math.max(0, offset);
+    const end = Math.min(env.limit, offset + size);
+    if (end > start)
+        bytes.set(new Uint8Array(env.base.readByteArray(end - start, start)), start - offset);
+    return [{ readByteArray: (length, at) => bytes.slice(at, at + length).buffer }, 0];
+}
 
 export function $std_mem_find_sequence(env, occurrence, ...bytes) { return $std_mem_find(env, occurrence, 0, env.limit, bytes.map(Number)); }
 

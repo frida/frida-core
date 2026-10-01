@@ -238,11 +238,7 @@ func (f *frame) readBytesAt(base int, addressValue runtimeValue, sizeValue runti
 	if err != nil {
 		return nil, err
 	}
-	bytes, available := f.decoder.bytes(base+int(address), int(size))
-	if !available {
-		return nil, errTruncated
-	}
-	return bytes, nil
+	return f.decoder.bytesOrZeros(base+int(address), int(size)), nil
 }
 
 func (f *frame) sectionArgument(v runtimeValue) (*section, error) {
