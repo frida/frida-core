@@ -96,7 +96,7 @@ func prerequisitesOf(t NamedType) []string {
 func (e *jsEmitter) emitNamedFunctions(out *strings.Builder, module *Module) {
 	out.WriteString("const $named = {\n")
 	for _, f := range module.Functions {
-		fmt.Fprintf(out, "    %q: %s,\n", f.Name, e.functionRef(f))
+		fmt.Fprintf(out, "    %q: ($env, $this, value) => %s($env, $this, %s),\n", f.Name, e.functionRef(f), attributeArgument(f, "value"))
 	}
 	names := make([]string, 0, len(builtins))
 	for name := range builtins {

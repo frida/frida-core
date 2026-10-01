@@ -742,9 +742,16 @@ func (p *parserEmitter) attributeCall(use *AttributeUse, argument string) string
 		return fmt.Sprintf("%s(%s, $env, $this, %s, %s)", p.helper("$callNamed"), p.namedFunctionsRef(), p.expression(use.Dynamic), argument)
 	}
 	if use.Function != nil {
-		return fmt.Sprintf("%s($env, $this, %s)", p.functionRef(use.Function), argument)
+		return fmt.Sprintf("%s($env, $this, %s)", p.functionRef(use.Function), attributeArgument(use.Function, argument))
 	}
 	return fmt.Sprintf("%s($env, %s)", p.helper(builtins[use.Builtin].js), argument)
+}
+
+func attributeArgument(f *Function, argument string) string {
+	if len(f.Params) > 0 && f.Params[0].Ref {
+		return fmt.Sprintf("{ v: %s }", argument)
+	}
+	return argument
 }
 
 func (p *parserEmitter) aligned(cursor string, t Type) string {
