@@ -914,7 +914,7 @@ func (p *parserEmitter) expression(v Value) string {
 	case *Index:
 		return fmt.Sprintf("%s(%s, %s)", p.helper("$index"), p.expression(v.Object), p.expression(v.Index))
 	case *MemberOf:
-		return fmt.Sprintf("%s.%s", p.expression(v.Object), v.Name)
+		return fmt.Sprintf("%s.%s", p.memberOwner(v.Object), v.Name)
 	case *Cursor:
 		return fmt.Sprintf("%s(%s)", p.helper("$cursorOffset"), p.cursorVariable())
 	case *AddressOf:
@@ -1147,6 +1147,9 @@ func (p *parserEmitter) ancestor(depth int) string {
 }
 
 func (p *parserEmitter) targetOffset(target Value) string {
+	if member, isMember := target.(*MemberOf); isMember && member.Field == nil {
+		return fmt.Sprintf("%s($env, %s)", p.helper("$addressOf"), p.memberSpan(member))
+	}
 	location := p.targetLocation(target)
 	if location.offset == "0" {
 		return fmt.Sprintf("%s($env.base, %s)", p.helper("$offset"), location.base)
@@ -1168,7 +1171,13 @@ func (p *parserEmitter) targetLocation(target Value) location {
 			return at(p.globalAccess(v) + ".$address")
 		}
 		return fieldLocation(fmt.Sprintf("%s.$fields.%s", parentOwner("$env.root", v.Path), v.Path[len(v.Path)-1]))
-	case *Index, *MemberOf, *LocalRef:
+	case *MemberOf:
+		if v.Field != nil {
+			return fieldLocation(fmt.Sprintf("%s.$fields.%s", p.memberOwner(v.Object), v.Name))
+		}
+		span := p.memberSpan(v)
+		return location{base: span + ".base", offset: span + ".offset"}
+	case *Index, *LocalRef:
 		return at(p.expression(v) + ".$address")
 	}
 	panic("unreachable")
@@ -1206,10 +1215,37 @@ func (p *parserEmitter) targetSize(target Value) string {
 			return p.globalAccess(v) + ".$size"
 		}
 		return fmt.Sprintf("%s.$fields.%s.size", parentOwner("$env.root", v.Path), v.Path[len(v.Path)-1])
-	case *Index, *MemberOf, *LocalRef:
-		return p.expression(v) + ".$size"
+	case *MemberOf:
+		if v.Field != nil {
+			if _, isPointer := Unalias(v.Field.Type).(*Pointer); isPointer {
+				return fmt.Sprintf("%s.$fields.%s.target()[1]", p.memberOwner(v.Object), v.Name)
+			}
+			return fmt.Sprintf("%s.$fields.%s.size", p.memberOwner(v.Object), v.Name)
+		}
+		return p.memberSpan(v) + ".size"
+	case *Index, *LocalRef:
+		return fmt.Sprintf("%s(%s)", p.helper("$sizeOf"), p.expression(v))
 	}
 	panic("unreachable")
+}
+
+func (p *parserEmitter) memberSpan(member *MemberOf) string {
+	return fmt.Sprintf("%s(%s, %q)", p.helper("$memberSpan"), p.memberOwner(member.Object), member.Name)
+}
+
+func (p *parserEmitter) memberOwner(object Value) string {
+	if member, isMember := object.(*MemberOf); isMember && member.Field == nil {
+		return fmt.Sprintf("%s(%s, %q)", p.helper("$memberOwner"), p.memberOwner(member.Object), member.Name)
+	}
+	if _, isPointer := Unalias(staticTypeOf(object)).(*Pointer); isPointer {
+		switch o := object.(type) {
+		case *MemberOf:
+			return fmt.Sprintf("%s(%s.$fields.%s)", p.helper("$pointee"), p.memberOwner(o.Object), o.Name)
+		case *FieldRef:
+			return fmt.Sprintf("%s(%s.$fields.%s)", p.helper("$pointee"), p.fieldPath(o.Path[:len(o.Path)-1]), o.Path[len(o.Path)-1].Name)
+		}
+	}
+	return p.expression(object)
 }
 
 func (p *parserEmitter) builtin(call *Builtin) string {

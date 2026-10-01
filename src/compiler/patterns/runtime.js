@@ -57,23 +57,6 @@ export function $alignCursor(start, cursor, alignment) { return start + Math.cei
 
 export function $cursorOffset(cursor) { return cursor < 0 ? BigInt.asUintN(64, BigInt(cursor)) : cursor; }
 
-export class $Span {
-    constructor(base, offset, size) {
-        this.base = base;
-        this.offset = offset;
-        this.size = size;
-    }
-    get address() { return this.base.add(this.offset); }
-}
-
-export class $BitSpan extends $Span {
-    constructor(base, offset, size, bitOffset, bits) {
-        super(base, offset, size);
-        this.bitOffset = bitOffset;
-        this.bits = bits;
-    }
-}
-
 export function $snapshot(object, env) { return { cursor: env.cursor, fields: Object.keys(object.$fields) }; }
 
 export function $restore(object, env, saved) {
@@ -110,6 +93,8 @@ export function $callNamed(named, env, $this, name, value) {
     return callee(env, $this, value);
 }
 
+export function $sizeOf(value) { return (typeof value === "string") ? value.length : value.$size; }
+
 export function $parsed(value) { return [value, value.$size]; }
 
 export function $patternReading([value, size]) { return [$patternInteger(value), size]; }
@@ -124,6 +109,38 @@ export function $patternInteger(value) {
     for (let i = bytes.length - 1; i >= 0; i--)
         number = number * 256 + bytes[i];
     return number;
+}
+
+export function $memberOwner(owner, name) {
+    const metadata = owner.$fields?.[name];
+    return (metadata?.target !== undefined) ? $pointee(metadata) : owner[name];
+}
+
+export function $memberSpan(owner, name) {
+    const metadata = owner.$fields?.[name];
+    if (metadata !== undefined)
+        return metadata;
+    const value = owner[name];
+    return new $Span(value.$address, 0, value.$size);
+}
+
+export function $addressOf(env, span) { return (span.base === env.base) ? span.offset : $offset(env.base, span.address); }
+
+export class $Span {
+    constructor(base, offset, size) {
+        this.base = base;
+        this.offset = offset;
+        this.size = size;
+    }
+    get address() { return this.base.add(this.offset); }
+}
+
+export class $BitSpan extends $Span {
+    constructor(base, offset, size, bitOffset, bits) {
+        super(base, offset, size);
+        this.bitOffset = bitOffset;
+        this.bits = bits;
+    }
 }
 
 export function $pointee(metadata) {
