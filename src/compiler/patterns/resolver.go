@@ -1843,6 +1843,9 @@ func (r *resolver) resolveCall(e *Call, scope *fieldScope) Value {
 		if operand == nil {
 			return nil
 		}
+		if e.Order != NativeOrder {
+			return &Cast{Kind: kind, Order: e.Order, DefaultOrder: r.order, Operand: operand}
+		}
 		return castValue(operand, kind)
 	}
 	if function, isFunction := r.lookupFunction(e.Name); isFunction && !explicitlyBuiltin {

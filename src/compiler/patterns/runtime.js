@@ -35,7 +35,7 @@ export function $cloneLocal(env, value) {
 export function $sectionEnvironment(env, id) {
     const section = $sectionOf(env, id);
     const base = new $SectionPointer(section, 0);
-    return { base, get limit() { return section.size; }, cursor: 0, root: env.root, globals: env.globals, littleEndian: env.littleEndian, arrayIndex: env.arrayIndex, breaks: false, continues: false, sections: env.sections, formatting: env.formatting };
+    return { base, get limit() { return section.size; }, cursor: 0, root: env.root, globals: env.globals, littleEndian: env.littleEndian, arrayIndex: env.arrayIndex, breaks: false, continues: false, sections: env.sections, formatting: env.formatting, defaultLittleEndian: env.defaultLittleEndian };
 }
 
 export class $Pattern {
@@ -110,18 +110,6 @@ export function $callNamed(named, env, $this, name, value) {
 export function $copyPattern(span, value) { span.base.writeByteArray(value.$address.readByteArray(value.$size), span.offset); }
 
 export function $sizeOf(value) { return (typeof value === "string") ? value.length : value.$size; }
-
-function $formatNow(owner) {
-    const apply = owner.$pendingFormat;
-    if (apply === undefined)
-        return;
-    owner.$pendingFormat = undefined;
-    try {
-        apply();
-    } catch (e) {
-        Object.defineProperty(owner, "$formatError", { value: e.message, configurable: true });
-    }
-}
 
 export function $parsed(value) { return [value, value.$size]; }
 
@@ -287,7 +275,22 @@ export function $std_core_formatted_value(env, pattern) {
     return (pattern.$formatted !== undefined) ? pattern.$formatted : $display(pattern);
 }
 
-export function $std_core_set_endian(env, endian) { env.littleEndian = Number(endian) !== 1; }
+export function $std_core_set_endian(env, endian) {
+    env.littleEndian = Number(endian) !== 1;
+    env.defaultLittleEndian = env.littleEndian;
+}
+
+function $formatNow(owner) {
+    const apply = owner.$pendingFormat;
+    if (apply === undefined)
+        return;
+    owner.$pendingFormat = undefined;
+    try {
+        apply();
+    } catch (e) {
+        Object.defineProperty(owner, "$formatError", { value: e.message, configurable: true });
+    }
+}
 
 export function $std_format(env, text, ...args) { return $format(String(text), ...args); }
 
@@ -852,6 +855,18 @@ export function $index(object, index) {
     if (object === null || object === undefined || i < 0 || i >= object.length)
         throw new RangeError("index " + i + " is out of range");
     return object[i];
+}
+
+export function $byteOrdered(env, value, size, littleEndian, littleByDefault, signed) {
+    if (littleEndian === (env.defaultLittleEndian ?? littleByDefault))
+        return value;
+    let remaining = BigInt.asUintN(size * 8, BigInt(value));
+    let swapped = 0n;
+    for (let i = 0; i !== size; i++) {
+        swapped = (swapped << 8n) | (remaining & 0xffn);
+        remaining >>= 8n;
+    }
+    return Number(signed ? BigInt.asIntN(size * 8, swapped) : swapped);
 }
 
 export function $packedString(value) {

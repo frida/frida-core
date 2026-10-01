@@ -421,6 +421,7 @@ type Call struct {
 	Name      string
 	Arguments []Expr
 	TypeArg   *TypeRef
+	Order     ByteOrder
 	Position  Position
 }
 

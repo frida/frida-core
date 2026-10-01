@@ -353,6 +353,7 @@ func defineCoreBuiltins() {
 			return nil, err
 		}
 		f.decoder.littleEndian = endian != 1
+		f.decoder.defaultOrder = map[bool]ByteOrder{true: LittleEndian, false: BigEndian}[endian != 1]
 		return nil, nil
 	})
 }

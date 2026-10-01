@@ -571,8 +571,10 @@ type FloatConstant struct {
 }
 
 type Cast struct {
-	Kind    PrimitiveKind
-	Operand Value
+	Kind         PrimitiveKind
+	Order        ByteOrder
+	DefaultOrder ByteOrder
+	Operand      Value
 }
 
 type FunctionCall struct {

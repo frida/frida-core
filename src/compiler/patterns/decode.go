@@ -210,6 +210,7 @@ type decoder struct {
 	active       *section
 	base         uint64
 	littleEndian bool
+	defaultOrder ByteOrder
 	steps        int
 	pointers     int
 	inputs       map[string]runtimeValue

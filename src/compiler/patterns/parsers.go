@@ -1152,6 +1152,14 @@ func (p *parserEmitter) lvalue(v Value) string {
 }
 
 func (p *parserEmitter) cast(v *Cast) string {
+	result := p.nativeCast(v)
+	if v.Order == NativeOrder || v.Kind.IsFloatingPoint() {
+		return result
+	}
+	return fmt.Sprintf("%s($env, %s, %d, %t, %t, %t)", p.helper("$byteOrdered"), result, v.Kind.Size(), v.Order == LittleEndian, v.DefaultOrder != BigEndian, v.Kind.IsSigned())
+}
+
+func (p *parserEmitter) nativeCast(v *Cast) string {
 	operand := p.expression(v.Operand)
 	switch {
 	case v.Kind == Bool:

@@ -675,7 +675,11 @@ func (f *frame) eval(v Value) (runtimeValue, error) {
 		if err != nil {
 			return nil, err
 		}
-		return cast(operand, v.Kind)
+		result, err := cast(operand, v.Kind)
+		if err != nil || v.Order == NativeOrder || v.Order == f.decoder.defaultOrderFor(v) || v.Kind.IsFloatingPoint() {
+			return result, err
+		}
+		return f.byteSwapped(result, v.Kind)
 	case *TemplateArgument:
 		argument, err := f.eval(v.Value)
 		if err != nil {
@@ -727,6 +731,28 @@ func (f *frame) truthy(v Value) (bool, error) {
 		return false, err
 	}
 	return truthyValue(result)
+}
+
+func (d *decoder) defaultOrderFor(v *Cast) ByteOrder {
+	for _, order := range []ByteOrder{d.defaultOrder, v.DefaultOrder} {
+		if order != NativeOrder {
+			return order
+		}
+	}
+	return LittleEndian
+}
+
+func (f *frame) byteSwapped(v runtimeValue, kind PrimitiveKind) (runtimeValue, error) {
+	number, err := toUint(v)
+	if err != nil {
+		return nil, err
+	}
+	swapped := uint64(0)
+	for i := 0; i != kind.Size(); i++ {
+		swapped = swapped<<8 | number&0xff
+		number >>= 8
+	}
+	return cast(swapped, kind)
 }
 
 func truthyValue(result runtimeValue) (bool, error) {

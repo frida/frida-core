@@ -1210,7 +1210,11 @@ func (p *parser) parseNamedPrimary() Expr {
 	case "le", "be":
 		if p.peekAt(1).kind == tokenIdentifier && p.peekAt(2).is(tokenPunctuation, "(") {
 			p.advance()
-			return p.parseNamedPrimary()
+			primary := p.parseNamedPrimary()
+			if call, isCall := primary.(*Call); isCall {
+				call.Order = map[string]ByteOrder{"le": LittleEndian, "be": BigEndian}[t.text]
+			}
+			return primary
 		}
 	case "null":
 		p.advance()
