@@ -1834,7 +1834,8 @@ func (r *resolver) resolveCall(e *Call, scope *fieldScope) Value {
 	case "str":
 		e = &Call{Name: "std::string::to_string", Arguments: e.Arguments, Position: e.Position}
 	}
-	if name, isBuiltin := strings.CutPrefix(e.Name, "builtin::"); isBuiltin {
+	name, explicitlyBuiltin := strings.CutPrefix(e.Name, "builtin::")
+	if explicitlyBuiltin {
 		e = &Call{Name: name, Arguments: e.Arguments, Position: e.Position}
 	}
 	if kind, isPrimitive := primitiveKindsByName[e.Name]; isPrimitive && len(e.Arguments) == 1 {
@@ -1844,7 +1845,7 @@ func (r *resolver) resolveCall(e *Call, scope *fieldScope) Value {
 		}
 		return castValue(operand, kind)
 	}
-	if function, isFunction := r.lookupFunction(e.Name); isFunction {
+	if function, isFunction := r.lookupFunction(e.Name); isFunction && !explicitlyBuiltin {
 		return r.resolveFunctionCall(e, function, scope)
 	}
 	if definition, isBuiltin := builtins[e.Name]; isBuiltin {
