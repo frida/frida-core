@@ -26,6 +26,7 @@ typedef void (* FridaDiagnosticFunc) (char * category, int code, char * path, in
     void * user_data);
 typedef void (* FridaLanguageServerReadyFunc) (uintptr_t handle, char * error_message, void * user_data);
 typedef void (* FridaLanguageServerMessageFunc) (char * text, void * user_data);
+typedef void (* FridaPatternResultFunc) (char * json, char * error_message, void * user_data);
 typedef void (* FridaDestroyFunc) (void * user_data);
 
 static inline void
@@ -99,6 +100,15 @@ invoke_language_server_message_func (FridaLanguageServerMessageFunc fn,
 }
 
 static inline void
+invoke_pattern_result_func (FridaPatternResultFunc fn,
+                            char * json,
+                            char * error_message,
+                            void * user_data)
+{
+  fn (json, error_message, user_data);
+}
+
+static inline void
 invoke_destroy_func (FridaDestroyFunc fn,
                      void * user_data)
 {
@@ -108,6 +118,7 @@ invoke_destroy_func (FridaDestroyFunc fn,
 import "C"
 
 import (
+	"encoding/json"
 	"runtime/cgo"
 	"unsafe"
 )
@@ -269,6 +280,84 @@ func _frida_compiler_backend_language_server_post(h uintptr, cText *C.char) *C.c
 		return C.CString(err.Error())
 	}
 	return nil
+}
+
+//export _frida_compiler_backend_patterns_describe
+func _frida_compiler_backend_patterns_describe(cSource, cPlatform, cArch *C.char,
+	onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
+	source := C.GoString(cSource)
+	platform := C.GoString(cPlatform)
+	arch := C.GoString(cArch)
+	onResult := NewCDelegate(onResultFn, onResultData, onResultDataDestroy)
+
+	go func() {
+		defer onResult.Dispose()
+
+		invokePatternResultFunc(onResult, describePatterns(source, platform, arch), nil)
+	}()
+}
+
+//export _frida_compiler_backend_patterns_decode
+func _frida_compiler_backend_patterns_decode(cSource, cTypeName *C.char, cData *C.uint8_t, dataLength C.int, address C.uint64_t,
+	cPlatform, cArch, cInputs *C.char, onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
+	source := C.GoString(cSource)
+	typeName := C.GoString(cTypeName)
+	data := C.GoBytes(unsafe.Pointer(cData), dataLength)
+	platform := C.GoString(cPlatform)
+	arch := C.GoString(cArch)
+	inputs := parsePatternInputs(cInputs)
+	onResult := NewCDelegate(onResultFn, onResultData, onResultDataDestroy)
+
+	go func() {
+		defer onResult.Dispose()
+
+		result, err := decodePattern(source, typeName, data, uint64(address), platform, arch, inputs)
+		invokePatternResultFunc(onResult, result, err)
+	}()
+}
+
+//export _frida_compiler_backend_patterns_call
+func _frida_compiler_backend_patterns_call(cSource, cTypeName *C.char, cData *C.uint8_t, dataLength C.int, address C.uint64_t,
+	cPlatform, cArch, cInputs *C.char, patternID C.uint, cFunctionName *C.char,
+	onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
+	source := C.GoString(cSource)
+	typeName := C.GoString(cTypeName)
+	data := C.GoBytes(unsafe.Pointer(cData), dataLength)
+	platform := C.GoString(cPlatform)
+	arch := C.GoString(cArch)
+	inputs := parsePatternInputs(cInputs)
+	functionName := C.GoString(cFunctionName)
+	onResult := NewCDelegate(onResultFn, onResultData, onResultDataDestroy)
+
+	go func() {
+		defer onResult.Dispose()
+
+		result, err := callPatternFunction(source, typeName, data, uint64(address), platform, arch, inputs, int(patternID), functionName)
+		invokePatternResultFunc(onResult, result, err)
+	}()
+}
+
+func parsePatternInputs(cInputs *C.char) map[string]any {
+	if cInputs == nil {
+		return nil
+	}
+	var inputs map[string]any
+	if err := json.Unmarshal([]byte(C.GoString(cInputs)), &inputs); err != nil {
+		return nil
+	}
+	return inputs
+}
+
+func invokePatternResultFunc(onResult *CDelegate[C.FridaPatternResultFunc], result string, err error) {
+	var cResult, cErrorMessage *C.char
+	if err == nil {
+		cResult = C.CString(result)
+	} else {
+		cErrorMessage = C.CString(err.Error())
+	}
+	C.invoke_pattern_result_func(onResult.Func, cResult, cErrorMessage, onResult.Data)
+	C.free(unsafe.Pointer(cResult))
+	C.free(unsafe.Pointer(cErrorMessage))
 }
 
 type languageServerHandle struct {

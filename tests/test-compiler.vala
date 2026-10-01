@@ -14,6 +14,253 @@ namespace Frida.CompilerTest {
 			var h = new Harness ((h) => LanguageServerTests.complete_simple_agent.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/Compiler/Patterns/build-agent-with-patterns", () => {
+			var h = new Harness ((h) => PatternTests.build_agent_with_patterns.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Compiler/Patterns/complete-pattern-fields", () => {
+			var h = new Harness ((h) => PatternTests.complete_pattern_fields.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Compiler/Patterns/compile-and-decode", () => {
+			var h = new Harness ((h) => PatternTests.compile_and_decode.begin (h as Harness));
+			h.run ();
+		});
+	}
+
+	namespace PatternTests {
+		private const string PLAYER_PATTERN = """
+#pragma abi native
+
+struct Vec3 {
+	float x;
+	float y;
+	float z;
+};
+
+struct Player {
+	u32 hitpoints;
+	u16 armor;
+	Vec3 position;
+	Player *next;
+};
+""";
+
+		private static async void build_agent_with_patterns (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
+				FileUtils.set_contents (agent_ts_path, """
+import { Player } from "./player.pat";
+
+const player = Player.at(Process.mainModule.base);
+const hitpoints: number = player.hitpoints;
+console.log(hitpoints, player.position.x, player.next);
+""");
+				string player_pat_path = Path.build_filename (project_dir, "player.pat");
+				FileUtils.set_contents (player_pat_path, PLAYER_PATTERN);
+
+				var compiler = new Compiler ();
+				compiler.diagnostics.connect (d => printerr ("DIAGNOSTICS: %s\n", d.print (false)));
+				var code = yield compiler.build (agent_ts_path);
+				assert ("hitpoints" in code);
+				assert ("readU32()" in code);
+
+				string declarations_path = Path.build_filename (project_dir, "player.pat.d.ts");
+				string declarations;
+				FileUtils.get_contents (declarations_path, out declarations);
+				assert ("export declare class Player" in declarations);
+
+				FileUtils.unlink (declarations_path);
+				FileUtils.unlink (player_pat_path);
+				FileUtils.unlink (agent_ts_path);
+				DirUtils.remove (project_dir);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private static async void compile_and_decode (Harness h) {
+			try {
+				var compiler = new PatternCompiler ();
+				var options = new PatternCompileOptions ();
+				options.platform = "darwin";
+				options.arch = "arm64";
+
+				var module = yield compiler.compile (PLAYER_PATTERN, options);
+				assert (module.diagnostics.size () == 0);
+				assert (module.types.size () == 2);
+				assert (module.root_type == null);
+				var player_type = module.types.get (1);
+				assert (player_type.name == "Player" && player_type.file == null && player_type.line == 9 && player_type.character == 0);
+
+				var placed = yield compiler.compile (PLAYER_PATTERN + "Player player @ 0x10;\n", options);
+				assert (placed.root_type == "Root");
+				assert (placed.lookup ("Root").fields.get (0).name == "player");
+				var player = module.lookup ("Player");
+				assert (player.kind == STRUCT);
+				assert (player.size == 32);
+				assert (player.fields.size () == 4);
+				var next = player.fields.get (3);
+				assert (next.name == "next");
+				assert (next.offset == 24);
+				assert (next.type_ref.kind == POINTER);
+				assert (next.type_ref.target.name == "Player");
+
+				var broken = yield compiler.compile ("struct A { auto a @ 0; };", options);
+				assert (broken.types.size () == 0);
+				assert (broken.diagnostics.size () == 1);
+				assert (broken.diagnostics.get (0).message == "auto is not supported");
+				assert (broken.diagnostics.get (0).character == 11);
+
+				var configurable = yield compiler.compile ("u32 scale in = 1;\nstruct Sample { u8 raw; u32 scaled = raw * scale [[export]]; };\nSample sample @ 0;\n", options);
+				assert (configurable.inputs.size () == 1);
+				assert (configurable.inputs.get (0).name == "scale");
+				assert (configurable.inputs.get (0).type_ref.name == "u32");
+				var decode_options = new PatternDecodeOptions ();
+				decode_options.inputs["scale"] = new Variant.int64 (3);
+				var scaled = yield configurable.decode ("Root", new Bytes ({ 7 }), 0, decode_options);
+				assert (scaled.fields.get (0).fields.get (1).value.get_int64 () == 21);
+
+				var data = new uint8[32];
+				data[0] = 94;
+				data[4] = 7;
+				data[24] = 0x34;
+				data[25] = 0x12;
+				var value = yield module.decode ("Player", new Bytes (data), 0x1000);
+				assert (value.type_name == "Player");
+				assert (value.size == 32);
+				assert (value.fields.get (0).name == "hitpoints");
+				assert (value.fields.get (0).value.get_uint64 () == 94);
+				assert (value.fields.get (2).fields.get (0).value.get_double () == 0.0);
+				assert (value.fields.get (3).address == 0x1018);
+				assert (value.fields.get (3).value.get_uint64 () == 0x1234);
+				var serialized = value.to_variant ();
+				assert (serialized.lookup_value ("fields", null).n_children () == 4);
+
+				string formatted_source = PLAYER_PATTERN + """
+fn describe(u32 hp) { return std::format("{} hp", hp); }
+struct Labelled { u32 hitpoints [[format("describe"), color("00FF00")]]; };
+""";
+				var formatted = yield compiler.compile (formatted_source, options);
+				var labelled = yield formatted.decode ("Labelled", new Bytes (data), 0);
+				assert (labelled.fields.get (0).formatted == "94 hp");
+				assert (labelled.fields.get (0).color == "00FF00");
+
+				var visualizing = yield compiler.compile ("""
+struct Image {
+	u8 magic[2];
+	u8 width;
+	u8 visualizer[3] @ addressof(this) [[sealed, hex::visualize("image", this), no_unique_address]];
+	u8 samples[2] [[hex::inline_visualize("line_plot", this, width)]];
+};
+""", options);
+				var visualized = yield visualizing.decode ("Image", new Bytes ({ 0x89, 0x50, 7, 1, 2 }), 0x1000);
+				var image = visualized.fields.get (2).visualizer;
+				assert (image.name == "image" && image.presentation == DETACHED);
+				var bytes = image.arguments.get (0);
+				assert (bytes.kind == PATTERN && bytes.address == 0x1000 && bytes.size == 3);
+				assert (bytes.pattern == visualized.fields.get (2).id && bytes.data.compare (new Bytes ({ 0x89, 0x50, 7 })) == 0);
+				var plot = visualized.fields.get (3).visualizer;
+				assert (plot.presentation == INLINE && plot.arguments.size () == 2);
+				assert (plot.arguments.get (1).kind == VALUE && plot.arguments.get (1).value.get_int64 () == 7);
+				assert (visualized.fields.get (2).to_variant ().lookup_value ("visualizer", null) != null);
+
+				var printing = yield compiler.compile ("""
+fn describe(ref auto pattern) { std::print("width {}", pattern.width); };
+struct Image { u8 magic[2]; u8 width; };
+""", options);
+				string output = yield printing.call_function ("Image", new Bytes ({ 0x89, 0x50, 7 }), 0x1000, 1, "describe");
+				assert (output == "width 7");
+
+				var truncated = yield module.decode ("Player", new Bytes (data[:20]), 0x1000);
+				assert (truncated.truncated);
+				assert (truncated.fields.get (3).value == null);
+
+				try {
+					yield module.decode ("Nope", new Bytes (data), 0);
+					assert_not_reached ();
+				} catch (Error e) {
+					assert (e is Error.INVALID_ARGUMENT);
+					assert ("unknown type Nope" in e.message);
+				}
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private static async void complete_pattern_fields (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
+				string agent_ts_source = "import { Player } from \"./player.pat\";\nconst p = Player.at(NULL);\np.\n";
+				FileUtils.set_contents (agent_ts_path, agent_ts_source);
+				string player_pat_path = Path.build_filename (project_dir, "player.pat");
+				FileUtils.set_contents (player_pat_path, PLAYER_PATTERN);
+
+				var server = new LanguageServer (project_dir);
+
+				var client = new LanguageServerTests.Client (server);
+				yield server.start ();
+
+				yield client.request ("initialize", """{
+					"processId": null,
+					"rootUri": "%s",
+					"capabilities": {}
+				}""".printf (LanguageServerTests.file_uri (project_dir)));
+				client.send_notification ("initialized", "{}");
+
+				client.send_notification ("textDocument/didOpen", """{
+					"textDocument": {
+						"uri": "%s",
+						"languageId": "typescript",
+						"version": 1,
+						"text": "%s"
+					}
+				}""".printf (LanguageServerTests.file_uri (agent_ts_path), agent_ts_source.escape ()));
+
+				var completion = yield client.request ("textDocument/completion", """{
+					"textDocument": { "uri": "%s" },
+					"position": { "line": 2, "character": 2 }
+				}""".printf (LanguageServerTests.file_uri (agent_ts_path)));
+				assert ("\"hitpoints\"" in completion);
+
+				yield client.request ("shutdown", null);
+				client.send_notification ("exit", null);
+				server.stop ();
+
+				FileUtils.unlink (Path.build_filename (project_dir, "player.pat.d.ts"));
+				FileUtils.unlink (player_pat_path);
+				FileUtils.unlink (agent_ts_path);
+				DirUtils.remove (project_dir);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
 	}
 
 	namespace LanguageServerTests {
@@ -71,11 +318,11 @@ namespace Frida.CompilerTest {
 			h.done ();
 		}
 
-		private static string file_uri (string path) throws ConvertError {
+		internal static string file_uri (string path) throws ConvertError {
 			return Filename.to_uri (path);
 		}
 
-		private class Client : Object {
+		internal class Client : Object {
 			private LanguageServer server;
 			private int next_id = 1;
 			private Gee.Map<int, PendingRequest> pending = new Gee.HashMap<int, PendingRequest> ();

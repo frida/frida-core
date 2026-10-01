@@ -4,29 +4,38 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"sync"
 )
 
 type BackendRequest struct {
-	Type             string   `json:"type"`
-	ID               uint     `json:"id,omitempty"`
-	SessionID        uint     `json:"session_id,omitempty"`
-	ProjectRoot      string   `json:"project_root,omitempty"`
-	Entrypoint       string   `json:"entrypoint,omitempty"`
-	OutputFormat     string   `json:"output_format,omitempty"`
-	BundleFormat     string   `json:"bundle_format,omitempty"`
-	DisableTypeCheck bool     `json:"disable_type_check,omitempty"`
-	SourceMap        bool     `json:"source_map,omitempty"`
-	Compress         bool     `json:"compress,omitempty"`
-	Platform         string   `json:"platform,omitempty"`
-	Externals        []string `json:"externals,omitempty"`
-	Text             string   `json:"text,omitempty"`
+	Type             string         `json:"type"`
+	ID               uint           `json:"id,omitempty"`
+	SessionID        uint           `json:"session_id,omitempty"`
+	ProjectRoot      string         `json:"project_root,omitempty"`
+	Entrypoint       string         `json:"entrypoint,omitempty"`
+	OutputFormat     string         `json:"output_format,omitempty"`
+	BundleFormat     string         `json:"bundle_format,omitempty"`
+	DisableTypeCheck bool           `json:"disable_type_check,omitempty"`
+	SourceMap        bool           `json:"source_map,omitempty"`
+	Compress         bool           `json:"compress,omitempty"`
+	Platform         string         `json:"platform,omitempty"`
+	Inputs           map[string]any `json:"inputs,omitempty"`
+	Externals        []string       `json:"externals,omitempty"`
+	Text             string         `json:"text,omitempty"`
+	TypeName         string         `json:"type_name,omitempty"`
+	Data             string         `json:"data,omitempty"`
+	Address          string         `json:"address,omitempty"`
+	Arch             string         `json:"arch,omitempty"`
+	Pattern          int            `json:"pattern,omitempty"`
+	Function         string         `json:"function,omitempty"`
 }
 
 type BackendEvent struct {
@@ -250,10 +259,68 @@ func run() error {
 				})
 			}
 
+		case "patterns:describe":
+			go func(req BackendRequest) {
+				emit(BackendEvent{
+					Type: "patterns:result",
+					ID:   req.ID,
+					Text: describePatterns(req.Text, req.Platform, req.Arch),
+				})
+			}(req)
+
+		case "patterns:decode":
+			go func(req BackendRequest) {
+				ev := BackendEvent{Type: "patterns:result", ID: req.ID}
+				result, err := decodePatternRequest(req)
+				if err != nil {
+					ev.Error = err.Error()
+				} else {
+					ev.Text = result
+				}
+				emit(ev)
+			}(req)
+
+		case "patterns:call":
+			go func(req BackendRequest) {
+				ev := BackendEvent{Type: "patterns:result", ID: req.ID}
+				result, err := callPatternFunctionRequest(req)
+				if err != nil {
+					ev.Error = err.Error()
+				} else {
+					ev.Text = result
+				}
+				emit(ev)
+			}(req)
+
 		default:
 			return fmt.Errorf("unsupported request type: %q", req.Type)
 		}
 	}
+}
+
+func decodePatternRequest(req BackendRequest) (string, error) {
+	data, address, err := patternRequestData(req)
+	if err != nil {
+		return "", err
+	}
+	return decodePattern(req.Text, req.TypeName, data, address, req.Platform, req.Arch, req.Inputs)
+}
+
+func callPatternFunctionRequest(req BackendRequest) (string, error) {
+	data, address, err := patternRequestData(req)
+	if err != nil {
+		return "", err
+	}
+	return callPatternFunction(req.Text, req.TypeName, data, address, req.Platform, req.Arch, req.Inputs, req.Pattern, req.Function)
+}
+
+func patternRequestData(req BackendRequest) ([]byte, uint64, error) {
+	data, err := base64.StdEncoding.DecodeString(req.Data)
+	if err != nil {
+		return nil, 0, err
+	}
+	address, err := strconv.ParseUint(req.Address, 0, 64)
+	return data, address, err
 }
 
 func buildOptionsFromRequest(req BackendRequest) (BuildOptions, error) {
