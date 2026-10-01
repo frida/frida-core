@@ -16,6 +16,7 @@ import (
 
 type LanguageServer struct {
 	incoming chan *lsproto.Message
+	patterns *patternRouter
 	cancel   context.CancelFunc
 	done     chan struct{}
 }
@@ -28,7 +29,7 @@ func NewLanguageServer(projectRootPath string, onMessage LanguageServerMessageCa
 		return nil, fmt.Errorf("Failed to resolve project root: %w", err)
 	}
 
-	fs := newConfiglessFS(newProjectFS(projectRoot), projectRoot)
+	fs := newConfiglessFS(newProjectFS(projectRoot, NewPatternCompiler()), projectRoot)
 
 	options, _, err := NewTSConfigCache(projectRoot, false, nil).GetCompilerOptions(projectHost{fs, projectRoot})
 	if err != nil {
@@ -36,9 +37,10 @@ func NewLanguageServer(projectRootPath string, onMessage LanguageServerMessageCa
 	}
 
 	incoming := make(chan *lsproto.Message, 256)
+	router := newPatternRouter(onMessage)
 	server := lsp.NewServer(&lsp.ServerOptions{
 		In:                 messageQueue{incoming},
-		Out:                messageSink(onMessage),
+		Out:                messageSink{router, onMessage},
 		Err:                io.Discard,
 		Cwd:                projectRoot,
 		FS:                 fs,
@@ -52,6 +54,7 @@ func NewLanguageServer(projectRootPath string, onMessage LanguageServerMessageCa
 
 	s := &LanguageServer{
 		incoming: incoming,
+		patterns: router,
 		cancel:   cancel,
 		done:     make(chan struct{}),
 	}
@@ -65,6 +68,9 @@ func NewLanguageServer(projectRootPath string, onMessage LanguageServerMessageCa
 }
 
 func (s *LanguageServer) Post(text string) error {
+	if s.patterns.route(text) {
+		return nil
+	}
 	var msg lsproto.Message
 	if err := json.Unmarshal([]byte(text), &msg); err != nil {
 		return err
@@ -91,14 +97,17 @@ func (q messageQueue) Read() (*lsproto.Message, error) {
 	return msg, nil
 }
 
-type messageSink LanguageServerMessageCallback
+type messageSink struct {
+	patterns  *patternRouter
+	onMessage LanguageServerMessageCallback
+}
 
 func (sink messageSink) Write(msg *lsproto.Message) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
-	sink(string(data))
+	sink.onMessage(sink.patterns.adjustResponse(string(data)))
 	return nil
 }
 

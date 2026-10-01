@@ -51,17 +51,17 @@ type TSCompiler struct {
 
 type LoadCompilerOptionsHandler func(host tsoptions.ParseConfigHost) (*core.CompilerOptions, string, error)
 
-func NewTSCompiler(projectRoot, entrypoint string, loadCompilerOptions LoadCompilerOptionsHandler) *TSCompiler {
+func NewTSCompiler(projectRoot, entrypoint string, patternCompiler *PatternCompiler, loadCompilerOptions LoadCompilerOptionsHandler) *TSCompiler {
 	return &TSCompiler{
 		projectRoot:         projectRoot,
 		entrypoint:          tspath.NormalizePath(entrypoint),
 		loadCompilerOptions: loadCompilerOptions,
-		fs:                  newProjectFS(projectRoot),
+		fs:                  newProjectFS(projectRoot, patternCompiler),
 	}
 }
 
-func newProjectFS(projectRoot string) vfs.FS {
-	return newTypesFS(bundled.WrapFS(osvfs.FS()), projectRoot)
+func newProjectFS(projectRoot string, patternCompiler *PatternCompiler) vfs.FS {
+	return newPatternDeclarationsFS(newTypesFS(bundled.WrapFS(osvfs.FS()), projectRoot), patternCompiler)
 }
 
 func (c *TSCompiler) Dispose() {

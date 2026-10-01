@@ -171,6 +171,8 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx *buil
 
 	isTS := strings.HasSuffix(entrypoint, ".ts")
 
+	patternCompiler := NewPatternCompiler()
+
 	var tsconfigCache *TSConfigCache
 	var tsconfigText string
 	var tsCompiler *TSCompiler
@@ -178,7 +180,7 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx *buil
 	if isTS {
 		tsconfigCache = NewTSConfigCache(projectRoot, options.SourceMap, callbacks.OnConfigChange)
 
-		tsCompiler = NewTSCompiler(projectRoot, entrypoint, tsconfigCache.GetCompilerOptions)
+		tsCompiler = NewTSCompiler(projectRoot, entrypoint, patternCompiler, tsconfigCache.GetCompilerOptions)
 
 		_, tsconfigText, err = tsconfigCache.GetCompilerOptions(tsCompiler)
 		if err != nil {
@@ -217,10 +219,10 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx *buil
 	}
 
 	if isTS && !options.DisableTypeCheck {
-		plugins = append(plugins, makeTypeScriptPlugin(tsCompiler))
+		plugins = append(plugins, makeTypeScriptPlugin(tsCompiler, patternCompiler))
 	}
 
-	plugins = append(plugins, makeFridaShimsPlugin())
+	plugins = append(plugins, makePatternPlugin(patternCompiler), makeFridaShimsPlugin())
 
 	buildOpts := esbuild.BuildOptions{
 		Sourcemap:         sourcemapOption,
@@ -527,7 +529,7 @@ func encodeStringToCString(s string) string {
 	return bldr.String()
 }
 
-func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
+func makeTypeScriptPlugin(compiler *TSCompiler, patternCompiler *PatternCompiler) esbuild.Plugin {
 	return esbuild.Plugin{
 		Name: "frida-custom-ts",
 		Setup: func(build esbuild.PluginBuild) {
@@ -554,6 +556,9 @@ func makeTypeScriptPlugin(compiler *TSCompiler) esbuild.Plugin {
 				}
 
 				var esbuildMessages []esbuild.Message
+				if len(tsDiagnostics) > 0 {
+					esbuildMessages = patternCompiler.UnreportedFailureMessages()
+				}
 				for _, d := range tsDiagnostics {
 					esbuildMessages = append(esbuildMessages, esbuild.Message{
 						Text:     d.Localize(locale.Default),
