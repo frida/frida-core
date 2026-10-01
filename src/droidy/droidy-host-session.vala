@@ -1,6 +1,6 @@
 namespace Frida {
 	public sealed class DroidyHostSessionBackend : Object, HostSessionBackend {
-		private Droidy.DeviceTracker tracker;
+		private AdbDeviceTracker tracker;
 
 		private Gee.HashMap<string, DroidyHostSessionProvider> providers = new Gee.HashMap<string, DroidyHostSessionProvider> ();
 
@@ -37,7 +37,7 @@ namespace Frida {
 		private async void do_start () {
 			bool success = true;
 
-			tracker = new Droidy.DeviceTracker ();
+			tracker = new AdbDeviceTracker ();
 			tracker.device_attached.connect (details => {
 				var provider = new DroidyHostSessionProvider (details);
 				providers[details.serial] = provider;
@@ -104,7 +104,7 @@ namespace Frida {
 			get { return HostSessionProviderKind.USB; }
 		}
 
-		public Droidy.DeviceDetails device_details {
+		public AdbDeviceDetails device_details {
 			get;
 			construct;
 		}
@@ -113,7 +113,7 @@ namespace Frida {
 
 		private const double MAX_CLIENT_AGE = 30.0;
 
-		public DroidyHostSessionProvider (Droidy.DeviceDetails details) {
+		public DroidyHostSessionProvider (AdbDeviceDetails details) {
 			Object (device_details: details);
 		}
 
@@ -207,9 +207,9 @@ namespace Frida {
 
 		public async IOStream open_channel (string address, Cancellable? cancellable) throws Error, IOError {
 			if (address.contains (":")) {
-				Droidy.Client client = null;
+				AdbClient client = null;
 				try {
-					client = yield Droidy.Client.open (cancellable);
+					client = yield AdbClient.open (cancellable);
 					yield client.request ("host:transport:" + device_details.serial, cancellable);
 					yield client.request_protocol_change (address, cancellable);
 					return client.stream;
@@ -226,7 +226,7 @@ namespace Frida {
 	}
 
 	public sealed class DroidyHostSession : Object, HostSession {
-		public Droidy.DeviceDetails device_details {
+		public AdbDeviceDetails device_details {
 			get;
 			construct;
 		}
@@ -267,7 +267,7 @@ namespace Frida {
 		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
 		private const string GADGET_APP_ID = "re.frida.Gadget";
 
-		public DroidyHostSession (Droidy.DeviceDetails device_details, HostChannelProvider channel_provider,
+		public DroidyHostSession (AdbDeviceDetails device_details, HostChannelProvider channel_provider,
 				string control_endpoint) {
 			Object (
 				device_details: device_details,
@@ -329,7 +329,7 @@ namespace Frida {
 			os["id"] = "android";
 			os["name"] = "Android";
 
-			string properties = yield Droidy.ShellCommand.run ("getprop", device_details.serial, cancellable);
+			string properties = yield AdbShellCommand.run ("getprop", device_details.serial, cancellable);
 			var property_pattern = /\[(.+?)\]: \[(.*?)\]/s;
 			try {
 				MatchInfo info;

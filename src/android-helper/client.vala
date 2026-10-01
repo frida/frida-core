@@ -5,7 +5,7 @@ namespace Frida {
 			construct;
 		}
 
-		private Droidy.ShellSession? shell;
+		private AdbShellSession? shell;
 
 		public AndroidHelperClient (AndroidHelperTransport transport) {
 			Object (transport: transport);
@@ -17,12 +17,12 @@ namespace Frida {
 
 			var helper_dex = new MemoryInputStream.from_bytes (
 				new Bytes.static (Frida.Data.Android.get_helper_dex_blob ().data));
-			var helper_meta = new Droidy.FileMetadata ();
+			var helper_meta = new AdbFileMetadata ();
 			helper_meta.mode = 0100644;
 			helper_meta.time_modified = new DateTime.now_utc ();
-			yield Droidy.FileSync.send (helper_dex, helper_meta, helper_path, serial, cancellable);
+			yield AdbFileSync.send (helper_dex, helper_meta, helper_path, serial, cancellable);
 
-			var shell = new Droidy.ShellSession ();
+			var shell = new AdbShellSession ();
 			try {
 				var output = new StringBuilder ();
 				bool waiting = false;
@@ -52,7 +52,7 @@ namespace Frida {
 					shell.disconnect (output_handler);
 				}
 
-				var client = yield Droidy.Client.open (cancellable);
+				var client = yield AdbClient.open (cancellable);
 				try {
 					yield client.request ("host:transport:" + serial, cancellable);
 					yield client.request_protocol_change ("localabstract:/frida-helper-" + instance_id,

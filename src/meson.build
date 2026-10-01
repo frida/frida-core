@@ -8,6 +8,7 @@ base_sources = [
   'portal-service.vala',
   'host-session-service.vala',
   'agent-container.vala',
+  'adb.vala',
   'gdb.vala',
   'debugger.vala',
   'system.vala',
@@ -32,7 +33,7 @@ backend_vala_args_private = []
 backend_libs = []
 backend_deps = []
 
-if host_os == 'android' or have_droidy_backend
+if host_os == 'android' or have_droidy_backend or have_barebone_backend
   subdir('android-helper')
 
   helpers_native_prefix = 'linux' / 'helpers' / 'artifacts' / 'native'
@@ -667,7 +668,6 @@ endif
 if have_droidy_backend
   backend_sources += [
     'droidy' / 'droidy-host-session.vala',
-    'droidy' / 'droidy-client.vala',
     'droidy' / 'jdwp.vala',
     'droidy' / 'injector.vala',
     'droidy' / 'axml.vala',
