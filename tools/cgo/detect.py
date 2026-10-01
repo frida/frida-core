@@ -29,10 +29,10 @@ FRIDA_ABI_TO_GO_ARCH = {
     "x86_64": "amd64",
 }
 
-FRIDA_ABI_TO_MINGW_FLAVOR = {
-    "arm64": "clangarm64",
-    "x86": "mingw32",
-    "x86_64": "mingw64",
+FRIDA_ABI_TO_MINGW_FLAVORS = {
+    "arm64": ["clangarm64"],
+    "x86": ["mingw32"],
+    "x86_64": ["ucrt64", "mingw64"],
 }
 
 FRIDA_ABI_TO_MINGW_ARCH = {
@@ -247,10 +247,8 @@ class MinGWToolchain:
                 msys_prefix = None
 
         if msys_prefix is not None:
-            flavor = host_abi_to_mingw_flavor(host_abi)
-            mingw_prefix = msys_prefix / flavor
-            if not mingw_prefix.exists():
-                mingw_prefix = None
+            candidates = [msys_prefix / flavor for flavor in host_abi_to_mingw_flavors(host_abi)]
+            mingw_prefix = next((prefix for prefix in candidates if prefix.exists()), None)
         else:
             mingw_prefix = None
 
@@ -330,9 +328,9 @@ class MinGWNotFoundError(Exception):
     pass
 
 
-def host_abi_to_mingw_flavor(abi: str) -> str:
+def host_abi_to_mingw_flavors(abi: str) -> List[str]:
     try:
-        return FRIDA_ABI_TO_MINGW_FLAVOR[abi]
+        return FRIDA_ABI_TO_MINGW_FLAVORS[abi]
     except KeyError:
         raise MinGWNotFoundError(f"unsupported host_abi: {abi}")
 
