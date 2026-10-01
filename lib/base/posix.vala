@@ -278,9 +278,9 @@ namespace Frida {
 
 		public uint exit_status;
 
-		public Posix.Signal term_signal;
+		public int term_signal;
 
-		public Posix.Signal stop_signal;
+		public int stop_signal;
 
 		public WaitResult (uint pid, int status) {
 			this.pid = pid;
