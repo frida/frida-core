@@ -508,7 +508,7 @@ func (c *compositeEmitter) dynamicSize(entry *fieldEntry) string {
 			return c.helper("$cStringSize") + "(" + address.arguments() + ")"
 		}
 		elementSize := c.table.value(entry.accessor+"_stride", c.sizesOfType(t.Element))
-		return fmt.Sprintf("(%s) * %s", c.expression(t.Length), elementSize)
+		return fmt.Sprintf("%s * %s", numeric(c.expression(t.Length)), elementSize)
 	case *Padding:
 		return fmt.Sprintf("(%s)", c.expression(t.Size))
 	default:
@@ -716,7 +716,7 @@ func (c *compositeEmitter) arrayReader(t *Array, address location, entry *fieldE
 		}
 		return fmt.Sprintf("%s(%s)", c.helper("$readCString"), address.arguments())
 	}
-	length := c.expression(t.Length)
+	length := numeric(c.expression(t.Length))
 	switch kind {
 	case Char:
 		return fmt.Sprintf("%s(%s, %s)", c.helper("$readTerminatedString"), address.arguments(), length)
@@ -870,7 +870,7 @@ func (e *jsEmitter) orderLiteral(order ByteOrder) string {
 }
 
 func (c *compositeEmitter) arrayEncoder(t *Array, offset string, value string, entry *fieldEntry) string {
-	length := c.expression(t.Length)
+	length := numeric(c.expression(t.Length))
 	switch characterKind(t.Element) {
 	case Char:
 		return fmt.Sprintf("%s(bytes, %s, %s, %s)", c.helper("$putString"), offset, length, value)
@@ -1152,4 +1152,13 @@ func (l location) pointer() string {
 
 func inEnvironment(offset string) location {
 	return location{base: "$env.base", offset: offset}
+}
+
+var integerLiteralPattern = regexp.MustCompile(`^[0-9]+$`)
+
+func numeric(expression string) string {
+	if integerLiteralPattern.MatchString(expression) {
+		return expression
+	}
+	return fmt.Sprintf("Number(%s)", expression)
 }

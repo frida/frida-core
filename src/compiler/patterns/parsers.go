@@ -872,7 +872,7 @@ func (p *parserEmitter) arrayReader(t *Array, address string) string {
 		}
 		return fmt.Sprintf("%s(%s)", p.helper("$parseCString"), inEnvironment(address).arguments())
 	}
-	length := p.expression(t.Length)
+	length := numeric(p.expression(t.Length))
 	switch kind {
 	case Char:
 		return fmt.Sprintf("[%s(%s, %s), %s]", p.helper("$readString"), inEnvironment(address).arguments(), length, length)

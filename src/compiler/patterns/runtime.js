@@ -41,6 +41,7 @@ export class $Pattern {
     get $args() { return this.#args; }
     get $parent() { return this.#parent; }
     get $fields() { return this.#fields; }
+    valueOf() { return $patternInteger(this); }
 }
 
 export function $checked(env, offset, size, value) {
