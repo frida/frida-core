@@ -43,8 +43,12 @@ func makePatternPlugin(compiler *PatternCompiler) esbuild.Plugin {
 
 			build.OnLoad(esbuild.OnLoadOptions{Filter: ".*", Namespace: patternNamespace},
 				func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
+					contents, isRuntime := patterns.RuntimeModules[args.Path]
+					if !isRuntime {
+						contents = compiler.unitModule(args.Path)
+					}
 					return esbuild.OnLoadResult{
-						Contents: patterns.RuntimeModules[args.Path],
+						Contents: contents,
 						Loader:   esbuild.LoaderJS,
 					}, nil
 				})
@@ -66,6 +70,7 @@ func makePatternPlugin(compiler *PatternCompiler) esbuild.Plugin {
 						return result, nil
 					}
 
+					compiler.registerUnits(compiled)
 					result.Contents = &compiled.JavaScript
 					result.Loader = esbuild.LoaderJS
 					return result, nil
@@ -186,12 +191,14 @@ type PatternCompiler struct {
 	mu       sync.Mutex
 	entries  map[string]*CompiledPattern
 	reported map[*CompiledPattern]bool
+	units    map[string]string
 }
 
 type CompiledPattern struct {
 	Path         string
 	Files        []string
 	JavaScript   string
+	UnitModules  map[string]string
 	Declarations string
 	Diagnostics  []patterns.Diagnostic
 	ModTime      time.Time
@@ -199,7 +206,7 @@ type CompiledPattern struct {
 }
 
 func NewPatternCompiler() *PatternCompiler {
-	return &PatternCompiler{entries: map[string]*CompiledPattern{}, reported: map[*CompiledPattern]bool{}}
+	return &PatternCompiler{entries: map[string]*CompiledPattern{}, reported: map[*CompiledPattern]bool{}, units: map[string]string{}}
 }
 
 func (c *PatternCompiler) ForgetReportedFailures() {
@@ -207,6 +214,13 @@ func (c *PatternCompiler) ForgetReportedFailures() {
 	defer c.mu.Unlock()
 
 	c.reported = map[*CompiledPattern]bool{}
+}
+
+func (c *PatternCompiler) unitModule(path string) *string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	source := c.units[path]
+	return &source
 }
 
 func (c *PatternCompiler) Compile(path string) (*CompiledPattern, error) {
@@ -253,7 +267,8 @@ func (p *compiledPatternCache) compile(path string) (*CompiledPattern, error) {
 		}
 	} else {
 		compiled.Files = module.Files
-		compiled.JavaScript = patterns.EmitJavaScript(module, sourceName)
+		modules := patterns.EmitJavaScript(module, sourceName)
+		compiled.JavaScript, compiled.UnitModules = modules.Main, modules.Units
 		compiled.Declarations = patterns.EmitDeclarations(module, sourceName)
 		writeDeclarationsFile(declarationsFileName(path), compiled.Declarations)
 	}
@@ -328,6 +343,14 @@ func (c *PatternCompiler) MarkFailureReported(compiled *CompiledPattern) {
 	defer c.mu.Unlock()
 
 	c.reported[compiled] = true
+}
+
+func (c *PatternCompiler) registerUnits(compiled *CompiledPattern) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for path, source := range compiled.UnitModules {
+		c.units[path] = source
+	}
 }
 
 func (c *PatternCompiler) UnreportedFailureMessages() []esbuild.Message {

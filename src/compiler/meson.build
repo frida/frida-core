@@ -57,6 +57,7 @@ if have_compiler_backend
       'patterns/resolver.go',
       'patterns/runtime.go',
       'patterns/runtime.js',
+      'patterns/sharedunits.go',
       'patterns/stdlib.go',
       'patterns/target.js',
       'patterns/typenames.go',

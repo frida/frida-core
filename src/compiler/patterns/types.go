@@ -14,6 +14,8 @@ type Module struct {
 	DynamicEndian     bool
 	DynamicAttributes bool
 	Warnings          []Diagnostic
+	origins           map[NamedType]origin
+	functionOrigins   map[*Function]origin
 }
 
 type ByteOrder int
@@ -372,14 +374,22 @@ func (t *Alias) TypeName() string    { return t.Name }
 
 func (m *Module) TypesWithAliasesLast() []NamedType {
 	used := m.usedTypes()
+	return m.typesWithAliasesLast(func(t NamedType) bool { return used[t] })
+}
+
+func (m *Module) libraryTypesWithAliasesLast() []NamedType {
+	return m.typesWithAliasesLast(func(t NamedType) bool { return t != NamedType(m.Root) })
+}
+
+func (m *Module) typesWithAliasesLast(include func(t NamedType) bool) []NamedType {
 	var ordered []NamedType
 	for _, t := range m.Types {
-		if _, isAlias := t.(*Alias); !isAlias && used[t] {
+		if _, isAlias := t.(*Alias); !isAlias && include(t) {
 			ordered = append(ordered, t)
 		}
 	}
 	for _, t := range m.Types {
-		if _, isAlias := t.(*Alias); isAlias && used[t] {
+		if _, isAlias := t.(*Alias); isAlias && include(t) {
 			ordered = append(ordered, t)
 		}
 	}

@@ -197,6 +197,7 @@ try {
 		if os.Getenv("PATTERN_LANGUAGE_VERBOSE") != "" {
 			fmt.Fprintln(os.Stderr, "emitting", c.name)
 		}
+		writeUnitModules(t, dir, module)
 		if err := os.WriteFile(filepath.Join(dir, c.name+".js"), []byte(nodeModule(module, c.name+".hexpat")), 0644); err != nil {
 			t.Fatal(err)
 		}

@@ -34,8 +34,13 @@ func Compile(source string) (*Module, []Diagnostic) {
 }
 
 func CompileSource(main Source, resolver Resolver) (*Module, []Diagnostic) {
-	loader := &unitLoader{resolver: resolver, loaded: map[string]*File{}, paths: map[*File]string{}, merged: map[string]bool{}}
-	loader.load(main, "", nil)
+	return compileUnit(main, nil, &unitRegistry{resolver: resolver, byKey: map[string]*sharedUnit{}})
+}
+
+func compileUnit(main Source, incoming macros, registry *unitRegistry) (*Module, []Diagnostic) {
+	loader := &unitLoader{resolver: registry.resolver, registry: registry, loaded: map[string]*File{}, paths: map[*File]string{},
+		unitsByFile: map[*File]*unit{}, merged: map[string]bool{}}
+	loader.load(main, "", incoming)
 	if len(loader.diagnostics) > 0 {
 		return nil, loader.diagnostics
 	}
@@ -43,15 +48,28 @@ func CompileSource(main Source, resolver Resolver) (*Module, []Diagnostic) {
 }
 
 type unit struct {
-	file  *File
-	order ByteOrder
-	abi   ABI
+	file     *File
+	source   Source
+	incoming macros
+	order    ByteOrder
+	abi      ABI
+	renamed  map[string]string
+	shared   *sharedUnit
+}
+
+func (u *unit) canonicalName(name string) string {
+	if original, isRenamed := u.renamed[name]; isRenamed {
+		return original
+	}
+	return name
 }
 
 type unitLoader struct {
 	resolver    Resolver
+	registry    *unitRegistry
 	loaded      map[string]*File
 	paths       map[*File]string
+	unitsByFile map[*File]*unit
 	merged      map[string]bool
 	units       []*unit
 	diagnostics []Diagnostic
@@ -95,18 +113,29 @@ func (l *unitLoader) parse(source Source, alias string, incoming macros) *File {
 			continue
 		}
 		if imported := l.loadDependency(source.Path, statement.Path, statement.Alias, statement.Position, statement.macros); imported != nil {
+			l.share(l.unitsByFile[imported])
 			l.mergeBody(file, imported)
 		}
 	}
 
+	u := &unit{file: file, source: source, incoming: incoming}
 	if alias != "" {
-		aliasFile(file, alias)
+		u.renamed = aliasFile(file, alias)
 	}
-
-	u := &unit{file: file}
 	u.order, u.abi = l.applyPragmas(file.Pragmas)
 	l.units = append(l.units, u)
+	l.unitsByFile[file] = u
 	return file
+}
+
+func (l *unitLoader) share(u *unit) {
+	key := u.source.Path + "\x00" + u.incoming.signature()
+	shared, exists := l.registry.byKey[key]
+	if !exists {
+		shared = &sharedUnit{key: key, source: u.source, incoming: u.incoming, registry: l.registry}
+		l.registry.byKey[key] = shared
+	}
+	u.shared = shared
 }
 
 func (l *unitLoader) loadIsolated(importer string, path string, namespace string, position Position, incoming macros) *File {
@@ -172,7 +201,8 @@ func resolveDependency(importer string, path string, resolver Resolver) (Source,
 
 var errNoResolver = errors.New("includes and imports are only available when compiling a file")
 
-func aliasFile(file *File, alias string) {
+func aliasFile(file *File, alias string) map[string]string {
+	renamed := map[string]string{}
 	declarations := make([]Declaration, len(file.Declarations))
 	for i, decl := range file.Declarations {
 		name := decl.declaredName()
@@ -181,6 +211,7 @@ func aliasFile(file *File, alias string) {
 		} else {
 			declarations[i] = renamedDeclaration(decl, alias+"::"+name, nestScope(alias, scopeOf(decl)))
 		}
+		renamed[declarations[i].declaredName()] = name
 	}
 	file.Declarations = declarations
 	file.Body = rescopedMembers(file.Body, func(scope string) string {
@@ -189,6 +220,7 @@ func aliasFile(file *File, alias string) {
 		}
 		return nestScope(alias, scope)
 	})
+	return renamed
 }
 
 func autoNamespaceOf(file *File, name string) string {

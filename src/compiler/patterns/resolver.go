@@ -9,7 +9,7 @@ import (
 
 func analyze(units []*unit) (*Module, []Diagnostic) {
 	r := &resolver{
-		module:    &Module{},
+		module:    &Module{origins: map[NamedType]origin{}, functionOrigins: map[*Function]origin{}},
 		shells:    map[string]NamedType{},
 		functions: map[string]*Function{},
 		templates: map[string]Declaration{},
@@ -125,6 +125,9 @@ func (r *resolver) declareTypes(declarations []Declaration) {
 			}
 			r.functions[name] = &Function{Name: name, Doc: function.Doc, Position: function.Position}
 			r.module.Functions = append(r.module.Functions, r.functions[name])
+			if u := r.units[decl]; u.shared != nil {
+				r.module.functionOrigins[r.functions[name]] = origin{unit: u.shared, name: u.canonicalName(name)}
+			}
 			continue
 		}
 		if existing, exists := r.decls[name]; exists {
@@ -143,6 +146,9 @@ func (r *resolver) declareTypes(declarations []Declaration) {
 		shell := r.makeShell(decl)
 		r.shells[name] = shell
 		r.module.Types = append(r.module.Types, shell)
+		if u := r.units[decl]; u.shared != nil {
+			r.module.origins[shell] = origin{unit: u.shared, name: u.canonicalName(name)}
+		}
 	}
 }
 

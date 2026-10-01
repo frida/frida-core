@@ -236,7 +236,7 @@ func TestCompileNamespaces(t *testing.T) {
 		t.Errorf("unexpected names: %v", names)
 	}
 
-	js := EmitJavaScript(module, "ns.pat")
+	js := EmitJavaScript(module, "ns.pat").Main
 	for _, expected := range []string{
 		"export const game = {};",
 		"game.math = {};",
@@ -281,7 +281,7 @@ func TestSizeOfFieldInArrayLength(t *testing.T) {
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
-	js := EmitJavaScript(module, "a.pat")
+	js := EmitJavaScript(module, "a.pat").Main
 	if !strings.Contains(js, "$readArray(this.$address, 4, 8, 1") || !strings.Contains(js, "$readArray(this.$address, 12, 4, 1") {
 		t.Errorf("unexpected output:\n%s", js)
 	}
@@ -482,7 +482,7 @@ func TestTemplates(t *testing.T) {
 		t.Errorf("unexpected root: %+v\n%s", root, rendered)
 	}
 
-	js := EmitJavaScript(module, "packet.hexpat")
+	js := EmitJavaScript(module, "packet.hexpat").Main
 	for _, expected := range []string{
 		"export class Vector_u8_4 {",
 		"export const Bytes = Vector_u8_4;",
@@ -583,5 +583,46 @@ func TestIncludesShareMacros(t *testing.T) {
 	files["lib.pat"] = strings.Replace(files["lib.pat"], "LIB_SIZE 4", "LIB_SIZE 8", 1)
 	if got := placements(); got != "tail@8" {
 		t.Errorf("a change to an included file's macros should reach the includer: %s", got)
+	}
+}
+
+func TestImportedDeclarationsAreShared(t *testing.T) {
+	files := sourceMap{
+		"a.hexpat":    "import common;\nstruct A { Vec3 position; u32 n = twice(2); };\nA a @ 0;\n",
+		"b.hexpat":    "import common as geometry;\nstruct B { u32 id; geometry::Vec3 velocity; u32 n = geometry::twice(3); };\nB b @ 0;\n",
+		"common.pat":  "struct Vec3 { float x, y, z; };\nfn twice(u32 x) { return x * 2; };\n",
+		"defined.pat": "#define WIDE\nimport common;\nstruct C { Vec3 v; };\nC c @ 0;\n",
+	}
+	emit := func(name string) JavaScriptModules {
+		module, diagnostics := CompileSource(Source{Path: name, Text: files[name]}, files)
+		if len(diagnostics) > 0 {
+			t.Fatal(diagnostics)
+		}
+		return EmitJavaScript(module, name)
+	}
+	a, b := emit("a.hexpat"), emit("b.hexpat")
+	if len(a.Units) != 1 || len(b.Units) != 1 {
+		t.Fatalf("expected one shared unit each: %v %v", a.Units, b.Units)
+	}
+	for path, source := range a.Units {
+		if b.Units[path] != source {
+			t.Errorf("an aliased import should share the unit module %s", path)
+		}
+		if !strings.Contains(source, "export class Vec3") || !strings.Contains(source, "export function $fn_twice(") {
+			t.Errorf("the unit module should define Vec3 and twice():\n%s", source)
+		}
+	}
+	for name, modules := range map[string]JavaScriptModules{"a": a, "b": b} {
+		if strings.Contains(modules.Main, "class Vec3") || strings.Contains(modules.Main, "function $fn_") {
+			t.Errorf("%s should import Vec3 and twice() rather than define them:\n%s", name, modules.Main)
+		}
+	}
+	if !strings.Contains(b.Main, "geometry.Vec3 = $unit_") {
+		t.Errorf("b should bind the shared Vec3 under its alias:\n%s", b.Main)
+	}
+	for path := range emit("defined.pat").Units {
+		if _, isShared := a.Units[path]; isShared {
+			t.Errorf("an import that sees other macros should get its own unit module")
+		}
 	}
 }

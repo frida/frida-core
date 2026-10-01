@@ -107,8 +107,13 @@ await import("./module.mjs");
 	writeRuntimeModules(t, dir)
 }
 
-func loadProblem(node string, scratch string, javaScript string) string {
-	if err := os.WriteFile(filepath.Join(scratch, "module.mjs"), []byte(nodeSource(javaScript)), 0644); err != nil {
+func loadProblem(node string, scratch string, javaScript JavaScriptModules) string {
+	for path, source := range javaScript.Units {
+		if err := os.WriteFile(filepath.Join(scratch, path), []byte(nodeSource(source)), 0644); err != nil {
+			return err.Error()
+		}
+	}
+	if err := os.WriteFile(filepath.Join(scratch, "module.mjs"), []byte(nodeSource(javaScript.Main)), 0644); err != nil {
 		return err.Error()
 	}
 	output, err := exec.Command(node, filepath.Join(scratch, "load.mjs")).CombinedOutput()

@@ -52,7 +52,15 @@ pattern=00 00 c0 3f ?? ?? ?? ?? 00 00 40 40
 sizes=12,2`
 
 func nodeModule(module *Module, sourceName string) string {
-	return nodeSource(EmitJavaScript(module, sourceName))
+	return nodeSource(EmitJavaScript(module, sourceName).Main)
+}
+
+func writeUnitModules(t *testing.T, dir string, module *Module) {
+	for path, source := range EmitJavaScript(module, "").Units {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(nodeSource(source)), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func nodeSource(javaScript string) string {
@@ -94,6 +102,7 @@ func TestGeneratedModuleUnderNode(t *testing.T) {
 		}
 	}
 	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
 
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
@@ -159,6 +168,7 @@ func TestShapeUnderNode(t *testing.T) {
 		}
 	}
 	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
 
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
@@ -218,6 +228,7 @@ func TestIconUnderNode(t *testing.T) {
 		}
 	}
 	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
 
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
@@ -295,6 +306,7 @@ func TestDynamicBitfieldsUnderNode(t *testing.T) {
 		}
 	}
 	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node failed: %v\n%s\n%s", err, output, files["record.js"])
@@ -337,6 +349,7 @@ console.log(JSON.stringify([root.blob.header, root.blob.peek, root.f, root.$fiel
 		}
 	}
 	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node failed: %v\n%s", err, output)
@@ -381,6 +394,7 @@ console.log(JSON.stringify([defaults.scaled, defaults.name, given.scaled, given.
 		}
 	}
 	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node failed: %v\n%s", err, output)

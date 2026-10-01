@@ -10,6 +10,7 @@ type moduleItem struct {
 	references    []string
 	prerequisites []string
 	helpers       map[string]bool
+	units         []*sharedUnit
 }
 
 type itemVisibility int

@@ -3,6 +3,8 @@ package patterns
 import (
 	"fmt"
 	"math/big"
+	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -10,10 +12,30 @@ import (
 	"strings"
 )
 
-func EmitJavaScript(module *Module, sourceName string) string {
+type JavaScriptModules struct {
+	Main  string
+	Units map[string]string
+}
+
+func EmitJavaScript(module *Module, sourceName string) JavaScriptModules {
+	units := map[string]string{}
+	main := emitModule(module, sourceName, wholePattern, units)
+	return JavaScriptModules{Main: main, Units: units}
+}
+
+type moduleKind int
+
+const (
+	wholePattern moduleKind = iota
+	sharedLibrary
+)
+
+func emitModule(module *Module, sourceName string, kind moduleKind, units map[string]string) string {
 	e := &jsEmitter{
-		module:  module,
-		layouts: moduleLayouts(module),
+		module:        module,
+		layouts:       moduleLayouts(module),
+		kind:          kind,
+		dynamicEndian: module.DynamicEndian || kind == sharedLibrary,
 	}
 	items := inNewspaperOrder(e.emitItems(module))
 
@@ -24,18 +46,30 @@ func EmitJavaScript(module *Module, sourceName string) string {
 	for _, item := range items {
 		out.WriteString(item.source)
 	}
+
+	for _, shared := range sharedUnitsOf(items) {
+		if _, isEmitted := units[shared.path()]; !isEmitted {
+			units[shared.path()] = ""
+			units[shared.path()] = emitModule(shared.library(), filepath.Base(shared.source.Path), sharedLibrary, units)
+		}
+	}
 	return out.String()
 }
 
 func (e *jsEmitter) emitItems(module *Module) []*moduleItem {
 	var items []*moduleItem
-	if module.Root != nil {
+	if module.Root != nil && e.kind == wholePattern {
 		items = append(items, e.emitItem(rootParseKey, exported, nil, func(out *strings.Builder) {
 			fmt.Fprintf(out, "export function parse(address, size, inputs) { return %s.parse(address, size, inputs); }\n", jsRef(module.Root.Name))
 		}))
 	}
-	for _, t := range module.TypesWithAliasesLast() {
+	for _, t := range e.typesToEmit() {
 		item := e.emitItem(typeItemKey(t.TypeName()), exported, prerequisitesOf(t), func(out *strings.Builder) {
+			if binding, isShared := e.sharedBinding(t); isShared {
+				openConstant(out, t.TypeName())
+				fmt.Fprintf(out, "%s;\n", binding)
+				return
+			}
 			switch t := t.(type) {
 			case *Struct:
 				e.emitComposite(out, t.Name, allFields(t), t)
@@ -58,11 +92,43 @@ func (e *jsEmitter) emitItems(module *Module) []*moduleItem {
 		}))
 	}
 	for _, f := range module.Functions {
-		items = append(items, e.emitItem(functionName(f), private, nil, func(out *strings.Builder) {
+		if _, isShared := e.sharedFunction(f); isShared {
+			continue
+		}
+		items = append(items, e.emitItem(functionName(f), e.functionVisibility(), nil, func(out *strings.Builder) {
 			e.emitFunction(out, f)
 		}))
 	}
 	return items
+}
+
+func (e *jsEmitter) typesToEmit() []NamedType {
+	if e.kind == sharedLibrary {
+		return e.module.libraryTypesWithAliasesLast()
+	}
+	return e.module.TypesWithAliasesLast()
+}
+
+func (e *jsEmitter) sharedBinding(t NamedType) (string, bool) {
+	origin, hasOrigin := e.module.origins[t]
+	if _, isAlias := t.(*Alias); isAlias || !hasOrigin {
+		return "", false
+	}
+	library := origin.unit.library()
+	if library == nil || !slices.ContainsFunc(library.Types, func(candidate NamedType) bool {
+		return candidate.TypeName() == origin.name && reflect.TypeOf(candidate) == reflect.TypeOf(t)
+	}) {
+		return "", false
+	}
+	e.current.units = append(e.current.units, origin.unit)
+	return unitBinding(origin.unit) + "." + jsRef(origin.name), true
+}
+
+func (e *jsEmitter) functionVisibility() itemVisibility {
+	if e.kind == sharedLibrary {
+		return exported
+	}
+	return private
 }
 
 const (
@@ -110,6 +176,9 @@ func (e *jsEmitter) emitNamedFunctions(out *strings.Builder, module *Module) {
 }
 
 func writeImports(out *strings.Builder, items []*moduleItem) {
+	for _, shared := range sharedUnitsOf(items) {
+		fmt.Fprintf(out, "import * as %s from %q;\n", unitBinding(shared), RuntimeScheme+shared.path())
+	}
 	namesByModule := map[string][]string{}
 	for _, name := range helpersOf(items) {
 		module, isConstant := constantModules[name]
@@ -126,6 +195,19 @@ func writeImports(out *strings.Builder, items []*moduleItem) {
 	for _, module := range modules {
 		fmt.Fprintf(out, "import { %s } from %q;\n", strings.Join(namesByModule[module], ", "), RuntimeScheme+module)
 	}
+}
+
+func sharedUnitsOf(items []*moduleItem) []*sharedUnit {
+	var units []*sharedUnit
+	for _, item := range items {
+		for _, shared := range item.units {
+			if !slices.Contains(units, shared) {
+				units = append(units, shared)
+			}
+		}
+	}
+	slices.SortFunc(units, func(a, b *sharedUnit) int { return strings.Compare(a.path(), b.path()) })
+	return units
 }
 
 func helpersOf(items []*moduleItem) []string {
@@ -251,10 +333,12 @@ func moduleLayouts(module *Module) []*ModuleLayout {
 }
 
 type jsEmitter struct {
-	module  *Module
-	layouts []*ModuleLayout
-	parsing bool
-	current *moduleItem
+	module        *Module
+	layouts       []*ModuleLayout
+	kind          moduleKind
+	dynamicEndian bool
+	parsing       bool
+	current       *moduleItem
 }
 
 type variantTable struct {
@@ -634,7 +718,7 @@ func (e *jsEmitter) scalarReader(t *Primitive, address location) string {
 	if isOddWidth(t.Kind) {
 		return fmt.Sprintf("%s(%s, %d, %s)", e.helper(oddWidthHelperName("$read", t.Kind)), address.arguments(), t.Kind.Size(), e.orderLiteral(t.Order))
 	}
-	if t.Order == NativeOrder && e.module.DynamicEndian && t.Kind.Size() > 1 && e.parsing {
+	if t.Order == NativeOrder && e.dynamicEndian && t.Kind.Size() > 1 && e.parsing {
 		return fmt.Sprintf("%s(%s, %d, %q, $env.littleEndian)", e.helper("$readScalar"), address.arguments(), t.Kind.Size(), viewMethod(t.Kind, "get"))
 	}
 	if t.Order == NativeOrder || t.Kind.Size() == 1 {
@@ -1107,9 +1191,29 @@ func typeItemKey(name string) string {
 }
 
 func (e *jsEmitter) functionRef(f *Function) string {
+	if binding, isShared := e.sharedFunction(f); isShared {
+		e.current.units = append(e.current.units, e.module.functionOrigins[f].unit)
+		return binding
+	}
 	name := functionName(f)
 	e.reference(name)
 	return name
+}
+
+func (e *jsEmitter) sharedFunction(f *Function) (string, bool) {
+	origin, hasOrigin := e.module.functionOrigins[f]
+	if !hasOrigin {
+		return "", false
+	}
+	library := origin.unit.library()
+	if library == nil || !slices.ContainsFunc(library.Functions, func(candidate *Function) bool { return candidate.Name == origin.name }) {
+		return "", false
+	}
+	return unitBinding(origin.unit) + "." + functionIdentifier(origin.name), true
+}
+
+func unitBinding(shared *sharedUnit) string {
+	return "$unit_" + strings.TrimSuffix(strings.TrimPrefix(shared.path(), "/unit-"), ".js")
 }
 
 func (e *jsEmitter) namedFunctionsRef() string {

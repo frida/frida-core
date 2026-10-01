@@ -117,6 +117,9 @@ func (e *jsEmitter) emitFunction(out *strings.Builder, f *Function) {
 	e.parsing = true
 	defer func() { e.parsing = false }()
 	p := &parserEmitter{jsEmitter: e, out: out, inFunction: true}
+	if e.kind == sharedLibrary {
+		out.WriteString("export ")
+	}
 	fmt.Fprintf(out, "function %s($env, $this", functionName(f))
 	for _, param := range f.Params {
 		fmt.Fprintf(out, ", %s", localName(param))
@@ -127,7 +130,11 @@ func (e *jsEmitter) emitFunction(out *strings.Builder, f *Function) {
 }
 
 func functionName(f *Function) string {
-	return "$fn_" + strings.ReplaceAll(f.Name, "::", "_")
+	return functionIdentifier(f.Name)
+}
+
+func functionIdentifier(name string) string {
+	return "$fn_" + strings.ReplaceAll(name, "::", "_")
 }
 
 type parserEmitter struct {

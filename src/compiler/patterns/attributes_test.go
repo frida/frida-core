@@ -106,6 +106,7 @@ func TestAttributesUnderNode(t *testing.T) {
 		}
 	}
 	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
 	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node failed: %v\n%s\n%s", err, output, files["entry.js"])
