@@ -94,6 +94,8 @@ export function $callNamed(named, env, $this, name, value) {
     return callee(env, $this, value);
 }
 
+export function $copyPattern(span, value) { span.base.writeByteArray(value.$address.readByteArray(value.$size), span.offset); }
+
 export function $sizeOf(value) { return (typeof value === "string") ? value.length : value.$size; }
 
 export function $parsed(value) { return [value, value.$size]; }

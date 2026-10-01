@@ -391,11 +391,14 @@ func (p *parserEmitter) memberStore(target *MemberOf, value string) string {
 	if target.Field == nil {
 		return ""
 	}
+	metadata := fmt.Sprintf("%s.$fields.%s", p.expression(target.Object), target.Name)
+	if isComposite(target.Field.Type) {
+		return fmt.Sprintf("%s(%s, %s)", p.helper("$copyPattern"), metadata, value)
+	}
 	primitive := primitiveOf(target.Field.Type)
 	if primitive == nil {
 		return ""
 	}
-	metadata := fmt.Sprintf("%s.$fields.%s", p.expression(target.Object), target.Name)
 	return p.primitiveStore(primitive, location{base: metadata + ".base", offset: metadata + ".offset"}, metadata+".size", value)
 }
 
