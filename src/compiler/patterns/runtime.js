@@ -568,9 +568,11 @@ export function $padArray(elements, length) {
     return elements;
 }
 
+export function $readCString(base, offset) { return $parseCString(base, offset)[0]; }
+
 export function $parseCString(base, offset) {
-    const value = base.readUtf8String(-1, offset);
-    return [value, $cStringSize(base, offset)];
+    const size = $cStringSize(base, offset);
+    return [$byteString(new Uint8Array(base.readByteArray(size - 1, offset))), size];
 }
 
 export function $parseCString16(base, offset) {
@@ -592,12 +594,12 @@ export function $cString16Size(base, offset) {
     return length + 2;
 }
 
-export function $readString(base, offset, size) {
+export function $readString(base, offset, size) { return $byteString(new Uint8Array(base.readByteArray(size, offset))); }
+
+export function $readTerminatedString(base, offset, size) {
     const bytes = new Uint8Array(base.readByteArray(size, offset));
-    let length = bytes.indexOf(0);
-    if (length === -1)
-        length = size;
-    return base.readUtf8String(length, offset);
+    const end = bytes.indexOf(0);
+    return $byteString(end === -1 ? bytes : bytes.subarray(0, end));
 }
 
 export function $readString16(base, offset, count) {
@@ -606,6 +608,49 @@ export function $readString16(base, offset, count) {
     if (length === -1)
         length = count;
     return base.readUtf16String(length, offset);
+}
+
+function $byteString(bytes) {
+    let text = "";
+    let i = 0;
+    while (i !== bytes.length) {
+        const sequence = $utf8SequenceAt(bytes, i);
+        if (sequence === null) {
+            text += String.fromCharCode(0xdc00 + bytes[i]);
+            i++;
+        } else {
+            text += String.fromCodePoint(sequence.codePoint);
+            i += sequence.length;
+        }
+    }
+    return text;
+}
+
+function $utf8SequenceAt(bytes, i) {
+    const lead = bytes[i];
+    if (lead < 0x80)
+        return { codePoint: lead, length: 1 };
+    let length, minimum, codePoint;
+    if ((lead & 0xe0) === 0xc0) {
+        length = 2; minimum = 0x80; codePoint = lead & 0x1f;
+    } else if ((lead & 0xf0) === 0xe0) {
+        length = 3; minimum = 0x800; codePoint = lead & 0x0f;
+    } else if ((lead & 0xf8) === 0xf0) {
+        length = 4; minimum = 0x10000; codePoint = lead & 0x07;
+    } else {
+        return null;
+    }
+    if (i + length > bytes.length)
+        return null;
+    for (let j = 1; j !== length; j++) {
+        const continuation = bytes[i + j];
+        if ((continuation & 0xc0) !== 0x80)
+            return null;
+        codePoint = (codePoint << 6) | (continuation & 0x3f);
+    }
+    if (codePoint < minimum || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff))
+        return null;
+    return { codePoint, length };
 }
 
 export function $readBitRange(base, offset, bitOffset, width, bigEndian = false) {

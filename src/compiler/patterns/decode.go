@@ -1525,7 +1525,7 @@ func (d *decoder) decodeWhileArray(value *DecodedValue, t *Array, offset int, sc
 func (d *decoder) decodeString(value *DecodedValue, t *Array, offset int, count int) {
 	kind := characterKind(t.Element)
 	unit := kind.Size()
-	var runes []rune
+	var raw []byte
 	var units []uint16
 	i := 0
 	for count < 0 || i < count {
@@ -1542,23 +1542,35 @@ func (d *decoder) decodeString(value *DecodedValue, t *Array, offset int, count 
 			}
 			units = append(units, code)
 		} else {
-			if bytes[0] == 0 {
+			if bytes[0] == 0 && count < 0 {
 				break
 			}
-			runes = append(runes, rune(bytes[0]))
+			raw = append(raw, bytes[0])
 		}
 	}
 	if kind == Char16 {
 		value.Value = string(utf16.Decode(units))
+		value.raw = value.Value
 	} else {
-		value.Value = string(runes)
+		value.Value = displayedCharacters(raw)
+		value.raw = string(raw)
 	}
-	value.raw = value.Value
 	value.ValueKind = "string"
 	if count < 0 {
 		size := i * unit
 		value.Size = &size
 	}
+}
+
+func displayedCharacters(raw []byte) string {
+	runes := make([]rune, 0, len(raw))
+	for _, b := range raw {
+		if b == 0 {
+			break
+		}
+		runes = append(runes, rune(b))
+	}
+	return string(runes)
 }
 
 func (d *decoder) addressOf(offset int) string {

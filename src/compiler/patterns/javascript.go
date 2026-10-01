@@ -708,19 +708,18 @@ func (e *jsEmitter) pointerReader(t *Pointer, address location) string {
 func (c *compositeEmitter) arrayReader(t *Array, address location, entry *fieldEntry) string {
 	kind := characterKind(t.Element)
 	if t.Length == nil {
-		method := "readUtf8String"
 		if kind == Char16 {
-			method = "readUtf16String"
+			if address.offset == "0" {
+				return address.call("readUtf16String")
+			}
+			return address.call("readUtf16String", "-1")
 		}
-		if address.offset == "0" {
-			return address.call(method)
-		}
-		return address.call(method, "-1")
+		return fmt.Sprintf("%s(%s)", c.helper("$readCString"), address.arguments())
 	}
 	length := c.expression(t.Length)
 	switch kind {
 	case Char:
-		return fmt.Sprintf("%s(%s, %s)", c.helper("$readString"), address.arguments(), length)
+		return fmt.Sprintf("%s(%s, %s)", c.helper("$readTerminatedString"), address.arguments(), length)
 	case Char16:
 		return fmt.Sprintf("%s(%s, %s)", c.helper("$readString16"), address.arguments(), length)
 	}
