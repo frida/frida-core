@@ -233,7 +233,9 @@ func (p *parserEmitter) emitStatements(statements []Statement, indent string) {
 			}
 			fmt.Fprintf(p.out, "%s}\n", indent)
 		case *Return:
-			if s.Value == nil {
+			if s.Value == nil && !p.inFunction {
+				fmt.Fprintf(p.out, "%sbreak $body;\n", indent)
+			} else if s.Value == nil {
 				fmt.Fprintf(p.out, "%sreturn;\n", indent)
 			} else {
 				fmt.Fprintf(p.out, "%sreturn %s;\n", indent, p.expression(s.Value))
