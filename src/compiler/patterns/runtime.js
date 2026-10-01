@@ -1224,7 +1224,7 @@ class $SectionPointer {
 }
 
 export function $pointerDelta(value) {
-    if (typeof value === "object" && value !== null)
+    if (value instanceof $SectionPointer)
         return value.offset;
     return typeof value === "bigint" ? Number(BigInt.asIntN(64, value)) : Number(value);
 }
