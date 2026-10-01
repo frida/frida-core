@@ -98,6 +98,8 @@ func typeParams(t Type) []*Local {
 		return t.Params
 	case *Union:
 		return t.Params
+	case *Bitfield:
+		return t.Params
 	}
 	return nil
 }
@@ -107,6 +109,8 @@ func typeArgs(t Type) []Value {
 	case *Struct:
 		return t.Args
 	case *Union:
+		return t.Args
+	case *Bitfield:
 		return t.Args
 	}
 	return nil
@@ -483,13 +487,13 @@ func (p *parserEmitter) emitNestedBitfield(field *Field, indent string) {
 	fmt.Fprintf(p.out, "%s    const $first = $bit;\n", indent)
 	switch t := Unalias(field.Type).(type) {
 	case *Bitfield:
-		fmt.Fprintf(p.out, "%s    const $value = %s.$parse($start + Math.floor($bit / 8), $env, $this, [], $bit %% 8);\n", indent, p.typeRef(t.Name))
+		fmt.Fprintf(p.out, "%s    const $value = %s.$parse($start + Math.floor($bit / 8), $env, $this, [%s], $bit %% 8);\n", indent, p.typeRef(t.Name), p.typeArguments(t))
 		fmt.Fprintf(p.out, "%s    $bit += $value.$bits;\n", indent)
 	case *Array:
 		element := Unalias(t.Element).(*Bitfield)
 		fmt.Fprintf(p.out, "%s    const $value = [];\n", indent)
 		fmt.Fprintf(p.out, "%s    for (let $i = 0, $n = Number(%s); $i !== $n; $i++) {\n", indent, p.expression(t.Length))
-		fmt.Fprintf(p.out, "%s        const $item = %s.$parse($start + Math.floor($bit / 8), $env, $this, [], $bit %% 8);\n", indent, p.typeRef(element.Name))
+		fmt.Fprintf(p.out, "%s        const $item = %s.$parse($start + Math.floor($bit / 8), $env, $this, [%s], $bit %% 8);\n", indent, p.typeRef(element.Name), p.typeArguments(element))
 		fmt.Fprintf(p.out, "%s        $value.push($item);\n", indent)
 		fmt.Fprintf(p.out, "%s        $bit += $item.$bits;\n", indent)
 		fmt.Fprintf(p.out, "%s    }\n", indent)
@@ -819,16 +823,8 @@ func (p *parserEmitter) reader(t Type, address string) string {
 			return fmt.Sprintf("%s(%s)", p.helper("$patternReading"), p.reader(Unalias(t.Encoding), address))
 		}
 		return fmt.Sprintf("[%s, %d]", p.primitiveReader(t.Underlying, inEnvironment(address)), t.Underlying.Kind.Size())
-	case *Struct, *Union:
-		arguments := make([]string, len(typeArgs(t)))
-		p.scoping = true
-		for i, arg := range typeArgs(t) {
-			arguments[i] = p.expression(arg)
-		}
-		p.scoping = false
-		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this, [%s]))", p.helper("$parsed"), p.typeRef(t.(NamedType).TypeName()), address, strings.Join(arguments, ", "))
-	case *Bitfield:
-		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this))", p.helper("$parsed"), p.typeRef(t.Name), address)
+	case *Struct, *Union, *Bitfield:
+		return fmt.Sprintf("%s(%s.$parse(%s, $env, $this, [%s]))", p.helper("$parsed"), p.typeRef(t.(NamedType).TypeName()), address, p.typeArguments(t))
 	case *Pointer:
 		return fmt.Sprintf("[%s, %s]", p.pointerReader(t, inEnvironment(address)), p.sizeOf(t, address))
 	case *Array:
@@ -837,6 +833,16 @@ func (p *parserEmitter) reader(t Type, address string) string {
 		return p.reader(t.Target, address)
 	}
 	panic("unreachable")
+}
+
+func (p *parserEmitter) typeArguments(t Type) string {
+	arguments := make([]string, len(typeArgs(t)))
+	p.scoping = true
+	for i, arg := range typeArgs(t) {
+		arguments[i] = p.expression(arg)
+	}
+	p.scoping = false
+	return strings.Join(arguments, ", ")
 }
 
 func (p *parserEmitter) arrayReader(t *Array, address string) string {
