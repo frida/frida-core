@@ -955,7 +955,7 @@ func (p *parserEmitter) expression(v Value) string {
 	case *ThisRef:
 		return p.ancestor(v.Depth)
 	case *SizeOf:
-		return p.sizeOf(v.Type, "$env.cursor")
+		return p.typeSize(v.Type)
 	case *Builtin:
 		return p.builtin(v)
 	case *Labelled:
@@ -983,6 +983,13 @@ func (p *parserEmitter) expression(v Value) string {
 		return fmt.Sprintf("(%s ? %s : %s)", p.condition(v.Condition), p.expression(v.Then), p.expression(v.Else))
 	}
 	panic("unreachable")
+}
+
+func (p *parserEmitter) typeSize(t Type) string {
+	if size := p.staticSize(t); size > 0 {
+		return strconv.Itoa(size)
+	}
+	return p.sizeOf(t, "$env.cursor")
 }
 
 func jsString(value string) string {
