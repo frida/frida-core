@@ -736,6 +736,9 @@ func truthyValue(result runtimeValue) (bool, error) {
 	case string:
 		return result != "", nil
 	case *DecodedValue:
+		if number := patternNumber(result); number != runtimeValue(result) {
+			return truthyValue(number)
+		}
 		return true, nil
 	case *big.Int:
 		return result.Sign() != 0, nil
@@ -1212,6 +1215,10 @@ func toInt(v runtimeValue) (int64, error) {
 		return boolToInt(v), nil
 	case int:
 		return int64(v), nil
+	case *DecodedValue:
+		if number := patternNumber(v); number != runtimeValue(v) {
+			return toInt(number)
+		}
 	case nil:
 		return 0, fmt.Errorf("runtimeValue is not available")
 	}
@@ -1219,6 +1226,9 @@ func toInt(v runtimeValue) (int64, error) {
 }
 
 func toUint(v runtimeValue) (uint64, error) {
+	if node, isPattern := v.(*DecodedValue); isPattern {
+		v = patternNumber(node)
+	}
 	if unsigned, isUnsigned := v.(uint64); isUnsigned {
 		return unsigned, nil
 	}
@@ -1233,6 +1243,9 @@ func toUint(v runtimeValue) (uint64, error) {
 }
 
 func toFloat(v runtimeValue) (float64, error) {
+	if node, isPattern := v.(*DecodedValue); isPattern {
+		v = patternNumber(node)
+	}
 	switch v := v.(type) {
 	case float64:
 		return v, nil
@@ -1250,6 +1263,13 @@ func (f *frame) call(c *FunctionCall) (runtimeValue, error) {
 	arguments, err := f.evalArguments(c.Arguments)
 	if err != nil {
 		return nil, err
+	}
+	for i, param := range c.Function.Params {
+		if i < len(c.Arguments) && isComposite(param.Type) && denotesPattern(c.Arguments[i]) {
+			if arguments[i], err = f.target(c.Arguments[i]); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if c.Function.Variadic {
 		fixed := len(c.Function.Params) - 1
@@ -1314,7 +1334,7 @@ func (f *frame) invokeWith(function *Function, arguments []runtimeValue) (*frame
 		if i >= len(arguments) {
 			break
 		}
-		if param.Ref {
+		if param.Ref || param.Type == nil || isComposite(param.Type) {
 			callee.locals[param] = arguments[i]
 		} else {
 			callee.locals[param] = scalarOf(arguments[i])
