@@ -257,6 +257,7 @@ Object.defineProperties(Process, {
             return [
                 {
                     name: "kernel",
+                    version: null,
                     base: NULL,
                     size: 0x1000,
                     path: "/kernel",
