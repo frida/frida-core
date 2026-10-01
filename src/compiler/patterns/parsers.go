@@ -32,12 +32,15 @@ func (e *jsEmitter) emitParseBody(out *strings.Builder, t Type) {
 	if naming := namingOf(t); hasDynamicNaming(t) {
 		fmt.Fprintf(out, "        Object.defineProperty($this, \"$typeName\", { value: %s });\n", e.instanceName(naming))
 	}
+	out.WriteString("        const $fields = $this.$fields;\n")
 	switch t := t.(type) {
 	case *Struct:
 		p.abi = t.ABI
 		p.global = t.Global
+		p.staticCursor = staticCursor{known: true}
 		out.WriteString("        $body: {\n")
 		p.emitStatements(structBody(t), "            ")
+		p.leaveStaticCursor("            ")
 		out.WriteString("        }\n")
 		out.WriteString("        $this.$size = $env.cursor - $start;\n")
 	case *Union:
@@ -46,7 +49,7 @@ func (e *jsEmitter) emitParseBody(out *strings.Builder, t Type) {
 		out.WriteString("        $body: {\n")
 		p.emitStatements(t.Body, "            ")
 		out.WriteString("        }\n")
-		out.WriteString("        $this.$size = Math.max(0, ...Object.values($this.$fields).map((f) => f.offset - $start + f.size));\n")
+		out.WriteString("        $this.$size = Math.max(0, ...Object.values($fields).map((f) => f.offset - $start + f.size));\n")
 	case *Bitfield:
 		p.bits = true
 		out.WriteString("        let $bit = $startBit;\n")
@@ -128,20 +131,30 @@ func functionName(f *Function) string {
 
 type parserEmitter struct {
 	*jsEmitter
-	t          Type
-	abi        ABI
-	global     bool
-	union      bool
-	bits       bool
-	inFunction bool
-	scoping    bool
-	loops      int
-	out        *strings.Builder
-	cursor     string
+	t            Type
+	abi          ABI
+	global       bool
+	union        bool
+	bits         bool
+	inFunction   bool
+	scoping      bool
+	loops        int
+	out          *strings.Builder
+	cursor       string
+	staticCursor staticCursor
+}
+
+type staticCursor struct {
+	known  bool
+	offset int
+	moved  bool
 }
 
 func (p *parserEmitter) emitStatements(statements []Statement, indent string) {
 	for _, statement := range statements {
+		if _, isField := statement.(*Field); !isField {
+			p.leaveStaticCursor(indent)
+		}
 		switch s := statement.(type) {
 		case *Field:
 			p.emitField(s, indent, !p.union)
@@ -440,7 +453,7 @@ func (p *parserEmitter) emitBitMember(member *BitfieldMember, indent string) {
 	fmt.Fprintf(p.out, "%s    const $big = %s;\n", indent, p.bigEndian(t))
 	fmt.Fprintf(p.out, "%s    const $pos = %s;\n", indent, p.bitPosition(t))
 	fmt.Fprintf(p.out, "%s    $this.%s = %s;\n", indent, member.Name, value)
-	fmt.Fprintf(p.out, "%s    $this.$fields.%s = new %s($env.base, $start + Math.floor($pos / 8), Math.ceil(($pos %% 8 + $width) / 8), $pos, $width);\n", indent, member.Name, p.helper("$BitSpan"))
+	fmt.Fprintf(p.out, "%s    %s.%s = new %s($env.base, $start + Math.floor($pos / 8), Math.ceil(($pos %% 8 + $width) / 8), $pos, $width);\n", indent, p.fields(), member.Name, p.helper("$BitSpan"))
 	fmt.Fprintf(p.out, "%s    $bit += $width;\n", indent)
 	fmt.Fprintf(p.out, "%s}\n", indent)
 }
@@ -482,7 +495,7 @@ func (p *parserEmitter) emitNestedBitfield(field *Field, indent string) {
 		fmt.Fprintf(p.out, "%s    }\n", indent)
 	}
 	fmt.Fprintf(p.out, "%s    $this.%s = $value;\n", indent, field.Name)
-	fmt.Fprintf(p.out, "%s    $this.$fields.%s = new %s($env.base, $start + Math.floor($first / 8), Math.ceil(($first %% 8 + $bit - $first) / 8), $first, $bit - $first);\n", indent, field.Name, p.helper("$BitSpan"))
+	fmt.Fprintf(p.out, "%s    %s.%s = new %s($env.base, $start + Math.floor($first / 8), Math.ceil(($first %% 8 + $bit - $first) / 8), $first, $bit - $first);\n", indent, p.fields(), field.Name, p.helper("$BitSpan"))
 	fmt.Fprintf(p.out, "%s}\n", indent)
 }
 
@@ -491,6 +504,19 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		p.emitNestedBitfield(field, indent)
 		return
 	}
+	uses := field.Attributes
+	if !isView(field.Type) {
+		for _, typed := range attributedTypes(field.Type) {
+			uses = append(uses, typed...)
+		}
+	}
+	if size, align, isFixed := p.fixedLayout(field.Type); isFixed && p.staticCursor.known && sequential && field.Address == nil &&
+		field.Section == nil && !field.NoUniqueAddress && field.Order == NativeOrder && field.PointerBase == nil && len(uses) == 0 &&
+		field.Name != "" {
+		p.emitStaticField(field, indent, size, align)
+		return
+	}
+	p.leaveStaticCursor(indent)
 	if p.bits {
 		fmt.Fprintf(p.out, "%s$bit = Math.ceil($bit / 8) * 8;\n", indent)
 		fmt.Fprintf(p.out, "%s$env.cursor = $start + $bit / 8;\n", indent)
@@ -526,40 +552,35 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		indent += "    "
 	}
 	fmt.Fprintf(p.out, "%s    const $at = %s;\n", indent, address)
-	if field.Order == NativeOrder {
-		fmt.Fprintf(p.out, "%s    let [$value, $n] = %s;\n", indent, reader)
-	} else {
+	size, _, isFixed := p.fixedLayout(field.Type)
+	switch {
+	case field.Order != NativeOrder:
 		fmt.Fprintf(p.out, "%s    const $order = %s.littleEndian;\n", indent, env)
 		fmt.Fprintf(p.out, "%s    %s.littleEndian = %t;\n", indent, env, field.Order == LittleEndian)
 		fmt.Fprintf(p.out, "%s    let $value, $n;\n", indent)
 		fmt.Fprintf(p.out, "%s    try { [$value, $n] = %s; } finally { %s.littleEndian = $order; }\n", indent, reader, env)
+	case isFixed && field.Section == nil:
+		fmt.Fprintf(p.out, "%s    let $value = %s;\n", indent, p.fixedReader(field.Type, "$at"))
+		fmt.Fprintf(p.out, "%s    const $n = %d;\n", indent, size)
+	default:
+		fmt.Fprintf(p.out, "%s    let [$value, $n] = %s;\n", indent, reader)
 	}
 	fmt.Fprintf(p.out, "%s    %s(%s, $at, $n);\n", indent, p.helper("$check"), env)
 	if field.PointerBase != nil {
 		fmt.Fprintf(p.out, "%s    $value = $value.add(%s($env, $this, $value));\n", indent, p.functionRef(field.PointerBase))
 	}
 	fmt.Fprintf(p.out, "%s    $this.%s = $value;\n", indent, field.Name)
-	fmt.Fprintf(p.out, "%s    $this.$fields.%s = new %s(%s.base, $at, $n);\n", indent, field.Name, p.helper("$Span"), env)
-	if pointer, isPointer := Unalias(field.Type).(*Pointer); isPointer {
-		fmt.Fprintf(p.out, "%s    $this.$fields.%s.target = () => %s;\n", indent, field.Name, p.reader(pointer.Target, fmt.Sprintf("%s($env.base, $value)", p.helper("$offset"))))
-	}
-	uses := field.Attributes
-	if !isView(field.Type) {
-		for _, typed := range attributedTypes(field.Type) {
-			uses = append(uses, typed...)
-		}
-	}
-	if field.Hidden {
-		fmt.Fprintf(p.out, "%s    $this.$fields.%s.hidden = true;\n", indent, field.Name)
-	}
-	if field.Doc != "" {
-		fmt.Fprintf(p.out, "%s    $this.$fields.%s.comment = %s;\n", indent, field.Name, strconv.Quote(field.Doc))
-	}
+	fmt.Fprintf(p.out, "%s    %s.%s = new %s(%s.base, $at, $n);\n", indent, p.fields(), field.Name, p.helper("$Span"), env)
+	p.emitFieldMetadata(field, indent+"    ", "$value")
 	for _, use := range uses {
-		p.emitAttribute(use, indent+"    ", "$this."+field.Name, "$this.$fields."+field.Name)
+		p.emitAttribute(use, indent+"    ", "$this."+field.Name, p.fields()+"."+field.Name)
 	}
 	if advance {
-		fmt.Fprintf(p.out, "%s    $env.cursor = $at + $this.$fields.%s.size;\n", indent, field.Name)
+		if hasAttribute(uses, "fixed_size") {
+			fmt.Fprintf(p.out, "%s    $env.cursor = $at + %s.%s.size;\n", indent, p.fields(), field.Name)
+		} else {
+			fmt.Fprintf(p.out, "%s    $env.cursor = $at + $n;\n", indent)
+		}
 		if p.bits {
 			fmt.Fprintf(p.out, "%s    $bit = ($env.cursor - $start) * 8;\n", indent)
 		}
@@ -569,6 +590,100 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		fmt.Fprintf(p.out, "%s    });\n", indent)
 	}
 	fmt.Fprintf(p.out, "%s}\n", indent)
+}
+
+func (p *parserEmitter) emitStaticField(field *Field, indent string, size int, align int) {
+	offset := (p.staticCursor.offset + align - 1) / align * align
+	at := "$start"
+	if offset != 0 {
+		at = fmt.Sprintf("$start + %d", offset)
+	}
+	value := fmt.Sprintf("%s($env, %s, %d, %s)", p.helper("$checked"), at, size, p.fixedReader(field.Type, at))
+	if _, isPointer := Unalias(field.Type).(*Pointer); isPointer {
+		fmt.Fprintf(p.out, "%s{\n", indent)
+		fmt.Fprintf(p.out, "%s    const $value = %s;\n", indent, value)
+		fmt.Fprintf(p.out, "%s    $this.%s = $value;\n", indent, field.Name)
+		fmt.Fprintf(p.out, "%s    %s.%s = new %s($env.base, %s, %d);\n", indent, p.fields(), field.Name, p.helper("$Span"), at, size)
+		p.emitFieldMetadata(field, indent+"    ", "$value")
+		fmt.Fprintf(p.out, "%s}\n", indent)
+	} else {
+		fmt.Fprintf(p.out, "%s$this.%s = %s;\n", indent, field.Name, value)
+		fmt.Fprintf(p.out, "%s%s.%s = new %s($env.base, %s, %d);\n", indent, p.fields(), field.Name, p.helper("$Span"), at, size)
+		p.emitFieldMetadata(field, indent, "")
+	}
+	p.staticCursor.offset = offset + size
+	p.staticCursor.moved = true
+}
+
+func (p *parserEmitter) emitFieldMetadata(field *Field, indent string, value string) {
+	if pointer, isPointer := Unalias(field.Type).(*Pointer); isPointer {
+		fmt.Fprintf(p.out, "%s%s.%s.target = () => %s;\n", indent, p.fields(), field.Name, p.reader(pointer.Target, fmt.Sprintf("%s($env.base, %s)", p.helper("$offset"), value)))
+	}
+	if field.Hidden {
+		fmt.Fprintf(p.out, "%s%s.%s.hidden = true;\n", indent, p.fields(), field.Name)
+	}
+	if field.Doc != "" {
+		fmt.Fprintf(p.out, "%s%s.%s.comment = %s;\n", indent, p.fields(), field.Name, strconv.Quote(field.Doc))
+	}
+}
+
+func (p *parserEmitter) fields() string {
+	if p.inFunction {
+		return "$this.$fields"
+	}
+	return "$fields"
+}
+
+func (p *parserEmitter) leaveStaticCursor(indent string) {
+	if p.staticCursor.moved {
+		fmt.Fprintf(p.out, "%s$env.cursor = $start + %d;\n", indent, p.staticCursor.offset)
+	}
+	p.staticCursor = staticCursor{}
+}
+
+func (p *parserEmitter) fixedLayout(t Type) (size int, align int, isFixed bool) {
+	switch t := Unalias(t).(type) {
+	case *Primitive:
+		size = t.Kind.Size()
+	case *Enum:
+		if t.Encoding != nil {
+			return 0, 0, false
+		}
+		size = t.Underlying.Kind.Size()
+	case *Pointer:
+		if t.Width == nil {
+			return 0, 0, false
+		}
+		size = t.Width.Kind.Size()
+	default:
+		return 0, 0, false
+	}
+	align = 1
+	if p.abi != PackedABI {
+		align = naturalAlign(size)
+	}
+	return size, align, true
+}
+
+func (p *parserEmitter) fixedReader(t Type, offset string) string {
+	switch t := Unalias(t).(type) {
+	case *Primitive:
+		return p.primitiveReader(t, inEnvironment(offset))
+	case *Enum:
+		return p.primitiveReader(t.Underlying, inEnvironment(offset))
+	case *Pointer:
+		return p.pointerReader(t, inEnvironment(offset))
+	}
+	panic("unreachable")
+}
+
+func hasAttribute(uses []*AttributeUse, name string) bool {
+	for _, use := range uses {
+		if use.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *parserEmitter) emitAttribute(use *AttributeUse, indent string, target string, metadata string) {
@@ -628,7 +743,14 @@ func (p *parserEmitter) aligned(cursor string, t Type) string {
 	if align == "1" {
 		return cursor
 	}
-	return fmt.Sprintf("%s($start, %s, %s)", p.helper("$alignCursor"), cursor, align)
+	return fmt.Sprintf("%s(%s, %s, %s)", p.helper("$alignCursor"), p.start(), cursor, align)
+}
+
+func (p *parserEmitter) start() string {
+	if p.inFunction {
+		return fmt.Sprintf("%s($env.base, $this.$address)", p.helper("$offset"))
+	}
+	return "$start"
 }
 
 func (p *parserEmitter) alignOf(t Type) string {

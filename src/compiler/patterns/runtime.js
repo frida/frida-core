@@ -43,6 +43,11 @@ export class $Pattern {
     get $fields() { return this.#fields; }
 }
 
+export function $checked(env, offset, size, value) {
+    $check(env, offset, size);
+    return value;
+}
+
 export function $check(env, offset, size) {
     if (offset + size > env.limit)
         throw new Error("the data ended before the value could be read");
