@@ -124,14 +124,59 @@ namespace std::time {
 	};
 
 	struct Time {
-		u16 year;
-		u8 month;
-		u8 day;
-		u8 hours;
-		u8 minutes;
-		u8 seconds;
-		u8 weekDay;
-		u16 yearDay;
+		u8 sec;
+		u8 min;
+		u8 hour;
+		u8 mday;
+		u8 mon;
+		s16 year;
+		u8 wday;
+		u16 yday;
+		bool isdst;
+	} [[sealed]];
+
+	union TimeConverter {
+		Time time;
+		u128 value;
+	};
+
+	enum TimeZone : u8 {
+		Local,
+		UTC,
+	};
+
+	fn epoch() {
+		return builtin::std::time::epoch();
+	};
+
+	fn to_local(auto epoch_time) {
+		TimeConverter converter;
+		converter.value = builtin::std::time::to_local(epoch_time);
+		return converter.time;
+	};
+
+	fn to_utc(auto epoch_time) {
+		TimeConverter converter;
+		converter.value = builtin::std::time::to_utc(epoch_time);
+		return converter.time;
+	};
+
+	fn now(TimeZone time_zone = TimeZone::Local) {
+		if (time_zone == TimeZone::UTC)
+			return std::time::to_utc(std::time::epoch());
+		return std::time::to_local(std::time::epoch());
+	};
+
+	fn to_epoch(Time time) {
+		TimeConverter converter;
+		converter.time = time;
+		return builtin::std::time::to_epoch(converter.value);
+	};
+
+	fn format(Time time, str format_string = "%c") {
+		TimeConverter converter;
+		converter.time = time;
+		return builtin::std::time::format(format_string, converter.value);
 	};
 };
 

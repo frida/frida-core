@@ -3,6 +3,9 @@ package patterns
 import (
 	"fmt"
 	"math"
+	"math/big"
+	"math/bits"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -606,28 +609,31 @@ func defineTimeBuiltins() {
 		if err != nil {
 			return nil, err
 		}
-		return timeValue(time.Unix(seconds, 0).UTC()), nil
+		return packTime(time.Unix(seconds, 0).UTC(), f.decoder.littleEndian), nil
 	})
 	defineBuiltin("std::time::to_local", 1, "$std_time_to_local", func(f *frame, args []runtimeValue) (runtimeValue, error) {
 		seconds, err := toInt(args[0])
 		if err != nil {
 			return nil, err
 		}
-		return timeValue(time.Unix(seconds, 0).Local()), nil
+		return packTime(time.Unix(seconds, 0).Local(), f.decoder.littleEndian), nil
 	})
-	defineBuiltin("std::time::format", variadic, "$std_time_format", func(f *frame, args []runtimeValue) (runtimeValue, error) {
-		if len(args) == 0 {
-			return nil, fmt.Errorf("std::time::format expects a time")
-		}
-		moment, err := timeOf(args[0])
+	defineBuiltin("std::time::to_epoch", 1, "$std_time_to_epoch", func(f *frame, args []runtimeValue) (runtimeValue, error) {
+		fields, err := unpackTime(args[0], f.decoder.littleEndian)
 		if err != nil {
 			return nil, err
 		}
-		layout := "%Y-%m-%d %H:%M:%S"
-		if len(args) > 1 {
-			layout = display(args[1])
+		return fields.moment(time.Local).Unix(), nil
+	})
+	defineBuiltin("std::time::format", 2, "$std_time_format", func(f *frame, args []runtimeValue) (runtimeValue, error) {
+		fields, err := unpackTime(args[1], f.decoder.littleEndian)
+		if err != nil {
+			return nil, err
 		}
-		return strftime(layout, moment), nil
+		if !fields.valid() {
+			return "Invalid", nil
+		}
+		return strftime(display(args[0]), fields.moment(time.UTC)), nil
 	})
 	defineBuiltin("std::time::format_dos_date", variadic, "$std_time_format_dos_date", func(f *frame, args []runtimeValue) (runtimeValue, error) {
 		date, err := toInt(patternInteger(args[0]))
@@ -680,14 +686,6 @@ func patternInteger(v runtimeValue) runtimeValue {
 	return v
 }
 
-var timeFields = []string{"year", "month", "day", "hours", "minutes", "seconds", "weekDay", "yearDay"}
-
-func timeValue(moment time.Time) *DecodedValue {
-	numbers := []int64{int64(moment.Year()), int64(moment.Month()), int64(moment.Day()), int64(moment.Hour()), int64(moment.Minute()),
-		int64(moment.Second()), int64(moment.Weekday()), int64(moment.YearDay())}
-	return recordValue("std::time::Time", timeFields, numbers)
-}
-
 func recordValue(typeName string, names []string, numbers []int64) *DecodedValue {
 	node := &DecodedValue{Type: typeName}
 	node.raw = node
@@ -697,21 +695,48 @@ func recordValue(typeName string, names []string, numbers []int64) *DecodedValue
 	return node
 }
 
-func timeOf(v runtimeValue) (time.Time, error) {
-	node, isPattern := v.(*DecodedValue)
-	if !isPattern {
-		seconds, err := toInt(v)
-		if err != nil {
-			return time.Time{}, err
-		}
-		return time.Unix(seconds, 0).UTC(), nil
+type packedTime struct {
+	second, minute, hour, monthDay, month, year, weekDay, yearDay, daylightSaving int
+}
+
+func packTime(moment time.Time, littleEndian bool) *big.Int {
+	year, yearDay := uint16(moment.Year()-1900), uint16(moment.YearDay()-1)
+	if !littleEndian {
+		year, yearDay = bits.ReverseBytes16(year), bits.ReverseBytes16(yearDay)
 	}
-	parts := map[string]int{}
-	for _, field := range node.Fields {
-		number, _ := toInt(field.raw)
-		parts[field.Name] = int(number)
+	bytes := []byte{byte(moment.Second()), byte(moment.Minute()), byte(moment.Hour()), byte(moment.Day()), byte(moment.Month() - 1),
+		byte(year), byte(year >> 8), byte(moment.Weekday()), byte(yearDay), byte(yearDay >> 8), 0, 0, 0, 0, 0, 0}
+	if littleEndian {
+		slices.Reverse(bytes)
 	}
-	return time.Date(parts["year"], time.Month(parts["month"]), parts["day"], parts["hours"], parts["minutes"], parts["seconds"], 0, time.UTC), nil
+	return new(big.Int).SetBytes(bytes)
+}
+
+func unpackTime(v runtimeValue, littleEndian bool) (packedTime, error) {
+	packed, err := toBig(v)
+	if err != nil {
+		return packedTime{}, err
+	}
+	bytes := make([]byte, 16)
+	new(big.Int).And(packed, new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))).FillBytes(bytes)
+	if littleEndian {
+		slices.Reverse(bytes)
+	}
+	year, yearDay := uint16(bytes[5])|uint16(bytes[6])<<8, uint16(bytes[8])|uint16(bytes[9])<<8
+	if !littleEndian {
+		year, yearDay = bits.ReverseBytes16(year), bits.ReverseBytes16(yearDay)
+	}
+	return packedTime{second: int(bytes[0]), minute: int(bytes[1]), hour: int(bytes[2]), monthDay: int(bytes[3]), month: int(bytes[4]),
+		year: int(int16(year)), weekDay: int(bytes[7]), yearDay: int(yearDay), daylightSaving: int(int8(bytes[10]))}, nil
+}
+
+func (t packedTime) valid() bool {
+	return t.second <= 61 && t.minute <= 59 && t.hour <= 23 && t.monthDay >= 1 && t.monthDay <= 31 && t.month <= 11 &&
+		t.weekDay <= 6 && t.yearDay <= 365 && t.daylightSaving >= -1 && t.daylightSaving <= 1
+}
+
+func (t packedTime) moment(location *time.Location) time.Time {
+	return time.Date(1900+t.year, time.Month(t.month+1), t.monthDay, t.hour, t.minute, t.second, 0, location)
 }
 
 func strftime(layout string, moment time.Time) string {
@@ -749,8 +774,21 @@ func strftime(layout string, moment time.Time) string {
 			out.WriteString(moment.Month().String())
 		case 'F':
 			fmt.Fprintf(&out, "%04d-%02d-%02d", moment.Year(), int(moment.Month()), moment.Day())
-		case 'T':
+		case 'T', 'X':
 			fmt.Fprintf(&out, "%02d:%02d:%02d", moment.Hour(), moment.Minute(), moment.Second())
+		case 'c':
+			fmt.Fprintf(&out, "%s %s %2d %02d:%02d:%02d %04d", moment.Weekday().String()[:3], moment.Month().String()[:3], moment.Day(),
+				moment.Hour(), moment.Minute(), moment.Second(), moment.Year())
+		case 'e':
+			fmt.Fprintf(&out, "%2d", moment.Day())
+		case 'D', 'x':
+			fmt.Fprintf(&out, "%02d/%02d/%02d", int(moment.Month()), moment.Day(), moment.Year()%100)
+		case 'R':
+			fmt.Fprintf(&out, "%02d:%02d", moment.Hour(), moment.Minute())
+		case 'I':
+			fmt.Fprintf(&out, "%02d", (moment.Hour()+11)%12+1)
+		case 'p':
+			out.WriteString(map[bool]string{false: "AM", true: "PM"}[moment.Hour() >= 12])
 		case '%':
 			out.WriteByte('%')
 		default:

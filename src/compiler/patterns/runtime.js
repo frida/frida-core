@@ -371,55 +371,89 @@ export function $std_math_accumulate(env, start, end, width) {
 
 export function $std_time_epoch(env) { return Math.floor(Date.now() / 1000); }
 
-export function $std_time_to_utc(env, seconds) { return $std_time_value(new Date(Number(seconds) * 1000), true); }
+export function $std_time_to_utc(env, seconds) { return $packTime(new Date(Number(seconds) * 1000), true, env.littleEndian); }
 
-export function $std_time_to_local(env, seconds) { return $std_time_value(new Date(Number(seconds) * 1000), false); }
+export function $std_time_to_local(env, seconds) { return $packTime(new Date(Number(seconds) * 1000), false, env.littleEndian); }
 
-export function $std_time_format(env, value, layout = "%Y-%m-%d %H:%M:%S") {
-    const t = $std_time_of(value);
-    const pad = (n, width) => String(n).padStart(width, "0");
+export function $std_time_to_epoch(env, packed) {
+    const t = $unpackTime(packed, env.littleEndian);
+    return Math.floor(new Date(1900 + t.year, t.mon, t.mday, t.hour, t.min, t.sec).getTime() / 1000);
+}
+
+export function $std_time_format(env, layout, packed) {
+    const t = $unpackTime(packed, env.littleEndian);
+    if (t.sec > 61 || t.min > 59 || t.hour > 23 || t.mday < 1 || t.mday > 31 || t.mon > 11 || t.wday > 6 || t.yday > 365 || t.isdst < -1 || t.isdst > 1)
+        return "Invalid";
+    const pad = (n, width, fill = "0") => String(n).padStart(width, fill);
+    const year = 1900 + t.year;
     const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    return String(layout).replace(/%([YymdHMSjaAbBFT%])/g, (match, verb) => {
+    const clock = pad(t.hour, 2) + ":" + pad(t.min, 2) + ":" + pad(t.sec, 2);
+    return String(layout).replace(/%([YymdHMSjaAbBFTXceDxRIp%])/g, (match, verb) => {
         switch (verb) {
-            case "Y": return pad(t.year, 4);
-            case "y": return pad(t.year % 100, 2);
-            case "m": return pad(t.month, 2);
-            case "d": return pad(t.day, 2);
-            case "H": return pad(t.hours, 2);
-            case "M": return pad(t.minutes, 2);
-            case "S": return pad(t.seconds, 2);
-            case "j": return pad(t.yearDay, 3);
-            case "a": return days[t.weekDay].slice(0, 3);
-            case "A": return days[t.weekDay];
-            case "b": return months[t.month - 1].slice(0, 3);
-            case "B": return months[t.month - 1];
-            case "F": return pad(t.year, 4) + "-" + pad(t.month, 2) + "-" + pad(t.day, 2);
-            case "T": return pad(t.hours, 2) + ":" + pad(t.minutes, 2) + ":" + pad(t.seconds, 2);
+            case "Y": return pad(year, 4);
+            case "y": return pad(year % 100, 2);
+            case "m": return pad(t.mon + 1, 2);
+            case "d": return pad(t.mday, 2);
+            case "e": return pad(t.mday, 2, " ");
+            case "H": return pad(t.hour, 2);
+            case "I": return pad((t.hour + 11) % 12 + 1, 2);
+            case "p": return t.hour >= 12 ? "PM" : "AM";
+            case "M": return pad(t.min, 2);
+            case "S": return pad(t.sec, 2);
+            case "j": return pad(t.yday + 1, 3);
+            case "a": return days[t.wday].slice(0, 3);
+            case "A": return days[t.wday];
+            case "b": return months[t.mon].slice(0, 3);
+            case "B": return months[t.mon];
+            case "F": return pad(year, 4) + "-" + pad(t.mon + 1, 2) + "-" + pad(t.mday, 2);
+            case "D":
+            case "x": return pad(t.mon + 1, 2) + "/" + pad(t.mday, 2) + "/" + pad(year % 100, 2);
+            case "R": return pad(t.hour, 2) + ":" + pad(t.min, 2);
+            case "T":
+            case "X": return clock;
+            case "c": return days[t.wday].slice(0, 3) + " " + months[t.mon].slice(0, 3) + " " + pad(t.mday, 2, " ") + " " + clock + " " + pad(year, 4);
             default: return "%";
         }
     });
 }
 
-function $std_time_of(value) {
-    if (typeof value === "object" && value !== null && value.year !== undefined)
-        return value;
-    return $std_time_value(new Date(Number(value) * 1000), true);
+function $packTime(date, utc, littleEndian) {
+    if (Number.isNaN(date.getTime()))
+        return 0n;
+    const get = (local, universal) => utc ? universal.call(date) : local.call(date);
+    const year = get(Date.prototype.getFullYear, Date.prototype.getUTCFullYear);
+    const start = utc ? Date.UTC(year, 0, 1) : new Date(year, 0, 1).getTime();
+    const yearDay = Math.floor((date.getTime() - start) / 86400000);
+    const bytes = [
+        get(Date.prototype.getSeconds, Date.prototype.getUTCSeconds),
+        get(Date.prototype.getMinutes, Date.prototype.getUTCMinutes),
+        get(Date.prototype.getHours, Date.prototype.getUTCHours),
+        get(Date.prototype.getDate, Date.prototype.getUTCDate),
+        get(Date.prototype.getMonth, Date.prototype.getUTCMonth),
+        ...$timeHalf(year - 1900, littleEndian),
+        get(Date.prototype.getDay, Date.prototype.getUTCDay),
+        ...$timeHalf(yearDay, littleEndian),
+    ];
+    let packed = 0n;
+    for (let i = 0; i !== 16; i++)
+        packed |= BigInt(bytes[i] ?? 0) << BigInt(8 * (littleEndian ? i : 15 - i));
+    return packed;
 }
 
-function $std_time_value(date, utc) {
-    const get = (local, universal) => utc ? universal.call(date) : local.call(date);
-    const start = utc ? Date.UTC(date.getUTCFullYear(), 0, 1) : new Date(date.getFullYear(), 0, 1).getTime();
+function $unpackTime(packed, littleEndian) {
+    const value = BigInt.asUintN(128, BigInt(packed));
+    const byte = (i) => Number((value >> BigInt(8 * (littleEndian ? i : 15 - i))) & 0xffn);
+    const half = (i) => littleEndian ? byte(i) | (byte(i + 1) << 8) : (byte(i) << 8) | byte(i + 1);
     return {
-        year: get(Date.prototype.getFullYear, Date.prototype.getUTCFullYear),
-        month: get(Date.prototype.getMonth, Date.prototype.getUTCMonth) + 1,
-        day: get(Date.prototype.getDate, Date.prototype.getUTCDate),
-        hours: get(Date.prototype.getHours, Date.prototype.getUTCHours),
-        minutes: get(Date.prototype.getMinutes, Date.prototype.getUTCMinutes),
-        seconds: get(Date.prototype.getSeconds, Date.prototype.getUTCSeconds),
-        weekDay: get(Date.prototype.getDay, Date.prototype.getUTCDay),
-        yearDay: Math.floor((date.getTime() - start) / 86400000) + 1,
+        sec: byte(0), min: byte(1), hour: byte(2), mday: byte(3), mon: byte(4),
+        year: (half(5) << 16) >> 16, wday: byte(7), yday: half(8), isdst: (byte(10) << 24) >> 24,
     };
+}
+
+function $timeHalf(value, littleEndian) {
+    const unsigned = value & 0xffff;
+    return littleEndian ? [unsigned & 0xff, unsigned >> 8] : [unsigned >> 8, unsigned & 0xff];
 }
 
 export function $std_time_format_dos_date(env, value, template = "{:04}-{:02}-{:02}") {
