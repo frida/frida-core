@@ -210,6 +210,7 @@ type decoder struct {
 	pointers     int
 	inputs       map[string]runtimeValue
 	log          []string
+	adopt        func(value *DecodedValue)
 }
 
 type section struct {
@@ -949,6 +950,7 @@ func (d *decoder) decodeStruct(value *DecodedValue, t *Struct, offset int, paren
 	f.abi = t.ABI
 	value.frame = f
 	value.raw = value
+	d.adoptPending(value)
 	value.Fields = []*DecodedValue{}
 	if err := f.bindArguments(t.Params, t.Args, parent); err != nil {
 		value.fail(err)
@@ -1364,7 +1366,11 @@ func (f *frame) place(field *Field) error {
 		})
 		target.placements = append(target.placements, &placement{node: node, t: field.Type, order: field.Order, offset: offset, frame: f})
 	} else {
+		if isStructOrUnion(field.Type) {
+			d.adopt = func(value *DecodedValue) { f.nodes[field] = value }
+		}
 		node = d.decodeOrdered(field.Type, field.Order, offset, f)
+		d.adopt = nil
 	}
 	node.Name = field.Name
 	if pointer, isPointer := Unalias(field.Type).(*Pointer); isPointer && field.PointerBase != nil {
@@ -1404,12 +1410,21 @@ func (f *frame) place(field *Field) error {
 	return nil
 }
 
+func isStructOrUnion(t Type) bool {
+	switch Unalias(t).(type) {
+	case *Struct, *Union:
+		return true
+	}
+	return false
+}
+
 func (d *decoder) decodeUnion(value *DecodedValue, t *Union, offset int, parent *frame) {
 	f := d.newFrame(value, offset, parent, false)
 	f.abi = t.ABI
 	f.union = true
 	value.frame = f
 	value.raw = value
+	d.adoptPending(value)
 	value.Fields = []*DecodedValue{}
 	if err := f.bindArguments(t.Params, t.Args, parent); err != nil {
 		value.fail(err)
@@ -1426,6 +1441,13 @@ func (d *decoder) decodeUnion(value *DecodedValue, t *Union, offset int, parent 
 	value.end(ending)
 	size := f.unionEnd
 	value.Size = &size
+}
+
+func (d *decoder) adoptPending(value *DecodedValue) {
+	if adopt := d.adopt; adopt != nil {
+		d.adopt = nil
+		adopt(value)
+	}
 }
 
 func (d *decoder) decodeArray(value *DecodedValue, t *Array, offset int, scope *frame) {
