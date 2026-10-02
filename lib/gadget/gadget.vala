@@ -1938,14 +1938,10 @@ namespace Frida.Gadget {
 			public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 					Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
-
+				//冻结优化
 				//if (resume_on_attach)
 					//Frida.Gadget.resume ();
-				// 仅在非 WAITING 状态下保持原逻辑；WAITING 状态则跳过此处解冻，交给上面的 load_script 处理
-			    if (Frida.Gadget.get_state () != Frida.Gadget.State.WAITING) {
-			        if (resume_on_attach)
-			            Frida.Gadget.resume ();
-			    }
+	
 
 				return yield parent.attach (options, this, cancellable);
 			}
