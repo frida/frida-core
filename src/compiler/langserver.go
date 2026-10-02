@@ -24,9 +24,9 @@ type LanguageServer struct {
 type LanguageServerMessageCallback func(text string)
 
 func NewLanguageServer(projectRootPath string, onMessage LanguageServerMessageCallback) (*LanguageServer, error) {
-	projectRoot, err := filepath.EvalSymlinks(projectRootPath)
+	projectRoot, err := resolveProjectRoot(projectRootPath)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to resolve project root: %w", err)
+		return nil, err
 	}
 
 	fs := newConfiglessFS(newProjectFS(projectRoot, NewPatternCompiler()), projectRoot)

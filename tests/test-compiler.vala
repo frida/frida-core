@@ -134,6 +134,12 @@ struct Image { u8 magic[2]; u8 width; };
 				assert (game.lookup ("Game").file == "game.hexpat" && game.lookup ("Game").size == 32);
 				assert (game.lookup ("Player").file == "player.pat");
 
+				string previous_dir = Environment.get_current_dir ();
+				Environment.set_current_dir (Path.get_dirname (project_dir));
+				var rooted = yield compiler.compile ("player.pat", make_pattern_options (Path.get_basename (project_dir)));
+				Environment.set_current_dir (previous_dir);
+				assert (rooted.lookup ("Player").file == "player.pat");
+
 				var placed = yield compiler.compile ("placed.hexpat", options);
 				assert (placed.root_type == "Placed");
 				assert (placed.lookup ("Placed").file == "placed.hexpat");

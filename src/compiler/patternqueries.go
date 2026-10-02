@@ -50,9 +50,9 @@ func callPatternFunction(query patternQuery, typeName string, data []byte, addre
 }
 
 func (q patternQuery) compile() (*patternCompilation, error) {
-	projectRoot, err := filepath.EvalSymlinks(q.projectRoot)
+	projectRoot, err := resolveProjectRoot(q.projectRoot)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to resolve project root: %w", err)
+		return nil, err
 	}
 
 	entrypoint := q.entrypoint

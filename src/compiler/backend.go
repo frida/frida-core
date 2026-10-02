@@ -144,8 +144,8 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx *buil
 	var e error
 
 	var projectRoot string
-	if projectRoot, e = filepath.EvalSymlinks(options.ProjectRoot); e != nil {
-		err = fmt.Errorf("Failed to resolve project root: %w", e)
+	if projectRoot, e = resolveProjectRoot(options.ProjectRoot); e != nil {
+		err = e
 		return
 	}
 
@@ -297,6 +297,17 @@ func changeToJS(p string) string {
 	ext := path.Ext(p)
 	base := p[:len(p)-len(ext)]
 	return base + ".js"
+}
+
+func resolveProjectRoot(path string) (string, error) {
+	root, err := filepath.Abs(path)
+	if err == nil {
+		root, err = filepath.EvalSymlinks(root)
+	}
+	if err != nil {
+		return "", fmt.Errorf("Failed to resolve project root: %w", err)
+	}
+	return root, nil
 }
 
 func makeBuildObserverPlugin(projectRoot, entrypoint string, options BuildOptions, callbacks BuildEventCallbacks) esbuild.Plugin {
