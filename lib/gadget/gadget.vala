@@ -2024,16 +2024,16 @@ namespace Frida.Gadget {
 				);
 			}
 			//优化wait逻辑
-			// ------------------ 新增以下重写方法 ------------------
-			    public override async void load_script (AgentScriptId sid, Cancellable? cancellable) throws Error, IOError {
-			        // 1. 先执行原有的脚本加载流程
-			        yield base.load_script (sid, cancellable);
-			
-			        // 2. 脚本加载成功后，检查是否处于 WAIT 模式并等待解冻
-			        if (controller != null && controller.pending_resume_on_load) {
-			            controller.pending_resume_on_load = false;
-			            Frida.Gadget.resume (); // 解冻目标进程/主线程
-			        }
+			// ------------------ 修正后的 load_script 逻辑 ------------------
+			public async void load_script (AgentScriptId sid, Cancellable? cancellable = null) throws GLib.Error {
+				// 1. 先执行原有的脚本加载流程
+				yield base.load_script (sid, cancellable);
+
+				// 2. 脚本加载成功后，检查是否处于 WAIT 模式并等待解冻
+				if (controller != null && controller.pending_resume_on_load) {
+					controller.pending_resume_on_load = false;
+					Frida.Gadget.resume (); // 解冻目标进程/主线程
+				}
 			}
 		}
 	}
