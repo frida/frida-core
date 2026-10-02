@@ -246,25 +246,19 @@ class MinGWToolchain:
             if not msys_prefix.exists():
                 msys_prefix = None
 
-        if msys_prefix is not None:
-            candidates = [msys_prefix / flavor for flavor in host_abi_to_mingw_flavors(host_abi)]
-            mingw_prefix = next((prefix for prefix in candidates if prefix.exists()), None)
-        else:
-            mingw_prefix = None
-
         mingw_cc = host_abi_to_mingw_cc(host_abi)
 
-        if mingw_prefix is not None:
-            mingw_bindir = mingw_prefix / "bin"
-            cc_path = mingw_bindir / f"{mingw_cc}.exe"
-            if not cc_path.exists():
-                cc_path = None
-        else:
+        cc_path = None
+        if msys_prefix is not None:
+            candidates = [msys_prefix / flavor / "bin" / f"{mingw_cc}.exe"
+                          for flavor in host_abi_to_mingw_flavors(host_abi)]
+            cc_path = next((path for path in candidates if path.exists()), None)
+        if cc_path is None:
             raw_cc_path = shutil.which(mingw_cc)
             cc_path = Path(raw_cc_path) if raw_cc_path is not None else None
-            if cc_path is not None:
-                mingw_bindir = cc_path.parent
-                mingw_prefix = mingw_bindir.parent
+        if cc_path is not None:
+            mingw_bindir = cc_path.parent
+            mingw_prefix = mingw_bindir.parent
 
         if cc_path is None:
             raise MinGWNotFoundError(
