@@ -173,7 +173,7 @@ namespace Frida {
 			yield script_engine.destroy_script (script_id);
 		}
 
-		public async virtual void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			yield script_engine.load_script (script_id);
