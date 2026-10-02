@@ -2034,6 +2034,7 @@ namespace Frida.Gadget {
 			            controller.pending_resume_on_load = false;
 			            Frida.Gadget.resume (); // 解冻目标进程/主线程
 			        }
+			}
 		}
 	}
 
