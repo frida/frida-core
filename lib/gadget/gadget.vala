@@ -2021,10 +2021,10 @@ namespace Frida.Gadget {
 		        // 1. 调用父类方法，等待 JS 脚本完成接收与顶层 Hook 的执行
 		        yield base.load_script (id, cancellable);
 		
-		        // 2. JS 脚本彻底执行完成后，若当前处于 WAITING 状态，解冻进程
-		        if (Frida.Gadget.get_state () == Frida.Gadget.State.WAITING) {
-		            Frida.Gadget.resume ();
-		        }
+				// 2. 直接调用 resume()。
+		        // 若当前处于 WAITING 状态（wait模式），它会解冻进程；
+		        // 若已经处于 RESUMED 状态（resume模式），函数内部会自动 return，无任何副作用。
+		        Frida.Gadget.resume ();
 		    }
 		}
 	}
