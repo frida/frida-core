@@ -283,48 +283,44 @@ func _frida_compiler_backend_language_server_post(h uintptr, cText *C.char) *C.c
 }
 
 //export _frida_compiler_backend_patterns_describe
-func _frida_compiler_backend_patterns_describe(cSource, cPlatform, cArch *C.char,
+func _frida_compiler_backend_patterns_describe(cProjectRoot, cEntrypoint, cPlatform, cArch *C.char,
 	onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
-	source := C.GoString(cSource)
-	platform := C.GoString(cPlatform)
-	arch := C.GoString(cArch)
+	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch)
 	onResult := NewCDelegate(onResultFn, onResultData, onResultDataDestroy)
 
 	go func() {
 		defer onResult.Dispose()
 
-		invokePatternResultFunc(onResult, describePatterns(source, platform, arch), nil)
+		result, err := describePatterns(query)
+		invokePatternResultFunc(onResult, result, err)
 	}()
 }
 
 //export _frida_compiler_backend_patterns_decode
-func _frida_compiler_backend_patterns_decode(cSource, cTypeName *C.char, cData *C.uint8_t, dataLength C.int, address C.uint64_t,
-	cPlatform, cArch, cInputs *C.char, onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
-	source := C.GoString(cSource)
+func _frida_compiler_backend_patterns_decode(cProjectRoot, cEntrypoint, cTypeName *C.char, cData *C.uint8_t, dataLength C.int,
+	address C.uint64_t, cPlatform, cArch, cInputs *C.char, onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer,
+	onResultDataDestroy C.FridaDestroyFunc) {
+	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch)
 	typeName := C.GoString(cTypeName)
 	data := C.GoBytes(unsafe.Pointer(cData), dataLength)
-	platform := C.GoString(cPlatform)
-	arch := C.GoString(cArch)
 	inputs := parsePatternInputs(cInputs)
 	onResult := NewCDelegate(onResultFn, onResultData, onResultDataDestroy)
 
 	go func() {
 		defer onResult.Dispose()
 
-		result, err := decodePattern(source, typeName, data, uint64(address), platform, arch, inputs)
+		result, err := decodePattern(query, typeName, data, uint64(address), inputs)
 		invokePatternResultFunc(onResult, result, err)
 	}()
 }
 
 //export _frida_compiler_backend_patterns_call
-func _frida_compiler_backend_patterns_call(cSource, cTypeName *C.char, cData *C.uint8_t, dataLength C.int, address C.uint64_t,
-	cPlatform, cArch, cInputs *C.char, patternID C.uint, cFunctionName *C.char,
+func _frida_compiler_backend_patterns_call(cProjectRoot, cEntrypoint, cTypeName *C.char, cData *C.uint8_t, dataLength C.int,
+	address C.uint64_t, cPlatform, cArch, cInputs *C.char, patternID C.uint, cFunctionName *C.char,
 	onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
-	source := C.GoString(cSource)
+	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch)
 	typeName := C.GoString(cTypeName)
 	data := C.GoBytes(unsafe.Pointer(cData), dataLength)
-	platform := C.GoString(cPlatform)
-	arch := C.GoString(cArch)
 	inputs := parsePatternInputs(cInputs)
 	functionName := C.GoString(cFunctionName)
 	onResult := NewCDelegate(onResultFn, onResultData, onResultDataDestroy)
@@ -332,9 +328,18 @@ func _frida_compiler_backend_patterns_call(cSource, cTypeName *C.char, cData *C.
 	go func() {
 		defer onResult.Dispose()
 
-		result, err := callPatternFunction(source, typeName, data, uint64(address), platform, arch, inputs, int(patternID), functionName)
+		result, err := callPatternFunction(query, typeName, data, uint64(address), inputs, int(patternID), functionName)
 		invokePatternResultFunc(onResult, result, err)
 	}()
+}
+
+func patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch *C.char) patternQuery {
+	return patternQuery{
+		projectRoot: C.GoString(cProjectRoot),
+		entrypoint:  C.GoString(cEntrypoint),
+		platform:    C.GoString(cPlatform),
+		arch:        C.GoString(cArch),
+	}
 }
 
 func parsePatternInputs(cInputs *C.char) map[string]any {

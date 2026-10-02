@@ -575,7 +575,7 @@ func (r *resolver) defineRoot(main *unit) {
 	}
 	r.scope = ""
 	r.order = main.order
-	root := &Struct{Name: rootTypeName(main.file.Path), ABI: main.abi, Global: true}
+	root := &Struct{Name: rootTypeName(main.file.Path), ABI: main.abi, Global: true, Position: Position{Path: main.file.Path}}
 	if _, taken := r.shells[root.Name]; taken {
 		root.Name += "Root"
 	}

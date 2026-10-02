@@ -261,11 +261,14 @@ func run() error {
 
 		case "patterns:describe":
 			go func(req BackendRequest) {
-				emit(BackendEvent{
-					Type: "patterns:result",
-					ID:   req.ID,
-					Text: describePatterns(req.Text, req.Platform, req.Arch),
-				})
+				ev := BackendEvent{Type: "patterns:result", ID: req.ID}
+				result, err := describePatterns(patternQueryFromRequest(req))
+				if err != nil {
+					ev.Error = err.Error()
+				} else {
+					ev.Text = result
+				}
+				emit(ev)
 			}(req)
 
 		case "patterns:decode":
@@ -303,7 +306,7 @@ func decodePatternRequest(req BackendRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return decodePattern(req.Text, req.TypeName, data, address, req.Platform, req.Arch, req.Inputs)
+	return decodePattern(patternQueryFromRequest(req), req.TypeName, data, address, req.Inputs)
 }
 
 func callPatternFunctionRequest(req BackendRequest) (string, error) {
@@ -311,7 +314,7 @@ func callPatternFunctionRequest(req BackendRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return callPatternFunction(req.Text, req.TypeName, data, address, req.Platform, req.Arch, req.Inputs, req.Pattern, req.Function)
+	return callPatternFunction(patternQueryFromRequest(req), req.TypeName, data, address, req.Inputs, req.Pattern, req.Function)
 }
 
 func patternRequestData(req BackendRequest) ([]byte, uint64, error) {
@@ -321,6 +324,10 @@ func patternRequestData(req BackendRequest) ([]byte, uint64, error) {
 	}
 	address, err := strconv.ParseUint(req.Address, 0, 64)
 	return data, address, err
+}
+
+func patternQueryFromRequest(req BackendRequest) patternQuery {
+	return patternQuery{projectRoot: req.ProjectRoot, entrypoint: req.Entrypoint, platform: req.Platform, arch: req.Arch}
 }
 
 func buildOptionsFromRequest(req BackendRequest) (BuildOptions, error) {

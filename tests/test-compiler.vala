@@ -94,21 +94,50 @@ console.log(hitpoints, player.position.x, player.next);
 
 		private static async void compile_and_decode (Harness h) {
 			try {
-				var compiler = new PatternCompiler ();
-				var options = new PatternCompileOptions ();
-				options.platform = "darwin";
-				options.arch = "arm64";
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string player_pat_path = write_pattern (project_dir, "player.pat", PLAYER_PATTERN);
+				write_pattern (project_dir, "game.hexpat", "import player;\n\nstruct Game {\n\tPlayer hero;\n};\n");
+				write_pattern (project_dir, "placed.hexpat", PLAYER_PATTERN + "Player player @ 0x10;\n");
+				write_pattern (project_dir, "broken.pat", "struct A { auto a @ 0; };\n");
+				write_pattern (project_dir, "importing-broken.hexpat", "import broken;\n");
+				write_pattern (project_dir, "configurable.hexpat",
+					"u32 scale in = 1;\nstruct Sample { u8 raw; u32 scaled = raw * scale [[export]]; };\nSample sample @ 0;\n");
+				write_pattern (project_dir, "formatted.hexpat", PLAYER_PATTERN + """
+fn describe(u32 hp) { return std::format("{} hp", hp); }
+struct Labelled { u32 hitpoints [[format("describe"), color("00FF00")]]; };
+""");
+				write_pattern (project_dir, "visualizing.hexpat", """
+struct Image {
+	u8 magic[2];
+	u8 width;
+	u8 visualizer[3] @ addressof(this) [[sealed, hex::visualize("image", this), no_unique_address]];
+	u8 samples[2] [[hex::inline_visualize("line_plot", this, width)]];
+};
+""");
+				write_pattern (project_dir, "printing.hexpat", """
+fn describe(ref auto pattern) { std::print("width {}", pattern.width); };
+struct Image { u8 magic[2]; u8 width; };
+""");
 
-				var module = yield compiler.compile (PLAYER_PATTERN, options);
+				var compiler = new PatternCompiler ();
+				var options = make_pattern_options (project_dir);
+
+				var module = yield compiler.compile (player_pat_path, make_pattern_options ());
 				assert (module.diagnostics.size () == 0);
 				assert (module.types.size () == 2);
 				assert (module.root_type == null);
 				var player_type = module.types.get (1);
-				assert (player_type.name == "Player" && player_type.file == null && player_type.line == 9 && player_type.character == 0);
+				assert (player_type.name == "Player" && player_type.file == "player.pat" && player_type.line == 9 && player_type.character == 0);
 
-				var placed = yield compiler.compile (PLAYER_PATTERN + "Player player @ 0x10;\n", options);
-				assert (placed.root_type == "Root");
-				assert (placed.lookup ("Root").fields.get (0).name == "player");
+				var game = yield compiler.compile ("game.hexpat", options);
+				assert (game.diagnostics.size () == 0);
+				assert (game.lookup ("Game").file == "game.hexpat" && game.lookup ("Game").size == 32);
+				assert (game.lookup ("Player").file == "player.pat");
+
+				var placed = yield compiler.compile ("placed.hexpat", options);
+				assert (placed.root_type == "Placed");
+				assert (placed.lookup ("Placed").file == "placed.hexpat");
+				assert (placed.lookup ("Placed").fields.get (0).name == "player");
 				var player = module.lookup ("Player");
 				assert (player.kind == STRUCT);
 				assert (player.size == 32);
@@ -119,19 +148,30 @@ console.log(hitpoints, player.position.x, player.next);
 				assert (next.type_ref.kind == POINTER);
 				assert (next.type_ref.target.name == "Player");
 
-				var broken = yield compiler.compile ("struct A { auto a @ 0; };", options);
+				var broken = yield compiler.compile ("broken.pat", options);
 				assert (broken.types.size () == 0);
 				assert (broken.diagnostics.size () == 1);
+				assert (broken.diagnostics.get (0).file == "broken.pat");
 				assert (broken.diagnostics.get (0).message == "auto is not supported");
 				assert (broken.diagnostics.get (0).character == 11);
 
-				var configurable = yield compiler.compile ("u32 scale in = 1;\nstruct Sample { u8 raw; u32 scaled = raw * scale [[export]]; };\nSample sample @ 0;\n", options);
+				var importing_broken = yield compiler.compile ("importing-broken.hexpat", options);
+				assert (importing_broken.diagnostics.get (0).file == "broken.pat");
+
+				try {
+					yield compiler.compile ("missing.hexpat", options);
+					assert_not_reached ();
+				} catch (Error e) {
+					assert (e is Error.INVALID_ARGUMENT);
+				}
+
+				var configurable = yield compiler.compile ("configurable.hexpat", options);
 				assert (configurable.inputs.size () == 1);
 				assert (configurable.inputs.get (0).name == "scale");
 				assert (configurable.inputs.get (0).type_ref.name == "u32");
 				var decode_options = new PatternDecodeOptions ();
 				decode_options.inputs["scale"] = new Variant.int64 (3);
-				var scaled = yield configurable.decode ("Root", new Bytes ({ 7 }), 0, decode_options);
+				var scaled = yield configurable.decode ("Configurable", new Bytes ({ 7 }), 0, decode_options);
 				assert (scaled.fields.get (0).fields.get (1).value.get_int64 () == 21);
 
 				var data = new uint8[32];
@@ -150,23 +190,12 @@ console.log(hitpoints, player.position.x, player.next);
 				var serialized = value.to_variant ();
 				assert (serialized.lookup_value ("fields", null).n_children () == 4);
 
-				string formatted_source = PLAYER_PATTERN + """
-fn describe(u32 hp) { return std::format("{} hp", hp); }
-struct Labelled { u32 hitpoints [[format("describe"), color("00FF00")]]; };
-""";
-				var formatted = yield compiler.compile (formatted_source, options);
+				var formatted = yield compiler.compile ("formatted.hexpat", options);
 				var labelled = yield formatted.decode ("Labelled", new Bytes (data), 0);
 				assert (labelled.fields.get (0).formatted == "94 hp");
 				assert (labelled.fields.get (0).color == "00FF00");
 
-				var visualizing = yield compiler.compile ("""
-struct Image {
-	u8 magic[2];
-	u8 width;
-	u8 visualizer[3] @ addressof(this) [[sealed, hex::visualize("image", this), no_unique_address]];
-	u8 samples[2] [[hex::inline_visualize("line_plot", this, width)]];
-};
-""", options);
+				var visualizing = yield compiler.compile ("visualizing.hexpat", options);
 				var visualized = yield visualizing.decode ("Image", new Bytes ({ 0x89, 0x50, 7, 1, 2 }), 0x1000);
 				var image = visualized.fields.get (2).visualizer;
 				assert (image.name == "image" && image.presentation == DETACHED);
@@ -178,10 +207,7 @@ struct Image {
 				assert (plot.arguments.get (1).kind == VALUE && plot.arguments.get (1).value.get_int64 () == 7);
 				assert (visualized.fields.get (2).to_variant ().lookup_value ("visualizer", null) != null);
 
-				var printing = yield compiler.compile ("""
-fn describe(ref auto pattern) { std::print("width {}", pattern.width); };
-struct Image { u8 magic[2]; u8 width; };
-""", options);
+				var printing = yield compiler.compile ("printing.hexpat", options);
 				string output = yield printing.call_function ("Image", new Bytes ({ 0x89, 0x50, 7 }), 0x1000, 1, "describe");
 				assert (output == "width 7");
 
@@ -196,12 +222,36 @@ struct Image { u8 magic[2]; u8 width; };
 					assert (e is Error.INVALID_ARGUMENT);
 					assert ("unknown type Nope" in e.message);
 				}
+
+				remove_directory (project_dir);
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
 
 			h.done ();
+		}
+
+		private static string write_pattern (string project_dir, string name, string contents) throws GLib.Error {
+			string path = Path.build_filename (project_dir, name);
+			FileUtils.set_contents (path, contents);
+			return path;
+		}
+
+		private static PatternCompileOptions make_pattern_options (string? project_root = null) {
+			var options = new PatternCompileOptions ();
+			options.project_root = project_root;
+			options.platform = "darwin";
+			options.arch = "arm64";
+			return options;
+		}
+
+		private static void remove_directory (string path) throws GLib.Error {
+			var dir = Dir.open (path);
+			string? name;
+			while ((name = dir.read_name ()) != null)
+				FileUtils.unlink (Path.build_filename (path, name));
+			DirUtils.remove (path);
 		}
 
 		private static async void complete_pattern_fields (Harness h) {

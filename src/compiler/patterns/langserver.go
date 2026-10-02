@@ -2,6 +2,9 @@ package patterns
 
 import (
 	"fmt"
+	"net/url"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,12 +16,14 @@ type LanguageService struct {
 }
 
 type serviceDocument struct {
-	uri   string
-	text  string
-	lines []int
-	file  *File
-	diags []Diagnostic
-	toks  []token
+	service *LanguageService
+	uri     string
+	path    string
+	text    string
+	lines   []int
+	file    *File
+	diags   []Diagnostic
+	toks    []token
 }
 
 type TextPosition struct {
@@ -143,20 +148,44 @@ func (s *LanguageService) Handles(uri string) bool {
 }
 
 func (s *LanguageService) Open(uri string, text string) {
-	s.documents[uri] = newServiceDocument(uri, text)
+	s.documents[uri] = s.newDocument(uri, text)
 }
 
 func (s *LanguageService) Change(uri string, text string) {
-	s.documents[uri] = newServiceDocument(uri, text)
+	s.documents[uri] = s.newDocument(uri, text)
 }
 
 func (s *LanguageService) Close(uri string) {
 	delete(s.documents, uri)
 }
 
-func newServiceDocument(uri string, text string) *serviceDocument {
-	parsed := parseShared(Source{Text: text}, nil, nil)
-	return &serviceDocument{uri: uri, text: text, lines: lineStarts(text), file: parsed.file, diags: parsed.diagnostics, toks: parsed.tokens}
+func (s *LanguageService) newDocument(uri string, text string) *serviceDocument {
+	path := documentPath(uri)
+	overlays := s.overlays()
+	overlays[path] = text
+	parsed := parseShared(Source{Path: path, Text: text}, nil, NewFileResolver(overlays))
+	return &serviceDocument{service: s, uri: uri, path: path, text: text, lines: lineStarts(text), file: parsed.file,
+		diags: parsed.diagnostics, toks: parsed.tokens}
+}
+
+func documentPath(uri string) string {
+	parsed, err := url.Parse(uri)
+	if err != nil || parsed.Scheme != "file" {
+		return uri
+	}
+	path := parsed.Path
+	if runtime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return filepath.FromSlash(path)
+}
+
+func (s *LanguageService) overlays() map[string]string {
+	overlays := map[string]string{}
+	for _, d := range s.documents {
+		overlays[d.path] = d.text
+	}
+	return overlays
 }
 
 func (s *LanguageService) Diagnostics(uri string) []LSPDiagnostic {
@@ -164,7 +193,7 @@ func (s *LanguageService) Diagnostics(uri string) []LSPDiagnostic {
 	if d == nil {
 		return []LSPDiagnostic{}
 	}
-	module, errors := Compile(d.text)
+	module, errors := d.compile()
 	result := d.lspDiagnostics(errors, SeverityError)
 	if module != nil {
 		result = append(result, d.lspDiagnostics(module.Warnings, SeverityWarning)...)
@@ -172,10 +201,15 @@ func (s *LanguageService) Diagnostics(uri string) []LSPDiagnostic {
 	return result
 }
 
+func (d *serviceDocument) compile() (*Module, []Diagnostic) {
+	module, diagnostics, _ := CompileFile(d.path, d.service.overlays())
+	return module, diagnostics
+}
+
 func (d *serviceDocument) lspDiagnostics(diagnostics []Diagnostic, severity DiagnosticSeverity) []LSPDiagnostic {
 	result := []LSPDiagnostic{}
 	for _, diagnostic := range diagnostics {
-		if diagnostic.Position.Path != "" {
+		if diagnostic.Position.Path != d.path {
 			continue
 		}
 		start := d.textPosition(diagnostic.Position)
@@ -579,7 +613,7 @@ func (s *LanguageService) Hover(uri string, position TextPosition) *Hover {
 }
 
 func (d *serviceDocument) sizeOf(name string) string {
-	module, diagnostics := Compile(d.text)
+	module, diagnostics := d.compile()
 	if len(diagnostics) > 0 || module == nil {
 		return ""
 	}

@@ -60,7 +60,13 @@ const (
 )
 
 func DecodeSource(source string, typeName string, data []byte, address uint64, target Target, inputs map[string]any) (string, error) {
-	module, t, err := compileType(source, typeName)
+	module, diagnostics := Compile(source)
+	return DecodeType(module, diagnostics, typeName, data, address, target, inputs)
+}
+
+func DecodeType(module *Module, diagnostics []Diagnostic, typeName string, data []byte, address uint64, target Target,
+	inputs map[string]any) (string, error) {
+	t, err := lookupType(module, diagnostics, typeName)
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +77,13 @@ func DecodeSource(source string, typeName string, data []byte, address uint64, t
 
 func CallFunctionSource(source string, typeName string, data []byte, address uint64, target Target, inputs map[string]any, patternID int,
 	functionName string) (string, error) {
-	module, t, err := compileType(source, typeName)
+	module, diagnostics := Compile(source)
+	return CallTypeFunction(module, diagnostics, typeName, data, address, target, inputs, patternID, functionName)
+}
+
+func CallTypeFunction(module *Module, diagnostics []Diagnostic, typeName string, data []byte, address uint64, target Target,
+	inputs map[string]any, patternID int, functionName string) (string, error) {
+	t, err := lookupType(module, diagnostics, typeName)
 	if err != nil {
 		return "", err
 	}
@@ -85,17 +97,16 @@ func CallFunctionSource(source string, typeName string, data []byte, address uin
 	return string(encoded), err
 }
 
-func compileType(source string, typeName string) (*Module, Type, error) {
-	module, diagnostics := Compile(source)
+func lookupType(module *Module, diagnostics []Diagnostic, typeName string) (Type, error) {
 	if len(diagnostics) > 0 {
-		return nil, nil, diagnostics[0]
+		return nil, diagnostics[0]
 	}
 	for _, candidate := range module.Types {
 		if candidate.TypeName() == typeName {
-			return module, candidate, nil
+			return candidate, nil
 		}
 	}
-	return nil, nil, fmt.Errorf("unknown type %s", typeName)
+	return nil, fmt.Errorf("unknown type %s", typeName)
 }
 
 func Decode(module *Module, target Target, t Type, data []byte, address uint64) *DecodedValue {

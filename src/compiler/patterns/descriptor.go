@@ -43,6 +43,7 @@ func moduleInputs(module *Module) []*Local {
 }
 
 type DiagnosticDescription struct {
+	File      string `json:"file"`
 	Line      int    `json:"line"`
 	Character int    `json:"character"`
 	Message   string `json:"message"`
@@ -109,12 +110,20 @@ type TypeRefDescription struct {
 
 func DescribeSource(source string, target Target) string {
 	module, diagnostics := Compile(source)
+	return DescribeModule(module, diagnostics, target, func(path string) string { return path })
+}
+
+func DescribeModule(module *Module, diagnostics []Diagnostic, target Target, display func(path string) string) string {
 	description := &Description{Diagnostics: []DiagnosticDescription{}}
 	for _, d := range diagnostics {
-		description.Diagnostics = append(description.Diagnostics, DiagnosticDescription{Line: d.Position.Line, Character: d.Position.Character, Message: d.Message})
+		description.Diagnostics = append(description.Diagnostics, DiagnosticDescription{File: display(d.Position.Path), Line: d.Position.Line,
+			Character: d.Position.Character, Message: d.Message})
 	}
 	if module != nil {
 		description.Types = Describe(module, target)
+		for _, t := range description.Types {
+			t.File = display(t.File)
+		}
 		if module.Root != nil {
 			description.Root = module.Root.Name
 		}

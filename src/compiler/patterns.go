@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -202,7 +201,7 @@ type CompiledPattern struct {
 	Declarations string
 	Diagnostics  []patterns.Diagnostic
 	ModTime      time.Time
-	modTimes     map[string]time.Time
+	resolver     *patterns.FileResolver
 }
 
 func NewPatternCompiler() *PatternCompiler {
@@ -251,15 +250,15 @@ func (p *compiledPatternCache) compile(path string) (*CompiledPattern, error) {
 		return cached, nil
 	}
 
-	loader := &patternFileLoader{modTimes: map[string]time.Time{}}
-	main, err := loader.read(path)
+	resolver := patterns.NewFileResolver(nil)
+	main, err := resolver.Read(path)
 	if err != nil {
 		return nil, err
 	}
 
-	compiled := &CompiledPattern{Path: path, Files: []string{path}, ModTime: loader.modTimes[path], modTimes: loader.modTimes}
+	compiled := &CompiledPattern{Path: path, Files: []string{path}, ModTime: resolver.ModTime(path), resolver: resolver}
 	sourceName := filepath.Base(path)
-	module, diagnostics := patterns.CompileSource(main, loader)
+	module, diagnostics := patterns.CompileSource(main, resolver)
 	if len(diagnostics) > 0 {
 		compiled.Diagnostics = diagnostics
 		if previous, wasCompiled := p.entries[path]; wasCompiled {
@@ -278,64 +277,7 @@ func (p *compiledPatternCache) compile(path string) (*CompiledPattern, error) {
 }
 
 func (c *CompiledPattern) isFresh() bool {
-	for path, modTime := range c.modTimes {
-		info, err := os.Stat(path)
-		if err != nil || !info.ModTime().Equal(modTime) {
-			return false
-		}
-	}
-	return true
-}
-
-type patternFileLoader struct {
-	modTimes map[string]time.Time
-}
-
-func (l *patternFileLoader) Resolve(importer string, path string) (patterns.Source, error) {
-	for _, candidate := range patternFileCandidates(importer, path) {
-		if candidate == importer {
-			continue
-		}
-		source, err := l.read(candidate)
-		if err == nil {
-			return source, nil
-		}
-	}
-	return patterns.Source{}, fmt.Errorf("cannot resolve %s", path)
-}
-
-func patternFileCandidates(importer string, path string) []string {
-	var candidates []string
-	appendIn := func(dir string) {
-		base := filepath.Join(dir, filepath.FromSlash(path))
-		candidates = append(candidates, base, base+".pat", base+".hexpat")
-	}
-	dir := filepath.Dir(importer)
-	appendIn(dir)
-	for {
-		appendIn(filepath.Join(dir, "node_modules"))
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return candidates
-		}
-		dir = parent
-	}
-}
-
-func (l *patternFileLoader) read(path string) (patterns.Source, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return patterns.Source{}, err
-	}
-	if info.IsDir() {
-		return patterns.Source{}, fmt.Errorf("%s is a directory", path)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return patterns.Source{}, err
-	}
-	l.modTimes[path] = info.ModTime()
-	return patterns.Source{Path: path, Text: string(data)}, nil
+	return c.resolver.Fresh(nil)
 }
 
 func (c *PatternCompiler) MarkFailureReported(compiled *CompiledPattern) {

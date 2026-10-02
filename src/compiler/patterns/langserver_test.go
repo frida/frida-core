@@ -146,6 +146,26 @@ func TestServiceCompletionsAndDiagnostics(t *testing.T) {
 	}
 }
 
+func TestServiceResolvesImportsBetweenOpenDocuments(t *testing.T) {
+	service := NewLanguageService()
+	service.Open("file:///lib/main.hexpat", "import common;\n\nVec v @ 0;\n")
+	diagnostics := service.Diagnostics("file:///lib/main.hexpat")
+	if len(diagnostics) != 1 || diagnostics[0].Message != "cannot resolve common" {
+		t.Fatalf("an unopened import should be reported: %+v", diagnostics)
+	}
+	service.Open("file:///lib/common.pat", "struct Vec {\n    u32 x;\n};\n")
+	if diagnostics := service.Diagnostics("file:///lib/main.hexpat"); len(diagnostics) != 0 {
+		t.Fatalf("an open import should resolve: %+v", diagnostics)
+	}
+	service.Change("file:///lib/common.pat", "struct Vec {\n    u32 x\n};\n")
+	if diagnostics := service.Diagnostics("file:///lib/main.hexpat"); len(diagnostics) != 0 {
+		t.Fatalf("problems belong to the document they are in: %+v", diagnostics)
+	}
+	if diagnostics := service.Diagnostics("file:///lib/common.pat"); len(diagnostics) != 1 || diagnostics[0].Range.Start.Line != 2 {
+		t.Fatalf("unexpected diagnostics: %+v", diagnostics)
+	}
+}
+
 func TestServiceSemanticTokens(t *testing.T) {
 	spans := openService(t).SemanticTokens("file:///test.hexpat")
 	var declared, referenced bool

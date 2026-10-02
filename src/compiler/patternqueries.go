@@ -1,22 +1,73 @@
 package main
 
 import (
+	"fmt"
+	"path/filepath"
 	"runtime"
 
 	"github.com/frida/frida-core-compiler/patterns"
 )
 
-func describePatterns(source string, platform string, arch string) string {
-	return patterns.DescribeSource(source, targetFor(platform, arch))
+type patternQuery struct {
+	projectRoot string
+	entrypoint  string
+	platform    string
+	arch        string
 }
 
-func decodePattern(source string, typeName string, data []byte, address uint64, platform string, arch string, inputs map[string]any) (string, error) {
-	return patterns.DecodeSource(source, typeName, data, address, targetFor(platform, arch), inputs)
+type patternCompilation struct {
+	module      *patterns.Module
+	diagnostics []patterns.Diagnostic
+	target      patterns.Target
+	projectRoot string
 }
 
-func callPatternFunction(source string, typeName string, data []byte, address uint64, platform string, arch string, inputs map[string]any,
-	patternID int, functionName string) (string, error) {
-	return patterns.CallFunctionSource(source, typeName, data, address, targetFor(platform, arch), inputs, patternID, functionName)
+func describePatterns(query patternQuery) (string, error) {
+	c, err := query.compile()
+	if err != nil {
+		return "", err
+	}
+	return patterns.DescribeModule(c.module, c.diagnostics, c.target, c.display), nil
+}
+
+func decodePattern(query patternQuery, typeName string, data []byte, address uint64, inputs map[string]any) (string, error) {
+	c, err := query.compile()
+	if err != nil {
+		return "", err
+	}
+	result, err := patterns.DecodeType(c.module, c.diagnostics, typeName, data, address, c.target, inputs)
+	return result, c.displayError(err)
+}
+
+func callPatternFunction(query patternQuery, typeName string, data []byte, address uint64, inputs map[string]any, patternID int,
+	functionName string) (string, error) {
+	c, err := query.compile()
+	if err != nil {
+		return "", err
+	}
+	result, err := patterns.CallTypeFunction(c.module, c.diagnostics, typeName, data, address, c.target, inputs, patternID, functionName)
+	return result, c.displayError(err)
+}
+
+func (q patternQuery) compile() (*patternCompilation, error) {
+	projectRoot, err := filepath.EvalSymlinks(q.projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to resolve project root: %w", err)
+	}
+
+	entrypoint := q.entrypoint
+	if !filepath.IsAbs(entrypoint) {
+		entrypoint = filepath.Join(projectRoot, entrypoint)
+	}
+	if entrypoint, err = filepath.EvalSymlinks(entrypoint); err != nil {
+		return nil, fmt.Errorf("Failed to resolve entrypoint: %w", err)
+	}
+
+	module, diagnostics, err := patterns.CompileFile(entrypoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &patternCompilation{module: module, diagnostics: diagnostics, target: targetFor(q.platform, q.arch), projectRoot: projectRoot}, nil
 }
 
 func targetFor(platform string, arch string) patterns.Target {
@@ -54,4 +105,20 @@ func hostArch() string {
 		return "ia32"
 	}
 	return runtime.GOARCH
+}
+
+func (c *patternCompilation) display(path string) string {
+	if !filepath.IsAbs(path) {
+		return path
+	}
+	rel, _ := filepath.Rel(c.projectRoot, path)
+	return rel
+}
+
+func (c *patternCompilation) displayError(err error) error {
+	if diagnostic, isDiagnostic := err.(patterns.Diagnostic); isDiagnostic {
+		diagnostic.Position.Path = c.display(diagnostic.Position.Path)
+		return diagnostic
+	}
+	return err
 }

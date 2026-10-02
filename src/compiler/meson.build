@@ -47,6 +47,7 @@ if have_compiler_backend
       'patterns/descriptor.go',
       'patterns/endianness.js',
       'patterns/evaluate.go',
+      'patterns/files.go',
       'patterns/javascript.go',
       'patterns/langserver.go',
       'patterns/layout.go',
