@@ -172,8 +172,8 @@ namespace Frida {
 
 			yield script_engine.destroy_script (script_id);
 		}
-
-		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
+		// 在 public async 和 void 之间加上 virtual
+		public async virtual void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 			//优化js加载逻辑
 			// 1. 等待底层脚本引擎完全解析并执行完 JS 顶层代码（如 Hook 注册）
@@ -182,6 +182,8 @@ namespace Frida {
 		    // 2. JS 脚本加载与顶层 Hook 生效后，自动解冻进程
 		    Frida.Gadget.resume ();
 		}
+
+
 
 		public async void interrupt_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
