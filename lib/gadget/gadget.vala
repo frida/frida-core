@@ -1714,6 +1714,19 @@ namespace Frida.Gadget {
 			_is_eternal = true;
 		}
 
+		// [LuoyePatch] 检测当前是否有活跃的远程脚本会话。
+		// 原理：Frida CLI 带 -l script.js 时，attach 后会立即（<50ms）调用
+		// create_script + load。如果一个 session 存活超过 200ms 且未断开，
+		// 几乎可以确定客户端正在加载脚本。
+		public bool has_active_remote_scripts () {
+			foreach (var session in sessions.values) {
+				// session 存在且 controller 未断开，说明客户端仍在活跃通信
+				if (session.controller != null)
+					return true;
+			}
+			return false;
+		}
+
 		private interface Peer : Object {
 			public abstract async void close (Cancellable? cancellable = null) throws IOError;
 		}
@@ -1788,6 +1801,21 @@ namespace Frida.Gadget {
 			private TimeoutSource? ping_timer;
 			private bool resume_on_attach = true;
 
+			// ==================== [LuoyePatch] 智能延迟解冻 ====================
+			// 在 listen/wait 模式下，attach 时不立即解冻进程，而是给远程客户端
+			// 一个窗口期来完成 create_script + load，让 JS hook 先就位再解冻主线程。
+			private bool deferred_resume_active = false;
+			private TimeoutSource? deferred_resume_timer = null;
+			private int deferred_resume_elapsed_ms = 0;
+			private bool script_activity_detected = false;
+			private int settle_remaining_ms = -1;
+
+			// 可调参数（毫秒）
+			private const int DEFERRED_RESUME_POLL_MS = 50;          // 轮询间隔
+			private const int DEFERRED_RESUME_DETECT_MAX_MS = 1000;   // 脚本检测窗口：1秒内没脚本就直接解冻
+			private const int DEFERRED_RESUME_SETTLE_MS = 400;       // 检测到脚本后，额外等400ms让脚本执行完
+			private const int DEFERRED_RESUME_ABSOLUTE_MAX_MS = 5000; // 绝对兜底：最多等5秒
+
 			public ControlChannel (ControlServer parent, DBusConnection connection) {
 				Object (parent: parent, connection: connection);
 			}
@@ -1816,6 +1844,7 @@ namespace Frida.Gadget {
 
 			public async void close (Cancellable? cancellable) throws IOError {
 				discard_ping_timer ();
+				cancel_deferred_resume (); // [LuoyePatch] 清理延迟解冻计时器
 
 				parent.teardown_control_channel (this);
 
@@ -1939,11 +1968,92 @@ namespace Frida.Gadget {
 					Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 
-				if (resume_on_attach)
-					Frida.Gadget.resume ();
-	
+				// [LuoyePatch] 智能延迟解冻：
+				// 在 wait 模式下（state == CREATED），attach 时不立即解冻。
+				// 而是启动一个监听器，观察远程客户端是否会携带 JS 脚本（frida -l script.js）。
+				//   - 如果携带脚本：等脚本完全加载执行（hook 就位）后再解冻主线程
+				//   - 如果没带脚本：短延迟后自动解冻，行为与原来一致
+				// 原理：wait 模式下 scheduler.disable_background_thread()，
+				// JS 任务和 DBus 事件都在 wait_for_resume_context 的主循环上跑，
+				// 只要不调用 resume()，脚本的 create_script+load 就会在等待期间完成。
+				bool should_defer_resume = resume_on_attach && peek_state () == State.CREATED;
 
-				return yield parent.attach (options, this, cancellable);
+				if (resume_on_attach && !should_defer_resume)
+					Frida.Gadget.resume ();
+
+				var session_id = yield parent.attach (options, this, cancellable);
+
+				if (should_defer_resume)
+					begin_deferred_script_resume ();
+
+				return session_id;
+			}
+
+			// [LuoyePatch] 启动延迟解冻监听器
+			private void begin_deferred_script_resume () {
+				deferred_resume_active = true;
+				deferred_resume_elapsed_ms = 0;
+				script_activity_detected = false;
+				settle_remaining_ms = -1;
+
+				deferred_resume_timer = new TimeoutSource (DEFERRED_RESUME_POLL_MS);
+				deferred_resume_timer.set_callback (() => {
+					// 如果外部已经调用了 resume()（比如 CLI 手动 resume），直接退出
+					if (peek_state () == State.STARTED) {
+						cancel_deferred_resume ();
+						return false;
+					}
+
+					deferred_resume_elapsed_ms += DEFERRED_RESUME_POLL_MS;
+
+					// 阶段1：检测脚本活动
+					if (!script_activity_detected) {
+						// 检测当前是否有活跃的远程脚本（通过 ControlServer 检查）
+						script_activity_detected = parent.has_active_remote_scripts ();
+
+						if (script_activity_detected) {
+							// 检测到脚本！进入阶段2：等待脚本执行完毕
+							settle_remaining_ms = DEFERRED_RESUME_SETTLE_MS;
+						} else if (deferred_resume_elapsed_ms >= DEFERRED_RESUME_DETECT_MAX_MS) {
+							// 检测窗口内没等到脚本，直接解冻（没带脚本的情况）
+							finish_deferred_resume ();
+							return false;
+						}
+					}
+
+					// 阶段2：脚本已检测到，等待 settle 时间让 JS 执行完毕
+					if (settle_remaining_ms >= 0) {
+						settle_remaining_ms -= DEFERRED_RESUME_POLL_MS;
+						if (settle_remaining_ms < 0) {
+							finish_deferred_resume ();
+							return false;
+						}
+					}
+
+					// 绝对兜底：防止异常情况下永远挂住
+					if (deferred_resume_elapsed_ms >= DEFERRED_RESUME_ABSOLUTE_MAX_MS) {
+						finish_deferred_resume ();
+						return false;
+					}
+
+					return true; // 继续轮询
+				});
+				deferred_resume_timer.attach (MainContext.get_thread_default ());
+			}
+
+			// [LuoyePatch] 执行延迟解冻
+			private void finish_deferred_resume () {
+				cancel_deferred_resume ();
+				Frida.Gadget.resume ();
+			}
+
+			// [LuoyePatch] 取消延迟解冻计时器（不解冻）
+			private void cancel_deferred_resume () {
+				deferred_resume_active = false;
+				if (deferred_resume_timer != null) {
+					deferred_resume_timer.destroy ();
+					deferred_resume_timer = null;
+				}
 			}
 
 			public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
