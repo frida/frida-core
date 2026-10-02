@@ -993,7 +993,8 @@ configure_file(
 
 add_project_arguments(
   (cc.get_argument_syntax() == 'msvc') ? '/FI' : '-include', meson.current_build_dir() / 'config.h',
-  '-DG_LOG_DOMAIN="Frida"',
+#修改Frida
+  '-DG_LOG_DOMAIN="SystemCore"',
   '-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_56',
   '-DG_DISABLE_DEPRECATED',
   language: c_languages)

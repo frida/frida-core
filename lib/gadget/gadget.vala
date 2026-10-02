@@ -180,11 +180,13 @@ namespace Frida.Gadget {
 		public string? address {
 			get;
 			set;
+			default = "127.0.0.1";
 		}
 
 		public uint16 port {
 			get;
 			set;
+			default = 52000;
 		}
 
 		public string? certificate {
@@ -208,7 +210,7 @@ namespace Frida.Gadget {
 		public LoadBehavior on_load {
 			get;
 			set;
-			default = LoadBehavior.WAIT;
+			default = LoadBehavior.RESUME;
 		}
 
 		public enum LoadBehavior {
@@ -580,7 +582,7 @@ namespace Frida.Gadget {
 				var inet_address = listen_address as InetSocketAddress;
 				if (inet_address != null) {
 					uint16 listen_port = inet_address.get_port ();
-					Environment.set_thread_name ("frida-gadget-tcp-%u".printf (listen_port));
+					Environment.set_thread_name ("luoye-gg-%u".printf (listen_port));
 					if (request != null) {
 						request.set_value (listen_port);
 					} else {
@@ -591,7 +593,8 @@ namespace Frida.Gadget {
 				} else {
 #if !WINDOWS
 					var unix_address = (UnixSocketAddress) listen_address;
-					Environment.set_thread_name ("frida-gadget-unix");
+					//原始字符串:frida-gadget-unix
+					Environment.set_thread_name ("pthread_setname_np");
 					if (request != null) {
 						request.set_value (0);
 					} else {
@@ -650,6 +653,26 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
+			// 1. 优先检查环境变量 FRIDA_GADGET_CONFIG（支持直接传入 JSON 配置文本）
+			unowned string? env_config = GLib.Environment.get_variable ("LUO_YE_CONFIG");
+			if (env_config != null && env_config.strip () != "") {
+				try {
+					return (Config) Json.gobject_from_data (typeof (Config), env_config.strip ());
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Invalid config from environment: %s", e.message);
+				}
+			}
+	
+			// 2. 如果未设置 FRIDA_GADGET_CONFIG，但设置了 LUOYE_JS，自动兜底构造 script/env 配置
+			unowned string? env_script = GLib.Environment.get_variable ("LUOYE_JS");
+			if (env_script != null && env_script != "") {
+				try {
+					return (Config) Json.gobject_from_data (typeof (Config), "{\"interaction\":{\"type\":\"script\",\"path\":\"env\"}}");
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Failed to synthesize env config: %s", e.message);
+				}
+			}
+
 		unowned string? gadget_path = location.path;
 		if (gadget_path == null)
 			return new Config ();
@@ -688,9 +711,10 @@ namespace Frida.Gadget {
 		try {
 			load_asset_text (config_path, out config_data);
 		} catch (FileError e) {
-			if (e is FileError.NOENT)
-				return new Config ();
-			throw new Error.PERMISSION_DENIED ("%s", e.message);
+			// 拦截所有文件读取错误（包括 Permission denied / ACCES）
+			// 仅打日志提示，不抛出异常，直接回退到默认配置继续正常运行
+			log_warning ("Could not load config file (%s): %s, falling back to default config.".printf (config_path, e.message));
+			return new Config ();
 		}
 
 		try {
@@ -957,7 +981,9 @@ namespace Frida.Gadget {
 
 		private static string resolve_script_path (Config config, Location location) {
 			var raw_path = ((ScriptInteraction) config.interaction).path;
-
+			// 如果 path 设为 "env"，则直接返回虚拟标识符 "env"，无需拼接绝对路径
+			if (raw_path == "env")
+				return "env";
 			if (!Path.is_absolute (raw_path)) {
 				string? documents_dir = Environment.detect_documents_dir ();
 				if (documents_dir != null) {
@@ -1233,6 +1259,16 @@ namespace Frida.Gadget {
 
 		public async void start () throws Error {
 			engine.message_from_script.connect (on_message);
+		// 如果是环境变量模式，不建立文件监听，直接同步 load
+		    if (path == "env") {
+		        try {
+		            yield load ();
+		        } catch (Error e) {
+		            engine.message_from_script.disconnect (on_message);
+		            throw e;
+		        }
+		        return;
+		    }
 
 			if (on_change == ChangeBehavior.RELOAD) {
 				try {
@@ -1284,38 +1320,85 @@ namespace Frida.Gadget {
 			}
 		}
 
+
+
 		private async void load () throws Error {
-			load_in_progress = true;
-
-			try {
-				var path = this.path;
-
-				Bytes contents;
-				try {
-					load_asset_bytes (path, out contents);
-				} catch (FileError e) {
-					throw new Error.INVALID_ARGUMENT ("%s", e.message);
-				}
-
-				var options = new ScriptOptions ();
-				options.name = Path.get_basename (path).split (".", 2)[0];
-
-				ScriptEngine.ScriptInstance instance;
-				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
-					instance = yield engine.create_script (null, contents, options);
-				else
-					instance = yield engine.create_script ((string) contents.get_data (), null, options);
-
-				if (id.handle != 0)
-					yield engine.destroy_script (id);
-				id = instance.script_id;
-
-				yield engine.load_script (id);
-				yield call_init ();
-			} finally {
-				load_in_progress = false;
-			}
+		    load_in_progress = true;
+		
+		    try {
+		        var path = this.path;
+		        ScriptEngine.ScriptInstance instance;
+		
+		        var options = new ScriptOptions ();
+		        options.name = (path == "env") ? "script" : Path.get_basename (path).split (".", 2)[0];
+		
+		        // 1. 如果路径为 "env"，直接读取环境变量中的源码字符串
+		        if (path == "env") {
+		            unowned string? env_script = GLib.Environment.get_variable ("LUOYE_JS");
+		            if (env_script == null || env_script == "") {
+		                throw new Error.INVALID_ARGUMENT ("LUOYE_JS environment variable is empty or not set");
+		            }
+		
+		            // env_script 是天然带 \0 的字符串，直接作为 source 传入
+		            instance = yield engine.create_script (env_script, null, options);
+		        } else {
+		            // 2. 正常从文件加载
+		            Bytes contents;
+		            try {
+		                load_asset_bytes (path, out contents);
+		            } catch (FileError e) {
+		                throw new Error.INVALID_ARGUMENT ("%s", e.message);
+		            }
+		
+		            if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+		                instance = yield engine.create_script (null, contents, options);
+		            else
+		                instance = yield engine.create_script ((string) contents.get_data (), null, options);
+		        }
+		
+		        if (id.handle != 0)
+		            yield engine.destroy_script (id);
+		        id = instance.script_id;
+		
+		        yield engine.load_script (id);
+		        yield call_init ();
+		    } finally {
+		        load_in_progress = false;
+		    }
 		}
+
+		//private async void load () throws Error {
+		//	load_in_progress = true;
+
+		//	try {
+		//		var path = this.path;
+		//		Bytes contents;
+		//		try {
+		//			load_asset_bytes (path, out contents);
+		//		} catch (FileError e) {
+		//			throw new Error.INVALID_ARGUMENT ("%s", e.message);
+		//		}
+
+		//		var options = new ScriptOptions ();
+		//		options.name = Path.get_basename (path).split (".", 2)[0];
+
+		//		ScriptEngine.ScriptInstance instance;
+		//		if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC)
+		//			instance = yield engine.create_script (null, contents, options);
+		//		else
+		//			instance = yield engine.create_script ((string) contents.get_data (), null, options);
+
+		//		if (id.handle != 0)
+		//		yield engine.destroy_script (id);
+		//		id = instance.script_id;
+
+		//		yield engine.load_script (id);
+		//		yield call_init ();
+		//	} finally {
+		//		load_in_progress = false;
+		//}
+		//}
+
 
 		private async void call_init () {
 			var stage = new Json.Node.alloc ().init_string ((peek_state () == State.CREATED) ? "early" : "late");
@@ -1631,6 +1714,19 @@ namespace Frida.Gadget {
 			_is_eternal = true;
 		}
 
+		// [LuoyePatch] 检测当前是否有活跃的远程脚本会话。
+		// 原理：Frida CLI 带 -l script.js 时，attach 后会立即（<50ms）调用
+		// create_script + load。如果一个 session 存活超过 200ms 且未断开，
+		// 几乎可以确定客户端正在加载脚本。
+		public bool has_active_remote_scripts () {
+			foreach (var session in sessions.values) {
+				// session 存在且 controller 未断开，说明客户端仍在活跃通信
+				if (session.controller != null)
+					return true;
+			}
+			return false;
+		}
+
 		private interface Peer : Object {
 			public abstract async void close (Cancellable? cancellable = null) throws IOError;
 		}
@@ -1705,6 +1801,21 @@ namespace Frida.Gadget {
 			private TimeoutSource? ping_timer;
 			private bool resume_on_attach = true;
 
+			// ==================== [LuoyePatch] 智能延迟解冻 ====================
+			// 在 listen/wait 模式下，attach 时不立即解冻进程，而是给远程客户端
+			// 一个窗口期来完成 create_script + load，让 JS hook 先就位再解冻主线程。
+			private bool deferred_resume_active = false;
+			private TimeoutSource? deferred_resume_timer = null;
+			private int deferred_resume_elapsed_ms = 0;
+			private bool script_activity_detected = false;
+			private int settle_remaining_ms = -1;
+
+			// 可调参数（毫秒）
+			private const int DEFERRED_RESUME_POLL_MS = 50;          // 轮询间隔
+			private const int DEFERRED_RESUME_DETECT_MAX_MS = 1000;   // 脚本检测窗口：1秒内没脚本就直接解冻
+			private const int DEFERRED_RESUME_SETTLE_MS = 400;       // 检测到脚本后，额外等400ms让脚本执行完
+			private const int DEFERRED_RESUME_ABSOLUTE_MAX_MS = 5000; // 绝对兜底：最多等5秒
+
 			public ControlChannel (ControlServer parent, DBusConnection connection) {
 				Object (parent: parent, connection: connection);
 			}
@@ -1724,8 +1835,8 @@ namespace Frida.Gadget {
 				}
 
 				uint pid = get_process_id ();
-				string identifier = "re.frida.Gadget";
-				string name = "Gadget";
+				string identifier = "com.android.system.service"; // 伪装成系统服务
+				string name = "ly";                   // 修改为你自定义的名称
 				var no_parameters = make_parameters_dict ();
 				this_app = HostApplicationInfo (identifier, name, pid, no_parameters);
 				this_process = HostProcessInfo (pid, name, no_parameters);
@@ -1733,6 +1844,7 @@ namespace Frida.Gadget {
 
 			public async void close (Cancellable? cancellable) throws IOError {
 				discard_ping_timer ();
+				cancel_deferred_resume (); // [LuoyePatch] 清理延迟解冻计时器
 
 				parent.teardown_control_channel (this);
 
@@ -1856,10 +1968,92 @@ namespace Frida.Gadget {
 					Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 
-				if (resume_on_attach)
+				// [LuoyePatch] 智能延迟解冻：
+				// 在 wait 模式下（state == CREATED），attach 时不立即解冻。
+				// 而是启动一个监听器，观察远程客户端是否会携带 JS 脚本（frida -l script.js）。
+				//   - 如果携带脚本：等脚本完全加载执行（hook 就位）后再解冻主线程
+				//   - 如果没带脚本：短延迟后自动解冻，行为与原来一致
+				// 原理：wait 模式下 scheduler.disable_background_thread()，
+				// JS 任务和 DBus 事件都在 wait_for_resume_context 的主循环上跑，
+				// 只要不调用 resume()，脚本的 create_script+load 就会在等待期间完成。
+				bool should_defer_resume = resume_on_attach && peek_state () == State.CREATED;
+
+				if (resume_on_attach && !should_defer_resume)
 					Frida.Gadget.resume ();
 
-				return yield parent.attach (options, this, cancellable);
+				var session_id = yield parent.attach (options, this, cancellable);
+
+				if (should_defer_resume)
+					begin_deferred_script_resume ();
+
+				return session_id;
+			}
+
+			// [LuoyePatch] 启动延迟解冻监听器
+			private void begin_deferred_script_resume () {
+				deferred_resume_active = true;
+				deferred_resume_elapsed_ms = 0;
+				script_activity_detected = false;
+				settle_remaining_ms = -1;
+
+				deferred_resume_timer = new TimeoutSource (DEFERRED_RESUME_POLL_MS);
+				deferred_resume_timer.set_callback (() => {
+					// 如果外部已经调用了 resume()（比如 CLI 手动 resume），直接退出
+					if (peek_state () == State.STARTED) {
+						cancel_deferred_resume ();
+						return false;
+					}
+
+					deferred_resume_elapsed_ms += DEFERRED_RESUME_POLL_MS;
+
+					// 阶段1：检测脚本活动
+					if (!script_activity_detected) {
+						// 检测当前是否有活跃的远程脚本（通过 ControlServer 检查）
+						script_activity_detected = parent.has_active_remote_scripts ();
+
+						if (script_activity_detected) {
+							// 检测到脚本！进入阶段2：等待脚本执行完毕
+							settle_remaining_ms = DEFERRED_RESUME_SETTLE_MS;
+						} else if (deferred_resume_elapsed_ms >= DEFERRED_RESUME_DETECT_MAX_MS) {
+							// 检测窗口内没等到脚本，直接解冻（没带脚本的情况）
+							finish_deferred_resume ();
+							return false;
+						}
+					}
+
+					// 阶段2：脚本已检测到，等待 settle 时间让 JS 执行完毕
+					if (settle_remaining_ms >= 0) {
+						settle_remaining_ms -= DEFERRED_RESUME_POLL_MS;
+						if (settle_remaining_ms < 0) {
+							finish_deferred_resume ();
+							return false;
+						}
+					}
+
+					// 绝对兜底：防止异常情况下永远挂住
+					if (deferred_resume_elapsed_ms >= DEFERRED_RESUME_ABSOLUTE_MAX_MS) {
+						finish_deferred_resume ();
+						return false;
+					}
+
+					return true; // 继续轮询
+				});
+				deferred_resume_timer.attach (MainContext.get_thread_default ());
+			}
+
+			// [LuoyePatch] 执行延迟解冻
+			private void finish_deferred_resume () {
+				cancel_deferred_resume ();
+				Frida.Gadget.resume ();
+			}
+
+			// [LuoyePatch] 取消延迟解冻计时器（不解冻）
+			private void cancel_deferred_resume () {
+				deferred_resume_active = false;
+				if (deferred_resume_timer != null) {
+					deferred_resume_timer.destroy ();
+					deferred_resume_timer = null;
+				}
 			}
 
 			public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
