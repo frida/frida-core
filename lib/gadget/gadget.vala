@@ -1934,15 +1934,27 @@ namespace Frida.Gadget {
 
 				Frida.Gadget.kill ();
 			}
+			// 在 ControlChannel 类内部定义标记变量（改为 public）
+			public bool pending_resume_on_load = false;
 
 			public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
-					Cancellable? cancellable) throws Error, IOError {
-				validate_pid (pid);
-
-				if (resume_on_attach)
-					Frida.Gadget.resume ();
-
-				return yield parent.attach (options, this, cancellable);
+			        Cancellable? cancellable) throws Error, IOError {
+			    validate_pid (pid);
+			    // 1. 判断当前 Gadget 是否处于 listen 模式且配置了 on_load: wait
+			    var listen_interaction = parent.config.interaction as ListenInteraction;
+			    bool is_wait_mode = (listen_interaction != null && listen_interaction.on_load == ListenInteraction.LoadBehavior.WAIT);
+			
+			    if (resume_on_attach) {
+			        if (is_wait_mode) {
+			            // WAIT 模式下，连接时不解冻，标记为等待脚本加载完成后解冻
+			            pending_resume_on_load = true;
+			        } else {
+			            Frida.Gadget.resume ();
+			        }
+			    }
+				//end
+			
+			    return yield parent.attach (options, this, cancellable);
 			}
 
 			public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
@@ -2011,6 +2023,17 @@ namespace Frida.Gadget {
 					dbus_context: dbus_context
 				);
 			}
+			//优化wait逻辑
+			// ------------------ 新增以下重写方法 ------------------
+			    public override async void load_script (AgentScriptId sid, Cancellable? cancellable) throws Error, IOError {
+			        // 1. 先执行原有的脚本加载流程
+			        yield base.load_script (sid, cancellable);
+			
+			        // 2. 脚本加载成功后，检查是否处于 WAIT 模式并等待解冻
+			        if (controller != null && controller.pending_resume_on_load) {
+			            controller.pending_resume_on_load = false;
+			            Frida.Gadget.resume (); // 解冻目标进程/主线程
+			        }
 		}
 	}
 
