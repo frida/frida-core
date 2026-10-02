@@ -171,6 +171,116 @@ namespace Frida {
 			}
 		}
 
+		/**
+		 * Builds the library rooted at @entrypoint into @output_dir, as a
+		 * module and declaration file per source file, with the patterns they
+		 * import alongside, ready for other projects to import.
+		 *
+		 * @param entrypoint path to the library's entrypoint module
+		 * @param output_dir directory to write the library to, relative to the
+		 *                   project root unless absolute
+		 * @param options library options, or null for the defaults
+		 */
+		public async void build_library (string entrypoint, string output_dir, LibraryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			CompilerBackend.check_available ();
+
+			LibraryOptions opts = (options != null) ? options : new LibraryOptions ();
+			string project_root = compute_project_root (entrypoint, opts.project_root);
+
+			starting ();
+			try {
+				string? error_message = null;
+				CompilerBackend.BuildCompleteFunc on_complete = (b, e) => {
+					error_message = e;
+					schedule_on_frida_thread (build_library.callback);
+				};
+
+				CompilerBackend.build_library (project_root, entrypoint, output_dir, (size_t) (opts.source_maps == INCLUDED),
+					on_diagnostic, (owned) on_complete);
+				yield;
+
+				if (error_message != null)
+					throw new Error.INVALID_ARGUMENT ("%s", error_message);
+			} finally {
+				finished ();
+			}
+		}
+
+		public void build_library_sync (string entrypoint, string output_dir, LibraryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<BuildLibraryTask> ();
+			task.entrypoint = entrypoint;
+			task.output_dir = output_dir;
+			task.options = options;
+			task.execute (cancellable);
+		}
+
+		private class BuildLibraryTask : CompilerTask<void> {
+			public string entrypoint;
+			public string output_dir;
+			public LibraryOptions? options;
+
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.build_library (entrypoint, output_dir, options, cancellable);
+			}
+		}
+
+		/**
+		 * Builds the library and keeps rebuilding it into @output_dir as its
+		 * sources change.
+		 *
+		 * @param entrypoint path to the library's entrypoint module
+		 * @param output_dir directory to write the library to, relative to the
+		 *                   project root unless absolute
+		 * @param options library options, or null for the defaults
+		 */
+		public async void watch_library (string entrypoint, string output_dir, LibraryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			CompilerBackend.check_available ();
+
+			LibraryOptions opts = (options != null) ? options : new LibraryOptions ();
+			string project_root = compute_project_root (entrypoint, opts.project_root);
+
+			cancel_watch ();
+
+			size_t session_handle = 0;
+			string? error_message = null;
+			CompilerBackend.WatchReadyFunc on_ready = (h, e) => {
+				session_handle = h;
+				error_message = e;
+				schedule_on_frida_thread (watch_library.callback);
+			};
+
+			CompilerBackend.watch_library (project_root, entrypoint, output_dir, (size_t) (opts.source_maps == INCLUDED),
+				on_starting, on_finished, on_diagnostic, (owned) on_ready);
+			yield;
+
+			if (error_message != null)
+				throw new Error.INVALID_ARGUMENT ("%s", error_message);
+
+			watch_session_handle = session_handle;
+		}
+
+		public void watch_library_sync (string entrypoint, string output_dir, LibraryOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<WatchLibraryTask> ();
+			task.entrypoint = entrypoint;
+			task.output_dir = output_dir;
+			task.options = options;
+			task.execute (cancellable);
+		}
+
+		private class WatchLibraryTask : CompilerTask<void> {
+			public string entrypoint;
+			public string output_dir;
+			public LibraryOptions? options;
+
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.watch_library (entrypoint, output_dir, options, cancellable);
+			}
+		}
+
 		private void on_starting () {
 			schedule_on_frida_thread (() => {
 				starting ();
@@ -2391,7 +2501,9 @@ namespace Frida {
 #if COMPILER_BACKEND_LINKED
 			_init_go_runtime ();
 			build = (BuildFunc) _build;
+			build_library = (BuildLibraryFunc) _build_library;
 			watch = (WatchFunc) _watch;
+			watch_library = (WatchLibraryFunc) _watch_library;
 			WatchSession.dispose = (WatchSession.DisposeFunc) WatchSession._dispose;
 			LanguageServer.open = (LanguageServer.OpenFunc) LanguageServer._open;
 			LanguageServer.close = (LanguageServer.CloseFunc) LanguageServer._close;
@@ -2409,7 +2521,9 @@ namespace Frida {
 			backend.make_resident ();
 
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
+			build_library = resolve_symbol (backend, "_frida_compiler_backend_build_library");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
+			watch_library = resolve_symbol (backend, "_frida_compiler_backend_watch_library");
 			WatchSession.dispose = resolve_symbol (backend, "_frida_compiler_backend_watch_session_dispose");
 			LanguageServer.open = resolve_symbol (backend, "_frida_compiler_backend_language_server_open");
 			LanguageServer.close = resolve_symbol (backend, "_frida_compiler_backend_language_server_close");
@@ -2452,7 +2566,9 @@ namespace Frida {
 			backend.make_resident ();
 
 			build = resolve_symbol (backend, "_frida_compiler_backend_build");
+			build_library = resolve_symbol (backend, "_frida_compiler_backend_build_library");
 			watch = resolve_symbol (backend, "_frida_compiler_backend_watch");
+			watch_library = resolve_symbol (backend, "_frida_compiler_backend_watch_library");
 			WatchSession.dispose = resolve_symbol (backend, "_frida_compiler_backend_watch_session_dispose");
 			LanguageServer.open = resolve_symbol (backend, "_frida_compiler_backend_language_server_open");
 			LanguageServer.close = resolve_symbol (backend, "_frida_compiler_backend_language_server_close");
@@ -2464,7 +2580,9 @@ namespace Frida {
 			backend_process = new BackendProcess ();
 
 			build = executable_build;
+			build_library = executable_build_library;
 			watch = executable_watch;
+			watch_library = executable_watch_library;
 			WatchSession.dispose = executable_watch_session_dispose;
 			LanguageServer.open = executable_language_server_open;
 			LanguageServer.close = executable_language_server_close;
@@ -2490,12 +2608,22 @@ namespace Frida {
 
 		private bool initialized = false;
 		private BuildFunc? build;
+		private BuildLibraryFunc? build_library;
 		private WatchFunc? watch;
+		private WatchLibraryFunc? watch_library;
 
 		[CCode (has_target = false)]
 		private delegate void BuildFunc (string project_root, string entrypoint, OutputFormat output_format,
 			BundleFormat bundle_format, size_t disable_type_check, size_t source_map, size_t compress,
 			string platform, string[] externals, DiagnosticFunc on_diagnostic, owned BuildCompleteFunc on_complete);
+
+		[CCode (has_target = false)]
+		private delegate void BuildLibraryFunc (string project_root, string entrypoint, string output_dir, size_t source_map,
+			DiagnosticFunc on_diagnostic, owned BuildCompleteFunc on_complete);
+
+		[CCode (has_target = false)]
+		private delegate void WatchLibraryFunc (string project_root, string entrypoint, string output_dir, size_t source_map,
+			StartingFunc on_starting, FinishedFunc on_finished, DiagnosticFunc on_diagnostic, owned WatchReadyFunc on_ready);
 
 		[CCode (has_target = false)]
 		private delegate void WatchFunc (string project_root, string entrypoint, OutputFormat output_format,
@@ -2506,7 +2634,9 @@ namespace Frida {
 #if COMPILER_BACKEND_LINKED
 		private extern void _init_go_runtime ();
 		private extern void _build ();
+		private extern void _build_library ();
 		private extern void _watch ();
+		private extern void _watch_library ();
 #endif
 
 		namespace WatchSession {
@@ -2596,6 +2726,11 @@ namespace Frida {
 				compress, platform, externals, on_diagnostic, (owned) on_complete);
 		}
 
+		private static void executable_build_library (string project_root, string entrypoint, string output_dir, size_t source_map,
+				DiagnosticFunc on_diagnostic, owned BuildCompleteFunc on_complete) {
+			backend_process.build_library (project_root, entrypoint, output_dir, source_map, on_diagnostic, (owned) on_complete);
+		}
+
 		private static void executable_watch (string project_root, string entrypoint, OutputFormat output_format,
 				BundleFormat bundle_format, size_t disable_type_check, size_t source_map, size_t compress,
 				string platform, string[] externals, StartingFunc on_starting, FinishedFunc on_finished,
@@ -2606,6 +2741,12 @@ namespace Frida {
 
 		private static void executable_watch_session_dispose (size_t handle) {
 			backend_process.dispose_watch_session (handle);
+		}
+
+		private static void executable_watch_library (string project_root, string entrypoint, string output_dir, size_t source_map,
+				StartingFunc on_starting, FinishedFunc on_finished, DiagnosticFunc on_diagnostic, owned WatchReadyFunc on_ready) {
+			backend_process.watch_library (project_root, entrypoint, output_dir, source_map, on_starting, on_finished,
+				on_diagnostic, (owned) on_ready);
 		}
 
 		private static void executable_language_server_open (string project_root, LanguageServerMessageFunc on_message,
@@ -2793,6 +2934,22 @@ namespace Frida {
 				}
 			}
 
+			public void build_library (string project_root, string entrypoint, string output_dir, size_t source_map,
+					DiagnosticFunc on_diagnostic, owned BuildCompleteFunc on_complete) {
+				try {
+					ensure_started ();
+				} catch (GLib.Error e) {
+					on_complete (null, e.message);
+					return;
+				}
+
+				uint request_id = allocate_request_id ();
+
+				pending_builds[request_id] = new PendingBuild ((owned) on_complete, on_diagnostic);
+
+				post_message (make_build_library_request (request_id, project_root, entrypoint, output_dir, source_map != 0));
+			}
+
 			public void watch (string project_root, string entrypoint, OutputFormat output_format, BundleFormat bundle_format,
 					size_t disable_type_check, size_t source_map, size_t compress, string platform, string[] externals,
 					StartingFunc on_starting, FinishedFunc on_finished, OutputFunc on_output,
@@ -2822,15 +2979,32 @@ namespace Frida {
 				));
 			}
 
+			public void watch_library (string project_root, string entrypoint, string output_dir, size_t source_map,
+					StartingFunc on_starting, FinishedFunc on_finished, DiagnosticFunc on_diagnostic,
+					owned WatchReadyFunc on_ready) {
+				try {
+					ensure_started ();
+				} catch (GLib.Error e) {
+					on_ready (0, e.message);
+					return;
+				}
+
+				uint session_id = allocate_session_id ();
+
+				watches[session_id] = new WatchEntry ((owned) on_ready, on_starting, on_finished, null, on_diagnostic);
+
+				post_message (make_watch_library_request (session_id, project_root, entrypoint, output_dir, source_map != 0));
+			}
+
 			private class WatchEntry {
 				public WatchReadyFunc? on_ready;
 				public unowned StartingFunc on_starting;
 				public unowned FinishedFunc on_finished;
-				public unowned OutputFunc on_output;
+				public unowned OutputFunc? on_output;
 				public unowned DiagnosticFunc on_diagnostic;
 
 				public WatchEntry (owned WatchReadyFunc on_ready, StartingFunc on_starting, FinishedFunc on_finished,
-						OutputFunc on_output, DiagnosticFunc on_diagnostic) {
+						OutputFunc? on_output, DiagnosticFunc on_diagnostic) {
 					this.on_ready = (owned) on_ready;
 					this.on_starting = on_starting;
 					this.on_finished = on_finished;
@@ -2969,6 +3143,40 @@ namespace Frida {
 					bool source_map, bool compress, string platform, string[] externals) {
 				return make_request ("watch", "session_id", session_id, project_root, entrypoint, output_format,
 					bundle_format, disable_type_check, source_map, compress, platform, externals);
+			}
+
+			private static string make_build_library_request (uint id, string project_root, string entrypoint, string output_dir,
+					bool source_map) {
+				return make_library_request ("build-library", "id", id, project_root, entrypoint, output_dir, source_map);
+			}
+
+			private static string make_watch_library_request (uint session_id, string project_root, string entrypoint,
+					string output_dir, bool source_map) {
+				return make_library_request ("watch-library", "session_id", session_id, project_root, entrypoint, output_dir,
+					source_map);
+			}
+
+			private static string make_library_request (string type, string id_name, uint id, string project_root,
+					string entrypoint, string output_dir, bool source_map) {
+				var builder = new Json.Builder ();
+
+				builder
+					.begin_object ()
+						.set_member_name ("type")
+						.add_string_value (type)
+						.set_member_name (id_name)
+						.add_int_value (id)
+						.set_member_name ("project_root")
+						.add_string_value (project_root)
+						.set_member_name ("entrypoint")
+						.add_string_value (entrypoint)
+						.set_member_name ("output_dir")
+						.add_string_value (output_dir)
+						.set_member_name ("source_map")
+						.add_boolean_value (source_map)
+					.end_object ();
+
+				return Json.to_string (builder.get_root (), false);
 			}
 
 			private static string make_request (string type, string id_name, uint id, string project_root, string entrypoint,
@@ -3271,6 +3479,8 @@ namespace Frida {
 
 				if (scope == "build")
 					handle_build_message (subtype, reader);
+				else if (scope == "build-library")
+					handle_build_library_message (subtype, reader);
 				else if (scope == "watch")
 					handle_watch_message (subtype, reader);
 				else if (scope == "language-server")
@@ -3288,6 +3498,13 @@ namespace Frida {
 					handle_build_diagnostic_message (reader);
 				else
 					throw new Error.PROTOCOL ("Unknown build message type: %s", type);
+			}
+
+			private void handle_build_library_message (string type, Json.Reader reader) throws Error {
+				if (type == "complete")
+					handle_build_library_complete_message (reader);
+				else
+					throw new Error.PROTOCOL ("Unknown build-library message type: %s", type);
 			}
 
 			private void handle_watch_message (string type, Json.Reader reader) throws Error {
@@ -3415,6 +3632,29 @@ namespace Frida {
 				reader.end_member ();
 
 				pending.on_complete (bundle, null);
+			}
+
+			private void handle_build_library_complete_message (Json.Reader reader) throws Error {
+				reader.read_member ("id");
+				uint id = (uint) reader.get_int_value ();
+				reader.end_member ();
+
+				PendingBuild pending;
+				if (!pending_builds.unset (id, out pending))
+					throw new Error.PROTOCOL ("Invalid pending build ID: %u", id);
+
+				if (reader.read_member ("error")) {
+					unowned string? error = reader.get_string_value ();
+					if (error == null)
+						throw new Error.PROTOCOL ("Missing or invalid 'error' value");
+					reader.end_member ();
+
+					pending.on_complete (null, error);
+					return;
+				}
+				reader.end_member ();
+
+				pending.on_complete (null, null);
 			}
 
 			private void handle_build_diagnostic_message (Json.Reader reader) throws Error {
@@ -3681,6 +3921,28 @@ namespace Frida {
 	 * Options for {@link Compiler.watch}.
 	 */
 	public sealed class WatchOptions : CompilerOptions {
+	}
+
+	/**
+	 * Options for {@link Compiler.build_library}.
+	 */
+	public sealed class LibraryOptions : Object {
+		/**
+		 * The project root directory, or null to infer it from the entrypoint.
+		 */
+		public string? project_root {
+			get;
+			set;
+		}
+
+		/**
+		 * Whether to emit source maps next to the modules.
+		 */
+		public SourceMaps source_maps {
+			get;
+			set;
+			default = INCLUDED;
+		}
 	}
 
 	/**

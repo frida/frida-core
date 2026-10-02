@@ -162,6 +162,34 @@ func _frida_compiler_backend_build(cProjectRoot, cEntrypoint *C.char, outputForm
 	}()
 }
 
+//export _frida_compiler_backend_build_library
+func _frida_compiler_backend_build_library(cProjectRoot, cEntrypoint, cOutputDir *C.char, sourceMap uintptr,
+	onDiagnosticFn C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer, onCompleteFn C.FridaBuildCompleteFunc,
+	onCompleteData unsafe.Pointer, onCompleteDataDestroy C.FridaDestroyFunc) {
+	options := LibraryOptions{
+		ProjectRoot: C.GoString(cProjectRoot),
+		Entrypoint:  C.GoString(cEntrypoint),
+		OutputDir:   C.GoString(cOutputDir),
+		SourceMap:   sourceMap != 0,
+	}
+	onDiagnostic := NewCDelegate(onDiagnosticFn, onDiagnosticData, nil)
+	onComplete := NewCDelegate(onCompleteFn, onCompleteData, onCompleteDataDestroy)
+
+	go func() {
+		defer onComplete.Dispose()
+		defer onDiagnostic.Dispose()
+
+		err := buildLibrary(options, makeCBuildDiagnosticCallback(onDiagnostic))
+
+		var cErrorMessage *C.char
+		if err != nil {
+			cErrorMessage = C.CString(err.Error())
+		}
+		C.invoke_build_complete_func(onComplete.Func, nil, cErrorMessage, onComplete.Data)
+		C.free(unsafe.Pointer(cErrorMessage))
+	}()
+}
+
 //export _frida_compiler_backend_watch
 func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputFormat C.FridaOutputFormat, bundleFormat C.FridaBundleFormat,
 	disableTypeCheck, sourceMap, compress uintptr, cPlatform *C.char, cExternals **C.char, numExternals C.int,
@@ -213,6 +241,56 @@ func _frida_compiler_backend_watch(cProjectRoot, cEntrypoint *C.char, outputForm
 		}
 
 		session, err := NewWatchSession(options, onDispose, callbacks)
+
+		var cSession C.uintptr_t
+		var cErrorMessage *C.char
+		if err == nil {
+			cSession = C.uintptr_t(cgo.NewHandle(session))
+		} else {
+			cErrorMessage = C.CString(err.Error())
+		}
+		C.invoke_watch_ready_func(onReady.Func, cSession, cErrorMessage, onReady.Data)
+		C.free(unsafe.Pointer(cErrorMessage))
+	}()
+}
+
+//export _frida_compiler_backend_watch_library
+func _frida_compiler_backend_watch_library(cProjectRoot, cEntrypoint, cOutputDir *C.char, sourceMap uintptr,
+	onStartingFn C.FridaStartingFunc, onStartingData unsafe.Pointer,
+	onFinishedFn C.FridaFinishedFunc, onFinishedData unsafe.Pointer,
+	onDiagnosticFn C.FridaDiagnosticFunc, onDiagnosticData unsafe.Pointer,
+	onReadyFn C.FridaWatchReadyFunc, onReadyData unsafe.Pointer, onReadyDataDestroy C.FridaDestroyFunc) {
+	options := LibraryOptions{
+		ProjectRoot: C.GoString(cProjectRoot),
+		Entrypoint:  C.GoString(cEntrypoint),
+		OutputDir:   C.GoString(cOutputDir),
+		SourceMap:   sourceMap != 0,
+	}
+	onStarting := NewCDelegate(onStartingFn, onStartingData, nil)
+	onFinished := NewCDelegate(onFinishedFn, onFinishedData, nil)
+	onDiagnostic := NewCDelegate(onDiagnosticFn, onDiagnosticData, nil)
+	onReady := NewCDelegate(onReadyFn, onReadyData, onReadyDataDestroy)
+
+	go func() {
+		defer onReady.Dispose()
+
+		onDispose := func() {
+			onStarting.Dispose()
+			onFinished.Dispose()
+			onDiagnostic.Dispose()
+		}
+
+		callbacks := BuildEventCallbacks{
+			OnStart: func() {
+				C.invoke_starting_func(onStarting.Func, onStarting.Data)
+			},
+			OnEnd: func() {
+				C.invoke_finished_func(onFinished.Func, onFinished.Data)
+			},
+			OnDiagnostic: makeCBuildDiagnosticCallback(onDiagnostic),
+		}
+
+		session, err := NewLibraryWatchSession(options, onDispose, callbacks)
 
 		var cSession C.uintptr_t
 		var cErrorMessage *C.char

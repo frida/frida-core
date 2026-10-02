@@ -10,6 +10,16 @@ namespace Frida.CompilerTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Compiler/Library/build-library", () => {
+			var h = new Harness ((h) => LibraryTests.build_library.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Compiler/Library/watch-library", () => {
+			var h = new Harness ((h) => LibraryTests.watch_library.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Compiler/LanguageServer/complete-simple-agent", () => {
 			var h = new Harness ((h) => LanguageServerTests.complete_simple_agent.begin (h as Harness));
 			h.run ();
@@ -316,6 +326,159 @@ struct Image { u8 magic[2]; u8 width; };
 			}
 
 			h.done ();
+		}
+	}
+
+	namespace LibraryTests {
+		private static async void build_library (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string lib_dir = Path.build_filename (project_dir, "lib");
+				DirUtils.create_with_parents (Path.build_filename (lib_dir, "patterns"), 0755);
+				FileUtils.set_contents (Path.build_filename (lib_dir, "index.ts"), """
+import { Player } from "./patterns/player.pat";
+import { describe } from "./describe.js";
+
+export function findPlayer(address: NativePointer): Player {
+    return Player.at(address);
+}
+
+export function describePlayer(player: Player): string {
+    return describe(player.hitpoints);
+}
+""");
+				FileUtils.set_contents (Path.build_filename (lib_dir, "describe.ts"), """
+export function describe(hitpoints: number): string {
+    return hitpoints + " hp";
+}
+""");
+				FileUtils.set_contents (Path.build_filename (lib_dir, "patterns", "player.pat"), """
+import geometry;
+
+#pragma abi native
+
+struct Player {
+	u32 hitpoints;
+	u16 armor;
+	Vec3 position;
+	Player *next;
+};
+""");
+				FileUtils.set_contents (Path.build_filename (lib_dir, "patterns", "geometry.pat"), """
+struct Vec3 {
+	float x;
+	float y;
+	float z;
+};
+""");
+
+				var compiler = new Compiler ();
+				compiler.diagnostics.connect (d => printerr ("DIAGNOSTICS: %s\n", d.print (false)));
+				yield compiler.build_library (Path.build_filename (lib_dir, "index.ts"), "dist",
+					new LibraryOptions () { project_root = project_dir });
+
+				string dist_dir = Path.build_filename (project_dir, "dist");
+				string declarations;
+				FileUtils.get_contents (Path.build_filename (dist_dir, "index.d.ts"), out declarations);
+				assert ("import { Player } from \"./patterns/player.pat\";" in declarations);
+				assert ("export declare function findPlayer(address: NativePointer): Player;" in declarations);
+				string code;
+				FileUtils.get_contents (Path.build_filename (dist_dir, "index.js"), out code);
+				assert ("from \"./patterns/player.pat\"" in code);
+				assert (FileUtils.test (Path.build_filename (dist_dir, "index.js.map"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "describe.js"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "describe.d.ts"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "player.pat"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "player.pat.d.ts"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "geometry.pat"), EXISTS));
+				assert (!FileUtils.test (Path.build_filename (dist_dir, "patterns", "geometry.pat.d.ts"), EXISTS));
+
+				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
+				FileUtils.set_contents (agent_ts_path, """
+import { findPlayer, describePlayer } from "./dist/index.js";
+
+console.log(describePlayer(findPlayer(Process.mainModule.base)));
+""");
+				var bundle = yield compiler.build (agent_ts_path);
+				assert ("describePlayer" in bundle);
+				assert ("readU32()" in bundle);
+
+				remove_tree (project_dir);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private static async void watch_library (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string lib_dir = Path.build_filename (project_dir, "lib");
+				DirUtils.create_with_parents (lib_dir, 0755);
+				string index_ts_path = Path.build_filename (lib_dir, "index.ts");
+				FileUtils.set_contents (index_ts_path, "export const answer = 42;\n");
+
+				var compiler = new Compiler ();
+				uint builds = 0;
+				bool waiting = false;
+				compiler.finished.connect (() => {
+					builds++;
+					if (waiting)
+						watch_library.callback ();
+				});
+
+				var options = new LibraryOptions () {
+					project_root = project_dir,
+					source_maps = OMITTED,
+				};
+				yield compiler.watch_library (index_ts_path, "dist", options);
+				while (builds == 0) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+
+				string dist_dir = Path.build_filename (project_dir, "dist");
+				string declarations;
+				FileUtils.get_contents (Path.build_filename (dist_dir, "index.d.ts"), out declarations);
+				assert ("export declare const answer = 42;" in declarations);
+				assert (!FileUtils.test (Path.build_filename (dist_dir, "index.js.map"), EXISTS));
+
+				compiler = null;
+				remove_tree (project_dir);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private static void remove_tree (string path) throws GLib.Error {
+			var dir = Dir.open (path);
+			string? name;
+			while ((name = dir.read_name ()) != null) {
+				string child = Path.build_filename (path, name);
+				if (FileUtils.test (child, IS_DIR))
+					remove_tree (child);
+				else
+					FileUtils.unlink (child);
+			}
+			DirUtils.remove (path);
 		}
 	}
 

@@ -21,6 +21,7 @@ type BackendRequest struct {
 	SessionID        uint           `json:"session_id,omitempty"`
 	ProjectRoot      string         `json:"project_root,omitempty"`
 	Entrypoint       string         `json:"entrypoint,omitempty"`
+	OutputDir        string         `json:"output_dir,omitempty"`
 	OutputFormat     string         `json:"output_format,omitempty"`
 	BundleFormat     string         `json:"bundle_format,omitempty"`
 	DisableTypeCheck bool           `json:"disable_type_check,omitempty"`
@@ -79,6 +80,67 @@ func run() error {
 		}
 	}
 
+	startWatch := func(sessionID uint, create func(onDispose SessionDisposeHandler, callbacks BuildEventCallbacks) (*WatchSession, error)) {
+		callbacks := BuildEventCallbacks{
+			OnStart: func() {
+				emit(BackendEvent{
+					Type:      "watch:starting",
+					SessionID: sessionID,
+				})
+			},
+			OnEnd: func() {
+				emit(BackendEvent{
+					Type:      "watch:finished",
+					SessionID: sessionID,
+				})
+			},
+			OnOutput: func(bundle string) {
+				emit(BackendEvent{
+					Type:      "watch:output",
+					SessionID: sessionID,
+					Bundle:    bundle,
+				})
+			},
+			OnDiagnostic: func(d Diagnostic) {
+				emit(BackendEvent{
+					Type:      "watch:diagnostic",
+					SessionID: sessionID,
+					Category:  d.category,
+					Code:      d.code,
+					Path:      d.path,
+					Line:      d.line,
+					Character: d.character,
+					Text:      d.text,
+				})
+			},
+		}
+
+		onDispose := func() {
+			sessionsMu.Lock()
+			delete(sessions, sessionID)
+			sessionsMu.Unlock()
+		}
+
+		session, err := create(onDispose, callbacks)
+		if err != nil {
+			emit(BackendEvent{
+				Type:      "watch:ready",
+				SessionID: sessionID,
+				Error:     err.Error(),
+			})
+			return
+		}
+
+		sessionsMu.Lock()
+		sessions[sessionID] = session
+		sessionsMu.Unlock()
+
+		emit(BackendEvent{
+			Type:      "watch:ready",
+			SessionID: sessionID,
+		})
+	}
+
 	for {
 		var req BackendRequest
 		if err := readMessage(reader, &req); err != nil {
@@ -101,21 +163,7 @@ func run() error {
 					return
 				}
 
-				onDiagnostic := func(d Diagnostic) {
-					ev := BackendEvent{
-						Type:      "build:diagnostic",
-						ID:        req.ID,
-						Category:  d.category,
-						Code:      d.code,
-						Path:      d.path,
-						Line:      d.line,
-						Character: d.character,
-						Text:      d.text,
-					}
-					emit(ev)
-				}
-
-				bundle, err := build(options, onDiagnostic)
+				bundle, err := build(options, makeBuildDiagnosticEmitter(emit, req.ID))
 
 				ev := BackendEvent{
 					Type: "build:complete",
@@ -125,6 +173,20 @@ func run() error {
 					ev.Error = err.Error()
 				} else {
 					ev.Bundle = bundle
+				}
+				emit(ev)
+			}(req)
+
+		case "build-library":
+			go func(req BackendRequest) {
+				err := buildLibrary(libraryOptionsFromRequest(req), makeBuildDiagnosticEmitter(emit, req.ID))
+
+				ev := BackendEvent{
+					Type: "build-library:complete",
+					ID:   req.ID,
+				}
+				if err != nil {
+					ev.Error = err.Error()
 				}
 				emit(ev)
 			}(req)
@@ -141,64 +203,15 @@ func run() error {
 					return
 				}
 
-				callbacks := BuildEventCallbacks{
-					OnStart: func() {
-						emit(BackendEvent{
-							Type:      "watch:starting",
-							SessionID: req.SessionID,
-						})
-					},
-					OnEnd: func() {
-						emit(BackendEvent{
-							Type:      "watch:finished",
-							SessionID: req.SessionID,
-						})
-					},
-					OnOutput: func(bundle string) {
-						emit(BackendEvent{
-							Type:      "watch:output",
-							SessionID: req.SessionID,
-							Bundle:    bundle,
-						})
-					},
-					OnDiagnostic: func(d Diagnostic) {
-						emit(BackendEvent{
-							Type:      "watch:diagnostic",
-							SessionID: req.SessionID,
-							Category:  d.category,
-							Code:      d.code,
-							Path:      d.path,
-							Line:      d.line,
-							Character: d.character,
-							Text:      d.text,
-						})
-					},
-				}
+				startWatch(req.SessionID, func(onDispose SessionDisposeHandler, callbacks BuildEventCallbacks) (*WatchSession, error) {
+					return NewWatchSession(options, onDispose, callbacks)
+				})
+			}(req)
 
-				var session *WatchSession
-				onDispose := func() {
-					sessionsMu.Lock()
-					delete(sessions, req.SessionID)
-					sessionsMu.Unlock()
-				}
-
-				session, err = NewWatchSession(options, onDispose, callbacks)
-				if err != nil {
-					emit(BackendEvent{
-						Type:      "watch:ready",
-						SessionID: req.SessionID,
-						Error:     err.Error(),
-					})
-					return
-				}
-
-				sessionsMu.Lock()
-				sessions[req.SessionID] = session
-				sessionsMu.Unlock()
-
-				emit(BackendEvent{
-					Type:      "watch:ready",
-					SessionID: req.SessionID,
+		case "watch-library":
+			go func(req BackendRequest) {
+				startWatch(req.SessionID, func(onDispose SessionDisposeHandler, callbacks BuildEventCallbacks) (*WatchSession, error) {
+					return NewLibraryWatchSession(libraryOptionsFromRequest(req), onDispose, callbacks)
 				})
 			}(req)
 
@@ -301,6 +314,21 @@ func run() error {
 	}
 }
 
+func makeBuildDiagnosticEmitter(emit func(ev BackendEvent), id uint) BuildDiagnosticCallback {
+	return func(d Diagnostic) {
+		emit(BackendEvent{
+			Type:      "build:diagnostic",
+			ID:        id,
+			Category:  d.category,
+			Code:      d.code,
+			Path:      d.path,
+			Line:      d.line,
+			Character: d.character,
+			Text:      d.text,
+		})
+	}
+}
+
 func decodePatternRequest(req BackendRequest) (string, error) {
 	data, address, err := patternRequestData(req)
 	if err != nil {
@@ -328,6 +356,10 @@ func patternRequestData(req BackendRequest) ([]byte, uint64, error) {
 
 func patternQueryFromRequest(req BackendRequest) patternQuery {
 	return patternQuery{projectRoot: req.ProjectRoot, entrypoint: req.Entrypoint, platform: req.Platform, arch: req.Arch}
+}
+
+func libraryOptionsFromRequest(req BackendRequest) LibraryOptions {
+	return LibraryOptions{ProjectRoot: req.ProjectRoot, Entrypoint: req.Entrypoint, OutputDir: req.OutputDir, SourceMap: req.SourceMap}
 }
 
 func buildOptionsFromRequest(req BackendRequest) (BuildOptions, error) {

@@ -33,6 +33,7 @@ if have_compiler_backend
       'tscompiler.go',
       'tsconfig.go',
       'langserver.go',
+      'library.go',
       'shims.go',
       'patterns.go',
       'patternlangserver.go',

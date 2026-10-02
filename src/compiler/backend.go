@@ -69,16 +69,24 @@ func build(options BuildOptions, onDiagnostic BuildDiagnosticCallback) (bundle s
 }
 
 type WatchSession struct {
-	mu        sync.Mutex
-	options   BuildOptions
-	callbacks BuildEventCallbacks
-	ctx       *buildContext
-	onDispose SessionDisposeHandler
+	mu            sync.Mutex
+	createContext ContextFactory
+	callbacks     BuildEventCallbacks
+	ctx           *buildContext
+	onDispose     SessionDisposeHandler
 }
+
+type ContextFactory func(callbacks BuildEventCallbacks) (*buildContext, error)
 
 type SessionDisposeHandler func()
 
-func NewWatchSession(opts BuildOptions, onDispose SessionDisposeHandler, callbacks BuildEventCallbacks) (session *WatchSession, err error) {
+func NewWatchSession(opts BuildOptions, onDispose SessionDisposeHandler, callbacks BuildEventCallbacks) (*WatchSession, error) {
+	return newWatchSession(func(cbs BuildEventCallbacks) (*buildContext, error) {
+		return makeContext(opts, cbs)
+	}, onDispose, callbacks)
+}
+
+func newWatchSession(createContext ContextFactory, onDispose SessionDisposeHandler, callbacks BuildEventCallbacks) (session *WatchSession, err error) {
 	cbs := BuildEventCallbacks{
 		OnStart:      callbacks.OnStart,
 		OnEnd:        callbacks.OnEnd,
@@ -92,7 +100,7 @@ func NewWatchSession(opts BuildOptions, onDispose SessionDisposeHandler, callbac
 		},
 	}
 
-	ctx, err := makeContext(opts, cbs)
+	ctx, err := createContext(cbs)
 	if err != nil {
 		return
 	}
@@ -100,10 +108,10 @@ func NewWatchSession(opts BuildOptions, onDispose SessionDisposeHandler, callbac
 	ctx.Watch(esbuild.WatchOptions{})
 
 	session = &WatchSession{
-		options:   opts,
-		callbacks: cbs,
-		ctx:       ctx,
-		onDispose: onDispose,
+		createContext: createContext,
+		callbacks:     cbs,
+		ctx:           ctx,
+		onDispose:     onDispose,
 	}
 	return
 }
@@ -130,7 +138,7 @@ func (s *WatchSession) onConfigChange() {
 			s.ctx = nil
 		}
 
-		ctx, err := makeContext(s.options, s.callbacks)
+		ctx, err := s.createContext(s.callbacks)
 		if err != nil {
 			return
 		}
@@ -150,22 +158,8 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx *buil
 	}
 
 	var entrypoint string
-	if filepath.IsAbs(options.Entrypoint) {
-		entrypoint = options.Entrypoint
-	} else {
-		entrypoint = filepath.Join(projectRoot, options.Entrypoint)
-	}
-	if entrypoint, e = filepath.EvalSymlinks(entrypoint); e != nil {
-		err = fmt.Errorf("Failed to resolve entrypoint: %w", e)
-		return
-	}
-	rel, e := filepath.Rel(projectRoot, entrypoint)
-	if e != nil {
-		err = fmt.Errorf("Could not compute entrypoint path relative to project root: %w", e)
-		return
-	}
-	if strings.HasPrefix(rel, "..") {
-		err = fmt.Errorf("Entrypoint must be inside the project root")
+	if entrypoint, e = resolveEntrypoint(projectRoot, options.Entrypoint); e != nil {
+		err = e
 		return
 	}
 
@@ -308,6 +302,25 @@ func resolveProjectRoot(path string) (string, error) {
 		return "", fmt.Errorf("Failed to resolve project root: %w", err)
 	}
 	return root, nil
+}
+
+func resolveEntrypoint(projectRoot string, path string) (string, error) {
+	entrypoint := path
+	if !filepath.IsAbs(entrypoint) {
+		entrypoint = filepath.Join(projectRoot, entrypoint)
+	}
+	entrypoint, err := filepath.EvalSymlinks(entrypoint)
+	if err != nil {
+		return "", fmt.Errorf("Failed to resolve entrypoint: %w", err)
+	}
+	rel, err := filepath.Rel(projectRoot, entrypoint)
+	if err != nil {
+		return "", fmt.Errorf("Could not compute entrypoint path relative to project root: %w", err)
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("Entrypoint must be inside the project root")
+	}
+	return entrypoint, nil
 }
 
 func makeBuildObserverPlugin(projectRoot, entrypoint string, options BuildOptions, callbacks BuildEventCallbacks) esbuild.Plugin {
