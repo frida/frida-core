@@ -178,9 +178,6 @@ namespace Frida {
 			//优化js加载逻辑
 			// 1. 等待底层脚本引擎完全解析并执行完 JS 顶层代码（如 Hook 注册）
 		    yield script_engine.load_script (script_id);
-		
-		    // 2. JS 脚本加载与顶层 Hook 生效后，自动解冻进程
-		    Frida.Gadget.resume ();
 		}
 
 
