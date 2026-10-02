@@ -105,7 +105,7 @@ fn hear_about_faults() {
     let install: unsafe extern "stdcall" fn(u32) -> u32 =
         unsafe { core::mem::transmute(user_api().set_unhandled_exception_filter as usize) };
 
-    unsafe { PREVIOUS_FILTER = install(on_fault as u32) };
+    unsafe { PREVIOUS_FILTER = install(on_fault as *const () as u32) };
 }
 
 fn stop_hearing_about_faults() {
@@ -513,9 +513,7 @@ fn resolve_user_api() {
             resume_thread: kernel32_export(b"ResumeThread"),
             create_event: kernel32_export(b"CreateEventA"),
             set_event: kernel32_export(b"SetEvent"),
-            wait_for_single_object: kernel32_export(b"WaitForSingleObject"),
             wait_for_single_object_ex: kernel32_export(b"WaitForSingleObjectEx"),
-            exit_thread: kernel32_export(b"ExitThread"),
             close_handle: kernel32_export(b"CloseHandle"),
             set_file_pointer: kernel32_export(b"SetFilePointer"),
             create_file: kernel32_export(b"CreateFileA"),
@@ -554,9 +552,7 @@ struct UserApi {
     resume_thread: u32,
     create_event: u32,
     set_event: u32,
-    wait_for_single_object: u32,
     wait_for_single_object_ex: u32,
-    exit_thread: u32,
     close_handle: u32,
     set_file_pointer: u32,
     create_file: u32,
@@ -589,9 +585,7 @@ static mut USER_API: UserApi = UserApi {
     resume_thread: 0,
     create_event: 0,
     set_event: 0,
-    wait_for_single_object: 0,
     wait_for_single_object_ex: 0,
-    exit_thread: 0,
     close_handle: 0,
     set_file_pointer: 0,
     create_file: 0,
@@ -723,7 +717,7 @@ pub fn spawn_process(command_line: &str) -> u32 {
         return 0;
     }
 
-    unsafe { held().insert(pid, HeldProcess { process, thread }) };
+    held().insert(pid, HeldProcess { process, thread });
 
     pid
 }
@@ -773,7 +767,7 @@ unsafe extern "stdcall" fn on_create_process(application: u32, command_line: *co
         let arena = crate::routed_arena() as u32;
         ((arena + HOLD_RESULT) as *mut u32).write_volatile(if held_ok { 1 } else { 2 });
     }
-    unsafe { held().insert(pid, HeldProcess { process, thread }) };
+    held().insert(pid, HeldProcess { process, thread });
 
     crate::tell_the_host_of_a_spawn(pid, command_line);
 
@@ -889,8 +883,6 @@ fn in_shared_library(address: u32) -> bool {
 }
 
 fn ask_for_a_guard(address: u32, bytes: &[u8]) {
-    let sleep: unsafe extern "stdcall" fn(u32) =
-        unsafe { core::mem::transmute(user_api().sleep as usize) };
     let arena = crate::routed_arena() as u32;
 
     if bytes.len() > PATCH_CODE_MAX {
@@ -945,8 +937,6 @@ fn give_the_slot_back() {
 static ASKING: AtomicBool = AtomicBool::new(false);
 
 fn patch(pid: u32, address: u32, code: u32) -> Option<(u32, u32)> {
-    let sleep: unsafe extern "stdcall" fn(u32) =
-        unsafe { core::mem::transmute(user_api().sleep as usize) };
     let arena = crate::routed_arena() as u32;
 
     take_the_slot();
@@ -1013,7 +1003,7 @@ fn resume_thread(thread: u32) {
 }
 
 pub fn resume_process(pid: u32) -> bool {
-    let Some(held) = (unsafe { held().remove(&pid) }) else {
+    let Some(held) = held().remove(&pid) else {
         return false;
     };
 
@@ -1043,12 +1033,9 @@ static mut HELD_PROCESSES: BTreeMap<u32, HeldProcess> = BTreeMap::new();
 const CREATE_SUSPENDED: u32 = 0x4;
 const CONTEXT_WORDS: usize = 179;
 const CONTEXT_CONTROL: u32 = 0x0001_0001;
-const CONTEXT_INTEGER: u32 = 0x0001_0002;
-const CONTEXT_EAX: usize = 0xb0;
 const CONTEXT_EIP: usize = 0xb8;
 const CONTEXT_ESP: usize = 0xc4;
 const HOLD_INSTRUCTION: u32 = 0xfeeb;
-const PATCH_ATTEMPTS: u32 = 5000;
 const HOLD_ATTEMPTS: u32 = 5000;
 const HOLD_SLICE_MS: u32 = 1;
 const STARTUP_INFO_WORDS: usize = 17;
@@ -1095,8 +1082,9 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     unsafe { start.write(UserThreadStart { entry, parameter }) };
 
     let thread = unsafe {
-        create_thread(0, USER_THREAD_STACK_SIZE, frida_win9x_user_thread as usize as u32,
-            start as *mut c_void, 0, core::ptr::null_mut())
+        create_thread(0, USER_THREAD_STACK_SIZE,
+            frida_win9x_user_thread as *const () as usize as u32, start as *mut c_void, 0,
+            core::ptr::null_mut())
     };
 
     let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =

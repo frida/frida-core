@@ -453,6 +453,7 @@ pub struct ThreadSlots {
     pub set: fn(u32, *mut c_void),
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "xnu-core"))]
 pub fn use_thread_slots(slots: &'static ThreadSlots) {
     unsafe { SLOTS = Some(slots) };
 }

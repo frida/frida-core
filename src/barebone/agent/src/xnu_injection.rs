@@ -163,9 +163,7 @@ fn where_a_copy_has_been(id: u32, map: *mut c_void) -> Option<u64> {
     (kept.map == map).then_some(kept.code)
 }
 
-fn what_an_agent_before_this_one_left(map: *mut c_void, shared: usize, size: usize)
-    -> Option<u64>
-{
+fn what_an_agent_before_this_one_left(map: *mut c_void, shared: usize) -> Option<u64> {
     let ask = unsafe { _mach_vm_region }?;
     let mut at = 0u64;
     for _ in 0..MOST_RANGES_TO_LOOK_THROUGH {
@@ -501,7 +499,7 @@ fn give_the_copy_a_home(id: u32, map: *mut c_void) -> Option<Home> {
     let shared = crate::writable_half_start() - base;
 
     let (code, seen_from_here, seen_size) = match where_a_copy_has_been(id, map)
-        .or_else(|| what_an_agent_before_this_one_left(map, shared, size))
+        .or_else(|| what_an_agent_before_this_one_left(map, shared))
     {
         Some(code) => {
             let private = (size - shared) as u64;

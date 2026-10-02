@@ -2,8 +2,6 @@
 // that you calculate from the page, and no kernel export is necessary. The two word sizes
 // differ only in the address of the self-map and the number of levels.
 
-use core::sync::atomic::{AtomicUsize, Ordering};
-
 use crate::kernel::MemoryRegion;
 
 pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
@@ -206,6 +204,7 @@ mod arch {
 #[cfg(target_arch = "x86_64")]
 mod arch {
     use super::*;
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     pub fn mapping_at(address: usize) -> Option<(u32, usize)> {
         for level in TOP_LEVEL..TABLE_LEVEL {
@@ -331,7 +330,7 @@ mod arch {
     }
 
     fn discover_self_map() -> Option<usize> {
-        let probe = discover_self_map as usize;
+        let probe = discover_self_map as *const () as usize;
         let expected = crate::winnt::virt_to_phys(probe as u64) & ADDRESS_MASK;
         if expected == 0 {
             return None;
@@ -370,12 +369,6 @@ mod arch {
 
     const LEVEL_SHIFTS: [usize; 4] = [39, 30, 21, 12];
     const LEVEL_INDEX_MASKS: [usize; 4] = [0x1ff, 0x3_ffff, 0x7ff_ffff, 0xf_ffff_ffff];
-    const LEVEL_BASES: [usize; 4] = [
-        0xffff_f6fb_7dbe_d000,
-        0xffff_f6fb_7da0_0000,
-        0xffff_f6fb_4000_0000,
-        0xffff_f680_0000_0000,
-    ];
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -582,6 +575,7 @@ pub use arch::present_span;
 
 use arch::{mapping_at, reprotect, walk_kernel_space};
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn protection_of(entry: u64, no_execute: u64) -> u32 {
     let mut prot = GUM_PAGE_READ;
     if (entry & PAGE_WRITEABLE as u64) != 0 {
@@ -593,6 +587,7 @@ fn protection_of(entry: u64, no_execute: u64) -> u32 {
     prot
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn apply_protection(entry: u64, gum_prot: u64, writeable: u64, no_execute: u64) -> u64 {
     let mut value = entry;
 
@@ -634,9 +629,13 @@ fn invalidate_page(address: usize) {
 }
 
 const PAGE_SIZE: usize = 4096;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PAGE_PRESENT: u32 = 0x1;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PAGE_WRITEABLE: u32 = 0x2;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PAGE_LARGE: u32 = 0x80;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PAGE_NO_EXECUTE: u64 = 1 << 63;
 
 pub(crate) const GUM_PAGE_READ: u32 = 0x1;

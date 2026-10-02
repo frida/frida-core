@@ -404,10 +404,6 @@ unsafe extern "C" fn say_which_one_first(errand: *mut c_void) -> *mut c_void {
     core::ptr::null_mut()
 }
 
-const STACK: usize = 1024 * 1024;
-const STACK_HEADROOM: u64 = 0x100;
-const PLAIN_ADDRESSES: u32 = 1;
-
 pub fn process_id() -> u32 {
     unsafe { ask(GET_PID, [0; 4]) as u32 }
 }
@@ -439,6 +435,7 @@ pub fn where_the_shared_code_is() -> Option<u64> {
 
 const WHERE_IS_THE_SHARED_CODE: i64 = 294;
 
+#[cfg(not(feature = "xnu-kext"))]
 pub fn code_memory_near(wanted: u64, size: usize) -> *mut u8 {
     let mut address = wanted;
     let told = unsafe {
@@ -453,6 +450,7 @@ pub fn code_memory_near(wanted: u64, size: usize) -> *mut u8 {
     take_memory(size).unwrap_or(0) as *mut u8
 }
 
+#[cfg(not(feature = "xnu-kext"))]
 fn own_task_map() -> u64 {
     own_task() as u64
 }
@@ -556,10 +554,6 @@ pub fn give_memory_back(address: u64, size: usize) {
     unsafe { trap(MACH_VM_DEALLOCATE, [task(), address, size as u64, 0]) };
 }
 
-fn set_protection(address: u64, size: usize, may: u64) -> bool {
-    unsafe { trap(MACH_VM_PROTECT, [task(), address, size as u64, may]) == KERN_SUCCESS }
-}
-
 unsafe fn task() -> u64 {
     unsafe { trap(TASK_SELF, [0; 4]) as u64 }
 }
@@ -604,12 +598,9 @@ pub(crate) unsafe fn ask7(number: i64, args: [u64; 7]) -> (i64, bool) {
     (answer, went_wrong != 0)
 }
 
+#[cfg(not(feature = "xnu-kext"))]
 pub(crate) fn own_task() -> u32 {
     unsafe { trap(TASK_SELF, [0; 4]) as u32 }
-}
-
-pub fn own_thread() -> u32 {
-    unsafe { trap(THREAD_SELF, [0; 4]) as u32 }
 }
 
 pub(crate) fn a_port_to_answer_on() -> u32 {
@@ -640,11 +631,8 @@ const ANYWHERE: u64 = 1;
 
 const MACH_VM_ALLOCATE: i64 = -10;
 const MACH_VM_DEALLOCATE: i64 = -12;
-const MACH_VM_PROTECT: i64 = -14;
 const TASK_SELF: i64 = -28;
 const REPLY_PORT: i64 = -26;
-const THREAD_SELF: i64 = -27;
-pub(crate) const MACH_MSG: i64 = -31;
 
 const COMPARE_AND_WAIT: u64 = 1;
 const WAKE_ALL: u64 = 0x100;

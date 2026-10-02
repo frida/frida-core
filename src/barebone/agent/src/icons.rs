@@ -87,13 +87,13 @@ fn write_identity(company: &[u8], program: &[u8], into: &mut [u8]) -> usize {
     };
 
     let mut written = 0;
-    let mut put = |byte: u8, into: &mut [u8], written: &mut usize| {
+    let put = |byte: u8, into: &mut [u8], written: &mut usize| {
         if *written != into.len() {
             into[*written] = byte;
             *written += 1;
         }
     };
-    let mut put_word = |word: &[u8], into: &mut [u8], written: &mut usize| {
+    let put_word = |word: &[u8], into: &mut [u8], written: &mut usize| {
         for byte in word {
             if byte.is_ascii_alphanumeric() {
                 put(byte.to_ascii_lowercase(), into, written);

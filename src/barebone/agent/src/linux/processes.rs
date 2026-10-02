@@ -272,6 +272,7 @@ fn current_time() -> (u64, u64) {
     (0, 0)
 }
 
+#[cfg(not(target_arch = "x86"))]
 #[repr(C)]
 struct Timespec {
     seconds: i64,

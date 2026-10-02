@@ -8,28 +8,31 @@ use crate::{
     FridaCommand,
     bindings::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumPageProtection_GUM_PAGE_READ,
-        _GumPageProtection_GUM_PAGE_WRITE, _GumRwxSupport_GUM_RWX_FULL,
-        _GumRwxSupport_GUM_RWX_NONE, GArray,
-        GumDebugSymbolDetails, GumFoundRangeFunc, GumFoundThreadFunc, GumMemoryRange,
+        _GumPageProtection_GUM_PAGE_WRITE, _GumRwxSupport_GUM_RWX_NONE,
+        GumFoundRangeFunc, GumFoundThreadFunc, GumMemoryRange,
         GumCpuContext, GumModuleRegistry, GumPageProtection, GumRangeDetails, GumRwxSupport,
         GumThreadDetails, GumThreadFlags, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT,
         GumThreadFlags_GUM_THREAD_FLAGS_STATE, GumThreadId,
-        GumThreadRegistry, gum_barebone_register_thread,
-        gum_barebone_unregister_thread,
-        g_array_append_vals, g_array_new, g_object_unref, g_strdup, g_variant_get_boolean,
-        g_variant_get_uint64, g_variant_new, g_variant_new_fixed_array, g_variant_type_free,
-        g_variant_type_new, g_variant_unref, gboolean, gchar, gconstpointer, gpointer, gsize, guint,
-        gum_barebone_register_module,
-        gum_barebone_try_remap_writable_pages as _gum_barebone_try_remap_writable_pages,
-        gum_mprotect, gum_query_page_size,
+        GumThreadRegistry, gum_barebone_register_thread, g_variant_get_uint64,
+        g_variant_new_fixed_array, g_variant_type_free, g_variant_type_new, g_variant_unref,
+        gboolean, gchar, gconstpointer, gpointer, gsize, guint, gum_mprotect, gum_query_page_size,
     },
     gum::{self, FoundExportCallback},
     host_rpc, kernel, libc,
 };
+#[cfg(feature = "xnu-core")]
+use crate::bindings::{g_object_unref, gum_barebone_register_module};
+#[cfg(feature = "linux-injected")]
+use crate::bindings::gum_barebone_unregister_thread;
+#[cfg(not(feature = "xnu-kext"))]
+use crate::bindings::{
+    g_variant_get_boolean, g_variant_new,
+    gum_barebone_try_remap_writable_pages as _gum_barebone_try_remap_writable_pages,
+};
 use alloc::collections::{BTreeMap, BTreeSet};
+#[cfg(feature = "xnu-core")]
 use alloc::format;
 use alloc::vec::Vec;
-use core::ffi::CStr;
 use core::mem::size_of;
 use core::ptr;
 
@@ -41,13 +44,6 @@ const KERNEL_PATH: &str = "/System/Library/Kernels/kernel";
 const MODULE_DIRECTORY: &str = "/System/Library/Extensions/";
 #[cfg(feature = "xnu-core")]
 const MODULE_SUFFIX: &str = ".kext";
-
-#[cfg(feature = "linux-injected")]
-const KERNEL_PATH: &str = "/boot/vmlinux";
-#[cfg(feature = "linux-injected")]
-const MODULE_DIRECTORY: &str = "/lib/modules/";
-#[cfg(feature = "linux-injected")]
-const MODULE_SUFFIX: &str = ".ko";
 
 const SHADOW_HEADER: usize = 24;
 
@@ -139,7 +135,7 @@ fn remap_agent_pages(first_page: gpointer, _n_pages: guint) -> gpointer {
 fn writable_in_place(first_page: gpointer, n_pages: guint) -> bool {
     let size = n_pages as usize * unsafe { gum_query_page_size() } as usize;
 
-    kernel::set_protection(first_page as u64, size, _GumPageProtection_GUM_PAGE_RWX)
+    kernel::set_protection(first_page as u64, size, GUM_PAGE_RWX)
 }
 
 #[cfg(not(feature = "xnu-kext"))]
@@ -177,8 +173,8 @@ fn remap_agent_pages_through_host(first_page: gpointer, n_pages: guint) -> gpoin
     }
 }
 
-#[cfg(feature = "linux-injected")]
-const _GumPageProtection_GUM_PAGE_RWX: u32 = 7;
+#[cfg(all(feature = "linux-injected", not(target_arch = "arm")))]
+const GUM_PAGE_RWX: u32 = 7;
 
 unsafe fn what_changed(first_page: u64, shadow: *const u8, total: usize) -> Option<(usize, usize)> {
     let live = unsafe { core::slice::from_raw_parts(first_page as *const u8, total) };
@@ -223,17 +219,13 @@ pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages
     #[cfg(feature = "xnu-kext")]
     if let Some(base) = crate::xnu::the_page_behind(writable as u64) {
         let size = _n_pages as usize * unsafe { gum_query_page_size() } as usize;
-        unsafe {
-            libc::__clear_cache(base as *const u8, (base + size as u64) as *const u8);
-        }
+        libc::__clear_cache(base as *const u8, (base + size as u64) as *const u8);
         return;
     }
 
     if let Some(executable) = aliases().remove(&(writable as u64)) {
         let size = _n_pages as usize * unsafe { gum_query_page_size() } as usize;
-        unsafe {
-            libc::__clear_cache(executable as *const u8, (executable + size as u64) as *const u8);
-        }
+        libc::__clear_cache(executable as *const u8, (executable + size as u64) as *const u8);
         return;
     }
 
@@ -241,10 +233,8 @@ pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages
         #[cfg(all(feature = "linux-injected", not(target_arch = "arm")))]
         {
             let size = _n_pages as usize * unsafe { gum_query_page_size() } as usize;
-            unsafe {
-                libc::__clear_cache(writable as *const u8,
-                    (writable as u64 + size as u64) as *const u8);
-            }
+            libc::__clear_cache(writable as *const u8,
+                (writable as u64 + size as u64) as *const u8);
         }
 
         return;
@@ -368,6 +358,7 @@ fn protect_here(address: u64, size: usize, prot: u32) -> bool {
     ask_the_host_to_protect(address, size, prot)
 }
 
+#[cfg(not(feature = "xnu-kext"))]
 pub fn ask_the_host_to_protect(address: u64, size: usize, prot: u32) -> bool {
     if !crate::transport_is_up() {
         return true;
@@ -383,6 +374,7 @@ pub fn ask_the_host_to_protect(address: u64, size: usize, prot: u32) -> bool {
     granted
 }
 
+#[cfg(not(feature = "xnu-kext"))]
 fn the_host_grants_it(address: u64, size: usize, prot: u32) -> bool {
     unsafe {
         let payload = g_variant_new(c"(ttu)".as_ptr(), address, size as u64, prot);
@@ -403,6 +395,7 @@ fn the_host_grants_it(address: u64, size: usize, prot: u32) -> bool {
 // bridge, which leaves this CPU's TLB holding the stale translation. Stalker
 // flips a slab page RW then RX in place, so without this the freeze never takes
 // effect and executing the page faults with a permission abort.
+#[cfg(not(feature = "xnu-kext"))]
 unsafe fn flush_tlb_range(address: u64, size: u64) {
     let page_size = unsafe { gum_query_page_size() } as u64;
     let start = address & !(page_size - 1);
@@ -411,7 +404,7 @@ unsafe fn flush_tlb_range(address: u64, size: u64) {
     unsafe { flush_pages(start, end, page_size) };
 }
 
-#[cfg(target_arch = "arm")]
+#[cfg(all(not(feature = "xnu-kext"), target_arch = "arm"))]
 unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
     unsafe {
         core::arch::asm!("dsb ish", options(nostack, preserves_flags));
@@ -425,7 +418,7 @@ unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(not(feature = "xnu-kext"), target_arch = "aarch64"))]
 unsafe fn flush_pages(start: u64, end: u64, page_size: u64) {
     unsafe {
         core::arch::asm!("dsb ish", options(nostack, preserves_flags));
@@ -505,7 +498,7 @@ fn release_pages_now(at: gpointer, size: gsize) {
 
 #[cfg(feature = "xnu-kext")]
 fn remember_slab_of(at: gpointer, size: gsize) {
-    unsafe { gum::register_slab(at as u64, size as usize) };
+    gum::register_slab(at as u64, size as usize);
     crate::xnu::remember_what_we_took(at as u64, size as usize, true);
 }
 
@@ -553,13 +546,11 @@ pub extern "C" fn gum_memory_allocate(
     let ptr = kernel::alloc_heap(size as usize);
     #[cfg(not(feature = "xnu-core"))]
     let _ = address;
-    unsafe {
-        #[cfg(not(feature = "xnu-kext"))]
-        core::ptr::write_bytes(ptr, 0, size as usize);
+    #[cfg(not(feature = "xnu-kext"))]
+    unsafe { core::ptr::write_bytes(ptr, 0, size as usize) };
 
-        if may_run {
-            gum::register_slab(ptr as u64, size as usize);
-        }
+    if may_run {
+        gum::register_slab(ptr as u64, size as usize);
     }
 
     #[cfg(not(feature = "xnu-kext"))]
@@ -674,12 +665,12 @@ pub extern "C" fn gum_barebone_on_thread_registry_deactivating(_registry: *mut G
     unsafe { THREAD_REGISTRY = ptr::null_mut() };
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
+#[cfg(feature = "linux-injected")]
 pub(crate) fn thread_appeared(id: u32) {
     announce_thread(id);
 }
 
-#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
+#[cfg(feature = "linux-injected")]
 pub(crate) fn thread_vanished(id: u32) {
     let registry = unsafe { THREAD_REGISTRY };
     if registry.is_null() {
@@ -812,7 +803,7 @@ pub extern "C" fn _gum_process_enumerate_ranges(
         return;
     };
 
-    let mut report = |base: u64, size: u64, protection: u32| {
+    let report = |base: u64, size: u64, protection: u32| {
         if (protection & prot as u32) != prot as u32 {
             return;
         }

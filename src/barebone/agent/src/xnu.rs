@@ -884,30 +884,6 @@ pub fn write_through_a_writable_alias(address: u64, data: *const u8, len: usize)
 }
 
 #[cfg(feature = "xnu-kext")]
-fn alias_of(physical: u64, page: usize) -> *mut c_void {
-    let held = unsafe { aliases() };
-    if let Some(known) = held.get(&physical) {
-        return *known as *mut c_void;
-    }
-
-    let made = map_io(physical, page as u64);
-    if !made.is_null() {
-        held.insert(physical, made as u64);
-    }
-
-    made
-}
-
-#[cfg(feature = "xnu-kext")]
-unsafe fn aliases() -> &'static mut alloc::collections::BTreeMap<u64, u64> {
-    unsafe { (&raw mut ALIASES).as_mut().unwrap() }
-}
-
-#[cfg(feature = "xnu-kext")]
-static mut ALIASES: alloc::collections::BTreeMap<u64, u64> =
-    alloc::collections::BTreeMap::new();
-
-#[cfg(feature = "xnu-kext")]
 fn hold_the_books() {
     while BOOKS
         .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
@@ -948,20 +924,6 @@ fn copy_the_words_that_differ(from: *const u8, have: *const u8, to: *mut u8, len
         if wanted != already {
             unsafe { (to.add(step) as *mut u32).write_volatile(wanted) };
         }
-    }
-
-    true
-}
-
-#[cfg(feature = "xnu-kext")]
-fn copy_as_words(from: *const u8, to: *mut u8, len: usize) -> bool {
-    if (to as usize) % 4 != 0 || len % 4 != 0 {
-        return false;
-    }
-
-    for step in (0..len).step_by(4) {
-        let word = unsafe { (from.add(step) as *const u32).read_unaligned() };
-        unsafe { (to.add(step) as *mut u32).write_volatile(word) };
     }
 
     true

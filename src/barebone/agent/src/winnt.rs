@@ -22,13 +22,13 @@ pub use crate::winnt_user::{
 };
 
 #[cfg(target_arch = "x86")]
-#[cfg(target_arch = "x86")]
 type ThreadChangeRoutine = unsafe extern "stdcall" fn(usize, usize, u8);
 #[cfg(target_arch = "x86_64")]
 type ThreadChangeRoutine = unsafe extern "win64" fn(usize, usize, u8);
 #[cfg(target_arch = "aarch64")]
 type ThreadChangeRoutine = unsafe extern "C" fn(usize, usize, u8);
 
+#[cfg(target_arch = "x86")]
 macro_rules! windows_fn {
     ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
     ($($argument:ty),* $(,)? => $result:ty) => {
@@ -94,7 +94,6 @@ pub fn panic(msg: &str) -> ! {
     unsafe {
         (_KeBugCheckEx)(MANUALLY_INITIATED_CRASH, msg.as_ptr() as usize, 0, 0, 0);
     }
-    loop {}
 }
 
 const MANUALLY_INITIATED_CRASH: u32 = 0xe2;
@@ -304,10 +303,6 @@ static mut SHAREABLE_WAKE_EVENT: *mut c_void = core::ptr::null_mut();
 static mut SHAREABLE_TOKEN: *const u8 = core::ptr::null();
 
 // The kernel has no futex. Thus each token uses an event, which the code makes on first use.
-fn event_for(token: *const u8) -> *mut c_void {
-    event_in(slot_for_token(token))
-}
-
 fn event_in(slot: usize) -> *mut c_void {
     loop {
         let existing = EVENTS[slot].load(Ordering::Acquire);
@@ -1046,7 +1041,7 @@ pub fn install_fault_reporter() {
         let (base, size) = crate::own_code();
         let entry = (shadow + SYNCHRONOUS_ENTRY_OFFSET) as *mut u8;
         FAULT_CONTROL = FaultControl {
-            thunk: frida_winnt_fault_thunk as usize as u64,
+            thunk: frida_winnt_fault_thunk as *const () as usize as u64,
             chain: entry.byte_add(chain_offset()) as u64,
             base: base as u64,
             size: size as u64,
@@ -1198,9 +1193,9 @@ fn pool_anchor() -> Option<usize> {
     None
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(target_arch = "aarch64")]
 const POOL_WINDOW: usize = 1 << 32;
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 const POOL_REACH: usize = 1 << 29;
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const POOL_GRANULARITY: usize = 16;
@@ -1389,21 +1384,6 @@ const BRANCH_LINK_MASK: u32 = 0xfc00_0000;
 const BRANCH_LINK: u32 = 0x9400_0000;
 
 #[cfg(target_arch = "aarch64")]
-const SET_VBAR: u32 = 0xd518_c000;
-#[cfg(target_arch = "aarch64")]
-const SET_VBAR_MASK: u32 = 0xffff_ffe0;
-#[cfg(target_arch = "aarch64")]
-const ADRP_MASK: u32 = 0x9f00_001f;
-#[cfg(target_arch = "aarch64")]
-const ADRP: u32 = 0x9000_0000;
-#[cfg(target_arch = "aarch64")]
-const ADD_MASK: u32 = 0xffc0_03ff;
-#[cfg(target_arch = "aarch64")]
-const ADD: u32 = 0x9100_0000;
-#[cfg(target_arch = "aarch64")]
-const LOAD: u32 = 0xf940_0000;
-
-#[cfg(target_arch = "aarch64")]
 fn vectors_in_use() -> *mut u64 {
     let Some(image) = image_containing(current_vectors()) else {
         return core::ptr::null_mut();
@@ -1444,7 +1424,7 @@ fn image_size(image: usize) -> Option<usize> {
     }
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(target_arch = "aarch64")]
 fn image_containing(address: usize) -> Option<usize> {
     unsafe {
         (*core::ptr::addr_of!(crate::MODULE_INFO))
@@ -1581,8 +1561,6 @@ struct FaultControl {
 #[cfg(target_arch = "aarch64")]
 static mut FAULT_CONTROL: FaultControl =
     FaultControl { thunk: 0, chain: 0, base: 0, size: 0 };
-#[cfg(target_arch = "aarch64")]
-static mut ORIGINAL_ENTRY: u32 = 0;
 
 #[cfg(target_arch = "aarch64")]
 unsafe extern "C" {
@@ -1662,8 +1640,6 @@ macro_rules! read_exception_register {
 use read_exception_register;
 
 #[cfg(target_arch = "aarch64")]
-const FRAME_BYTES: usize = 288;
-#[cfg(target_arch = "aarch64")]
 const RESUME_STACK_SLOT: usize = 31;
 
 #[cfg(target_arch = "aarch64")]
@@ -1695,6 +1671,7 @@ const SYNDROME_BREAKPOINT: u32 = 0x30;
 #[cfg(target_arch = "aarch64")]
 const SYNDROME_SOFTWARE_STEP: u32 = 0x32;
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn descriptor_table_base() -> usize {
     let mut descriptor = [0u8; DESCRIPTOR_SIZE];
     unsafe {
@@ -1709,6 +1686,7 @@ const GATE_SIZE: usize = 8;
 #[cfg(target_arch = "x86_64")]
 const GATE_SIZE: usize = 16;
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const DESCRIPTOR_SIZE: usize = 2 + core::mem::size_of::<usize>();
 
 // Report only the faults from our own code. Send the other faults, primarily the paging
@@ -1717,6 +1695,7 @@ const DESCRIPTOR_SIZE: usize = 2 + core::mem::size_of::<usize>();
 // A long-mode frame always contains the stack pointer. Thus write the values from Gum into
 // the frame.
 
+#[cfg(target_arch = "aarch64")]
 fn handle(fault: u32, pc: u64, cpu_context: &mut crate::bindings::GumCpuContext) -> bool {
     handle_with(fault, pc, faulting_address(), cpu_context)
 }
@@ -1735,11 +1714,6 @@ fn handle_with(fault: u32, pc: u64, accessed: usize,
     handled != 0
 }
 
-#[cfg(target_arch = "x86")]
-const PUSHED_REGISTERS: usize = 8;
-#[cfg(target_arch = "x86_64")]
-const PUSHED_REGISTERS: usize = 16;
-
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn exception_type_for(fault: u32) -> crate::bindings::GumExceptionType {
     use crate::bindings::*;
@@ -1751,17 +1725,10 @@ fn exception_type_for(fault: u32) -> crate::bindings::GumExceptionType {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn faulting_address() -> usize {
-    let address: usize;
-    unsafe {
-        core::arch::asm!("mov {0}, cr2", out(reg) address,
-            options(nomem, nostack, preserves_flags));
-    }
-    address
-}
-
 const INVALID_OPCODE: u32 = 6;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const GENERAL_PROTECTION: u32 = 13;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PAGE_FAULT: u32 = 14;
 
 pub fn enumerate_threads(found: &mut dyn FnMut(ThreadInfo), with_registers: bool) {
@@ -2023,7 +1990,7 @@ pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
 
 #[cfg(target_arch = "x86")]
 pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
-    let mut field = |offset: usize, value: u32| unsafe {
+    let field = |offset: usize, value: u32| unsafe {
         base.add(offset).cast::<u32>().write_unaligned(value)
     };
 
@@ -2065,7 +2032,7 @@ pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
 
 #[cfg(target_arch = "x86_64")]
 pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
-    let mut field = |offset: usize, value: u64| unsafe {
+    let field = |offset: usize, value: u64| unsafe {
         base.add(offset).cast::<u64>().write_unaligned(value)
     };
 
@@ -2109,7 +2076,7 @@ pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
 
 #[cfg(target_arch = "aarch64")]
 pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
-    let mut field = |offset: usize, value: u64| unsafe {
+    let field = |offset: usize, value: u64| unsafe {
         base.add(offset).cast::<u64>().write_unaligned(value)
     };
 
@@ -2368,33 +2335,6 @@ unsafe fn read_string_from(process: *mut c_void, address: usize, out: &mut [u8])
 
 static mut WIDE: [u8; MAX_COMMAND_LINE_SIZE] = [0; MAX_COMMAND_LINE_SIZE];
 
-// This read can cause a fault if the page is not in memory. At PASSIVE_LEVEL the pager gets
-// the page again.
-
-unsafe fn read_user_string(address: usize, out: &mut [u8]) {
-    unsafe {
-        let Some(length) = try_read_pointer(address).map(|word| word as u16 as usize) else {
-            return;
-        };
-        let Some(buffer) = try_read_pointer(address + UNICODE_STRING_BUFFER_OFFSET) else {
-            return;
-        };
-        if buffer == 0 {
-            return;
-        }
-
-        let limit = out.len() - 1;
-        let mut written = 0;
-        for i in 0..length.min(limit) / 2 {
-            let Some(word) = try_read_pointer(buffer + i * 2) else {
-                break;
-            };
-            written += encode_utf8(word as u16, &mut out[written..limit]);
-        }
-        out[written] = 0;
-    }
-}
-
 fn encode_utf8(c: u16, out: &mut [u8]) -> usize {
     if c < 0x80 && !out.is_empty() {
         out[0] = c as u8;
@@ -2537,7 +2477,6 @@ pub fn place_agent_in_process(pid: u32) -> bool {
                 wake,
                 started: false,
                 text: placed.seen_by_process,
-                size: own.size as u64,
                 stack: 0,
                 step: 0,
                 carrier: core::ptr::null_mut(),
@@ -2557,7 +2496,6 @@ pub struct Placement {
     pub arena_mdl: *mut c_void,
 }
 
-const MAX_PLACEMENT_TRIES: usize = 8;
 const USER_MODE: u8 = 1;
 const MM_CACHED: u32 = 1;
 const NORMAL_PAGE_PRIORITY: u32 = 16;
@@ -2673,17 +2611,16 @@ pub fn stop_copies() {
 
 static mut TEARDOWN_TOKEN: u8 = 0;
 
-const TEARDOWN_GRACE_US: u64 = 500_000;
-
 pub fn start_agent_in_process(pid: u32) -> u32 {
     let Some(target) = (unsafe { targets().get(&pid) }) else {
         return 0;
     };
     let (arena, seen) = (target.arena, target.seen);
     let own = unsafe { core::ptr::addr_of!(crate::OWN_RANGE).read() }.base_address as usize;
-    let bootstrap = target.text + (crate::winnt_user::frida_winnt_user_bootstrap as usize
-        - own) as u64;
-    let entry = target.text + (crate::winnt_user::frida_winnt_user_main as usize - own) as u64;
+    let bootstrap = target.text
+        + (crate::winnt_user::frida_winnt_user_bootstrap as *const () as usize - own) as u64;
+    let entry = target.text
+        + (crate::winnt_user::frida_winnt_user_main as *const () as usize - own) as u64;
 
     if !target.started {
         let mut process: *mut c_void = core::ptr::null_mut();
@@ -2768,16 +2705,6 @@ fn carry_image_across(process: *mut c_void, whole: u64, private_offset: usize, s
 
         carried
     }
-}
-
-fn put_a_copy_in_the_session_server(pid: u32) {
-    let server = session_server_pid();
-    if server == 0 || server == pid || arena_for_pid(server).is_some() {
-        return;
-    }
-
-    place_agent_in_process(server);
-    start_agent_in_process(server);
 }
 
 fn introduce_to_session_server(pid: u32) {
@@ -2984,7 +2911,7 @@ fn synthesize_zw_stub(index: u32) -> usize {
 // The image is further from pool memory than a relative jump can reach here, thus the jump to
 // the dispatcher is an indirect one.
 #[cfg(target_arch = "x86_64")]
-unsafe fn emit_zw_stub(template: *const u8, stub: *mut u8, index: u32,
+unsafe fn emit_zw_stub(template: *const u8, _stub: *mut u8, index: u32,
         put: &mut dyn FnMut(&[u8])) {
     unsafe {
         let linkage = template.add(ZW_STUB_LEA_NEXT) as u64
@@ -3483,9 +3410,9 @@ fn allocate_in_process(process_handle: *mut c_void, size: usize, protection: u32
 // This is a system thread, but it uses the address space of the target. The code after the
 // descent runs in ring 3.
 const STACK_SIZE: usize = 256 * 1024;
-const BLOCK_SIZE: usize = 4096;
 const PROCESS_ALL_ACCESS: u32 = 0x1f_0fff;
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const INITIAL_EFLAGS: u64 = 0x200;
 
 // The primitives that differ between the two halves. The kernel half runs on KERNEL, and the
@@ -4124,19 +4051,12 @@ struct Target {
     started: bool,
     introduced: bool,
     text: u64,
-    size: u64,
     stack: u64,
     step: u64,
     carrier: *mut c_void,
     arena_mdl: *mut c_void,
 }
 
-impl Target {
-    fn private_offset(&self) -> u64 {
-        crate::writable_half_start() as u64
-            - unsafe { core::ptr::addr_of!(crate::OWN_RANGE).read() }.base_address
-    }
-}
 
 pub const ARENA_SIZE: usize = 0x1000 + 2 * FRAME_BUFFER_SIZE;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
@@ -4682,18 +4602,11 @@ pub fn set_kernel_base(base: u64) {
 
 static KERNEL_BASE: AtomicUsize = AtomicUsize::new(0);
 
-unsafe extern "C" {
-    fn frida_winnt_run_on_stack(stack_top: *mut u8, entry: unsafe extern "C" fn(*mut c_void),
-        context: *mut c_void);
-}
-
 // To give a fault back to the kernel, remove only the vector from the frame. Thus the error
 // code stays where the previous handler reads it.
 #[cfg(target_arch = "x86")]
 core::arch::global_asm!(
     r#"
-.intel_syntax noprefix
-
 .global frida_winnt_run_on_stack
 frida_winnt_run_on_stack:
     push ebp
@@ -4719,8 +4632,6 @@ frida_winnt_run_on_stack:
 #[cfg(target_arch = "x86_64")]
 core::arch::global_asm!(
     r#"
-.intel_syntax noprefix
-
 .global frida_winnt_run_on_stack
 frida_winnt_run_on_stack:
     push rbp

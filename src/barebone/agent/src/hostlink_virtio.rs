@@ -51,7 +51,9 @@ const F_MULTIPORT: u64 = 1u64 << 1;
 
 const INT_VRING: u32 = 1;
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PCI_CONFIG_ADDRESS: u16 = 0xcf8;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PCI_CONFIG_DATA: u16 = 0xcfc;
 
 const PCI_VENDOR_VIRTIO: u16 = 0x1af4;
@@ -62,14 +64,18 @@ const PCI_COMMAND: u8 = 0x04;
 const PCI_CAP_LIST_POINTER: u8 = 0x34;
 const PCI_INTERRUPT_LINE: u8 = 0x3c;
 const PCI_BASE_ADDRESS_0: u8 = 0x10;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PCI_INTERRUPT_PIN: u8 = 0x3d;
 const PCI_COMMAND_INTX_DISABLE: u32 = 0x400;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const ISA_BRIDGE_DEVFN: u8 = 0x08;
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 const ECAM_DEVFN_SHIFT: usize = 12;
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 const ECAM_BUS_SIZE: u64 = 256 * 4096;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PIRQ_ROUTE: u8 = 0x60;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PIRQ_DISABLED: u32 = 1 << 7;
 
 const PCI_COMMAND_MEMORY: u32 = 1 << 1;
@@ -867,6 +873,7 @@ extern "C" fn isr_wake(token: *mut c_void, _refcon: *mut c_void, _nub: *mut c_vo
     crate::nudge_the_loop(token as *const u8);
 }
 
+#[cfg(not(feature = "xnu-core"))]
 pub fn a_turn_is_wanted() -> bool {
     A_TURN_IS_WANTED.load(core::sync::atomic::Ordering::Acquire)
 }
@@ -903,9 +910,7 @@ impl Regs {
                 while r8(p.common, COMMON_STATUS) != 0 {
                     left -= 1;
                     if left == 0 {
-                        unsafe {
-                            kernel::log("virtio: reset not taken\n");
-                        }
+                        kernel::log("virtio: reset not taken\n");
                         break;
                     }
                 }
@@ -1021,6 +1026,7 @@ impl Regs {
 
 #[derive(Copy, Clone)]
 struct Bus {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", feature = "linux-injected"))]
     number: u8,
     #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     config: *mut u8,
@@ -1035,7 +1041,11 @@ impl Bus {
     #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     fn first(ecam: u64) -> Self {
         let config = kernel::map_io(ecam, ECAM_BUS_SIZE) as *mut u8;
-        Bus { number: 0, config }
+        Bus {
+            #[cfg(feature = "linux-injected")]
+            number: 0,
+            config,
+        }
     }
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -1046,7 +1056,9 @@ impl Bus {
     #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     fn function(&self, devfn: u8) -> PciDevice {
         PciDevice {
+            #[cfg(feature = "linux-injected")]
             bus: self.number,
+            #[cfg(feature = "linux-injected")]
             devfn,
             config: unsafe { self.config.add((devfn as usize) << ECAM_DEVFN_SHIFT) },
         }
@@ -1055,7 +1067,9 @@ impl Bus {
 
 #[derive(Copy, Clone)]
 struct PciDevice {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", feature = "linux-injected"))]
     bus: u8,
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", feature = "linux-injected"))]
     devfn: u8,
     #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     config: *mut u8,
@@ -1207,6 +1221,7 @@ impl PciDevice {
             .find(|candidate| (candidate & PIRQ_DISABLED) == 0)
     }
 
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", feature = "linux-injected"))]
     fn line_in_config(&self) -> Option<u32> {
         match self.read_config_byte(PCI_INTERRUPT_LINE) {
             0 => None,
@@ -1232,6 +1247,7 @@ impl PciDevice {
         (self.read_config(offset) >> ((offset & 3) * 8)) as u8
     }
 
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     fn write_config_byte(&self, offset: u8, value: u8) {
         let shift = (offset & 3) * 8;
         let others = self.read_config(offset) & !(0xff << shift);

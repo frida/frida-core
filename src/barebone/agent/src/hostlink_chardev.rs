@@ -101,6 +101,7 @@ impl Drop for Hostlink {
     }
 }
 
+#[cfg(feature = "xnu-kext")]
 pub fn a_turn_is_wanted() -> bool {
     unsafe { frida_kmod_link_pending() }
 }
@@ -115,5 +116,6 @@ unsafe extern "C" {
     fn frida_kmod_link_close();
     fn frida_kmod_link_send(data: *const c_void, size: usize) -> c_int;
     fn frida_kmod_link_recv(data: *mut c_void, size: usize) -> isize;
+    #[cfg(feature = "xnu-kext")]
     fn frida_kmod_link_pending() -> bool;
 }

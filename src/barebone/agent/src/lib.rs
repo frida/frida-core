@@ -25,19 +25,12 @@ use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use bindings::{
-    GAsyncResult, GBytes, GError, GMainContext, GObject, GSource, GSourceFunc, GSourceFuncs,
-    GVariant, GumMemoryRange, gboolean, g_main_context_acquire, g_main_context_check,
-    g_main_context_dispatch, g_main_context_prepare, g_main_context_query, g_main_context_release,
-    g_main_context_wakeup,
-    g_source_attach, g_source_new, g_source_unref,
+    GAsyncResult, GBytes, GError, GMainContext, GObject, GVariant, GumMemoryRange,
     GumScript, GumScriptBackend, g_error_free, g_free, g_main_context_iteration,
     g_main_context_push_thread_default, g_memdup2, g_object_unref, g_variant_check_format_string,
-    g_variant_get, g_variant_get_boolean, g_variant_get_child_value, g_variant_get_data,
-    g_variant_get_size, g_variant_get_string, g_variant_get_strv,
+    g_variant_get, g_variant_get_data, g_variant_get_size, g_variant_get_string,
     g_variant_get_uint32, g_variant_new, g_variant_new_from_data, g_variant_new_string,
     g_variant_new_tuple, g_variant_new_uint32, g_variant_type_free, g_variant_type_new,
-    g_variant_builder_add, g_variant_builder_add_value, g_variant_builder_close,
-    g_variant_builder_end, g_variant_builder_new, g_variant_builder_open,
     g_variant_new_fixed_array, g_variant_get_fixed_array, g_bytes_new, g_bytes_get_data,
     g_bytes_unref, GVariantType,
     g_variant_unref, gchar, gpointer, gsize, gum_script_backend_create,
@@ -47,12 +40,20 @@ use bindings::{
     gum_script_scheduler_get_js_context, gum_script_set_message_handler, gum_script_unload,
     gum_script_unload_finish, gum_stalker_exclude,
 };
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
+use bindings::{
+    GSource, GSourceFunc, GSourceFuncs, gboolean, g_main_context_wakeup, g_source_attach,
+    g_source_new, g_source_unref, g_variant_builder_add, g_variant_builder_add_value,
+    g_variant_builder_close, g_variant_builder_end, g_variant_builder_new, g_variant_builder_open,
+    g_variant_get_boolean, g_variant_get_child_value,
+};
 
 mod ffi;
 mod glib;
 mod gthread;
 mod gum;
 mod libc;
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 mod ring;
 
 pub mod kernel;
@@ -732,10 +733,6 @@ mod entrypoint_linux {
         STOP_REQUESTED.load(Ordering::Acquire)
     }
 
-    fn start_worker() {
-        kernel::spawn_thread(worker, 12345usize as *mut c_void);
-    }
-
     unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
         unsafe {
             kernel::log("frida: worker entry\n\0");
@@ -844,7 +841,7 @@ impl Transport {
 
 // Configuration space is reached through I/O ports where there are any, and only a machine
 // without them is told where it is mapped instead.
-#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+#[cfg(all(feature = "blob", any(target_arch = "aarch64", target_arch = "arm")))]
 unsafe fn where_configuration_space_is_mapped(transport: *mut GVariant) -> u64 {
     use crate::bindings::{g_variant_get_child_value, g_variant_get_uint64, g_variant_unref};
 
@@ -857,7 +854,7 @@ unsafe fn where_configuration_space_is_mapped(transport: *mut GVariant) -> u64 {
     }
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(all(feature = "blob", any(target_arch = "x86", target_arch = "x86_64")))]
 unsafe fn where_configuration_space_is_mapped(_transport: *mut GVariant) -> u64 {
     0
 }
@@ -887,6 +884,7 @@ fn transport_set(driver: Transport) {
     }
 }
 
+#[cfg(feature = "blob")]
 fn tell_the_host_we_are_listening() {
     unsafe {
         let message = g_variant_new(
@@ -943,7 +941,7 @@ static mut SCRIPTS: BTreeMap<u32, *mut GumScript> = BTreeMap::new();
 static NEXT_SCRIPT_ID: AtomicU32 = AtomicU32::new(1);
 // A copy of the agent runs the same code, but it cannot share what gets written to. Thus keep
 // the writable half as it is before anything writes to it.
-#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu"))]
 pub(crate) unsafe fn preserve_writable_half() {
     let size = writable_half_size();
     let pristine = kernel::alloc(size);
@@ -1036,9 +1034,11 @@ fn writable_half_size() -> usize {
 
 // A relocation names the slot first, and the rest of it says the same thing as the value that
 // the slot already holds.
-#[cfg(any(target_arch = "x86", target_arch = "arm"))]
+#[cfg(all(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+    feature = "xnu-core"), any(target_arch = "x86", target_arch = "arm")))]
 const RELOCATION_SIZE: usize = 8;
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
+    feature = "xnu-core"), any(target_arch = "x86_64", target_arch = "aarch64")))]
 const RELOCATION_SIZE: usize = 24;
 
 #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
@@ -1071,6 +1071,7 @@ unsafe extern "C" {
 
 // A copy runs at a base of its own, thus the half that placed it there says where. The
 // Stalker keeps out of this range: it must not instrument the runtime it runs on.
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "xnu-core"))]
 pub(crate) unsafe fn set_own_range(base: u64, size: u64) {
     unsafe {
         OWN_RANGE = GumMemoryRange {
@@ -1082,17 +1083,19 @@ pub(crate) unsafe fn set_own_range(base: u64, size: u64) {
 
 #[cfg(feature = "winnt")]
 pub(crate) fn own_code() -> (usize, usize) {
-    let start = entrypoint_blob::_start as usize;
+    let start = entrypoint_blob::_start as *const () as usize;
 
     (start, (&raw const _agent_private_start as usize) - start)
 }
 
+#[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 pub(crate) fn own_range() -> (usize, usize) {
     let range = unsafe { ptr::addr_of!(OWN_RANGE).read() };
 
     (range.base_address as usize, range.size as usize)
 }
 
+#[cfg(feature = "win9x")]
 pub(crate) fn own_range_contains(address: u32) -> bool {
     let range = unsafe { ptr::addr_of!(OWN_RANGE).read() };
     let base = range.base_address as u32;
@@ -1115,6 +1118,7 @@ unsafe fn init_gum() {
 
 // The Exceptor installs fault handling for the full machine, which only the kernel half may
 // do. A copy in a process would take it from the half that uses it.
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 pub(crate) unsafe fn init_gum_without_exceptor() {
     unsafe { init_gum_with_exceptor(false) };
 }
@@ -1190,6 +1194,7 @@ pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
 
 static mut JS_THREAD_ID: u64 = 0;
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 pub(crate) fn on_js_thread() -> bool {
     let id = unsafe { JS_THREAD_ID };
     id != 0 && kernel::current_thread_id() == id
@@ -1201,6 +1206,7 @@ pub(crate) static STOP_REQUESTED: core::sync::atomic::AtomicBool =
 #[unsafe(no_mangle)]
 pub static mut frida_agent_left: u32 = 0;
 
+#[cfg(any(feature = "win9x", all(feature = "linux-injected", target_arch = "aarch64")))]
 pub(crate) fn note_unhandled_fault(vector: u64, pc: u64, address: u64) {
     unsafe {
         let fault = &raw mut frida_agent_fault;
@@ -1338,7 +1344,7 @@ fn serve_the_kernel_half() {
         tell_the_host_of_a_spawn(id, said.as_ptr() as *const u8);
     });
 
-    unsafe { transport_get_unchecked().process() };
+    transport_get_unchecked().process();
 
     #[cfg(feature = "win9x")]
     serve_deferred_work();
@@ -1355,6 +1361,7 @@ fn serve_the_kernel_half() {
     relay_frames_from_targets();
 }
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 pub(crate) fn watch_for_work(main_context: *mut GMainContext, ready: fn() -> bool, serve: fn()) {
     unsafe {
         WORK_READY = Some(ready);
@@ -1370,31 +1377,22 @@ pub(crate) fn watch_for_work(main_context: *mut GMainContext, ready: fn() -> boo
     }
 }
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 static mut WORK_SOURCE: *mut GSource = ptr::null_mut();
 
-#[repr(C)]
-pub struct GPollFd {
-    pub fd: i32,
-    pub events: u16,
-    pub revents: u16,
-    pub user_data: *mut c_void,
-}
+#[cfg(any(feature = "winnt", feature = "linux-injected"))]
+static mut WAKEUP_POLLFD: bindings::GPollFD =
+    bindings::GPollFD { fd: -1, events: 0, revents: 0, user_data: ptr::null_mut() };
 
-pub type GPollFunc = unsafe extern "C" fn(*mut GPollFd, u32, i32) -> i32;
-
-unsafe extern "C" {
-    fn g_source_add_poll(source: *mut GSource, fd: *mut GPollFd);
-    fn g_main_context_set_poll_func(context: *mut GMainContext, func: GPollFunc);
-}
-
-static mut WAKEUP_POLLFD: GPollFd = GPollFd { fd: -1, events: 0, revents: 0, user_data: ptr::null_mut() };
-
-pub(crate) fn watch_a_descriptor(context: *mut GMainContext, fd: i32, poll: GPollFunc) {
+#[cfg(any(feature = "winnt", feature = "linux-injected"))]
+pub(crate) fn watch_a_descriptor(context: *mut GMainContext, fd: i32,
+        poll: unsafe extern "C" fn(*mut bindings::GPollFD, u32, i32) -> i32) {
     const G_IO_IN: u16 = 1;
     unsafe {
-        WAKEUP_POLLFD = GPollFd { fd, events: G_IO_IN, revents: 0, user_data: ptr::null_mut() };
-        g_source_add_poll(WORK_SOURCE, ptr::addr_of_mut!(WAKEUP_POLLFD));
-        g_main_context_set_poll_func(context, poll);
+        WAKEUP_POLLFD =
+            bindings::GPollFD { fd, events: G_IO_IN, revents: 0, user_data: ptr::null_mut() };
+        bindings::g_source_add_poll(WORK_SOURCE, ptr::addr_of_mut!(WAKEUP_POLLFD));
+        bindings::g_main_context_set_poll_func(context, Some(poll));
     }
 }
 
@@ -1421,9 +1419,12 @@ unsafe fn sign_what_the_loop_calls_back() {
     }
 }
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 static mut WORK_READY: Option<fn() -> bool> = None;
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 static mut WORK_SERVE: Option<fn()> = None;
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 unsafe extern "C" fn work_prepare(source: *mut GSource, timeout: *mut i32) -> gboolean {
     unsafe {
         *timeout = -1;
@@ -1432,6 +1433,7 @@ unsafe extern "C" fn work_prepare(source: *mut GSource, timeout: *mut i32) -> gb
     }
 }
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 unsafe extern "C" fn work_check(_source: *mut GSource) -> gboolean {
     let Some(ready) = (unsafe { ptr::addr_of!(WORK_READY).read() }) else {
         return 0;
@@ -1440,6 +1442,7 @@ unsafe extern "C" fn work_check(_source: *mut GSource) -> gboolean {
     ready() as gboolean
 }
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 unsafe extern "C" fn work_dispatch(_source: *mut GSource, _callback: GSourceFunc,
         _data: gpointer) -> gboolean {
     if let Some(serve) = unsafe { ptr::addr_of!(WORK_SERVE).read() } {
@@ -1449,6 +1452,7 @@ unsafe extern "C" fn work_dispatch(_source: *mut GSource, _callback: GSourceFunc
     1
 }
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 static mut WORK_FUNCS: GSourceFuncs = GSourceFuncs {
     prepare: Some(work_prepare),
     check: Some(work_check),
@@ -1469,6 +1473,7 @@ pub(crate) unsafe fn dispatch_pending_work(main_context: *mut GMainContext) {
 static SERVICE_CONTEXT: core::sync::atomic::AtomicUsize =
     core::sync::atomic::AtomicUsize::new(0);
 
+#[cfg(any(feature = "blob", feature = "xnu-core"))]
 pub(crate) fn nudge_the_loop(token: *const u8) {
     let context = SERVICE_CONTEXT.load(Ordering::Acquire) as *mut GMainContext;
     if !context.is_null() {
@@ -1911,7 +1916,7 @@ fn handle_enumerate_applications(payload: *mut GVariant) -> HandlerResponse {
             let path = as_text(path, &mut path_text);
 
             let identity = kernel::identify_image(path as *const u8);
-            let named = if unsafe { identity.read() } != 0 { identity as *const gchar } else {
+            let named = if identity.read() != 0 { identity as *const gchar } else {
                 identifier
             };
 
@@ -1935,15 +1940,17 @@ fn handle_enumerate_applications(payload: *mut GVariant) -> HandlerResponse {
     }
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 struct SelectedIdentifiers {
     names: *mut *const gchar,
     count: usize,
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 impl SelectedIdentifiers {
     unsafe fn from(variant: *mut GVariant) -> Self {
         let mut count: gsize = 0;
-        let names = unsafe { g_variant_get_strv(variant, &mut count) };
+        let names = unsafe { bindings::g_variant_get_strv(variant, &mut count) };
         SelectedIdentifiers { names, count: count as usize }
     }
 
@@ -1956,12 +1963,14 @@ impl SelectedIdentifiers {
     }
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 impl Drop for SelectedIdentifiers {
     fn drop(&mut self) {
         unsafe { g_free(self.names as gpointer) };
     }
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 unsafe fn c_string_equal(a: *const gchar, b: *const gchar) -> bool {
     unsafe {
         let mut offset = 0;
@@ -2150,11 +2159,23 @@ fn handle_enumerate_processes(payload: *mut GVariant) -> HandlerResponse {
     }
 }
 
+#[cfg(any(
+    feature = "win9x",
+    feature = "winnt",
+    feature = "linux-injected",
+    feature = "xnu-core"
+))]
 struct SelectedPids {
     pids: *const u32,
     count: usize,
 }
 
+#[cfg(any(
+    feature = "win9x",
+    feature = "winnt",
+    feature = "linux-injected",
+    feature = "xnu-core"
+))]
 impl SelectedPids {
     unsafe fn from(variant: *mut GVariant) -> Self {
         let mut count: gsize = 0;
@@ -2181,7 +2202,7 @@ fn kernel_name() -> *const gchar {
     c"ntoskrnl.exe".as_ptr() as *const gchar
 }
 
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 fn kernel_name() -> *const gchar {
     c"kernel".as_ptr() as *const gchar
 }
@@ -2191,6 +2212,12 @@ fn kernel_name() -> *const gchar {
     c"kernel".as_ptr() as *const gchar
 }
 
+#[cfg(any(
+    feature = "win9x",
+    feature = "winnt",
+    feature = "linux-injected",
+    feature = "xnu-core"
+))]
 const KERNEL_PID: u32 = 0;
 
 #[cfg(any(
@@ -2535,7 +2562,7 @@ unsafe extern "C" fn frida_message_handler(
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(feature = "win9x")]
 pub(crate) fn routed_arena() -> u64 {
     unsafe { ROUTED_ARENA }
 }

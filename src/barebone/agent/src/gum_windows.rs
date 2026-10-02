@@ -170,7 +170,7 @@ pub(crate) fn watch_the_loader() {
     }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(feature = "winnt")]
 pub(crate) fn forget_the_loader() {
     let Some(entries) = kernel::loader_entry_points() else {
         return;
@@ -194,7 +194,7 @@ pub(crate) fn loader_load() -> gpointer {
     unsafe { LOADER_LOAD }
 }
 
-#[cfg(any(feature = "win9x", feature = "winnt"))]
+#[cfg(feature = "win9x")]
 pub(crate) fn loader_load_with_flags() -> gpointer {
     unsafe { LOADER_LOAD_WITH_FLAGS }
 }
@@ -410,10 +410,6 @@ fn forget_the_threads() {
         crate::bindings::gum_interceptor_revert(interceptor, entries.exit as gpointer);
         crate::bindings::gum_interceptor_end_transaction(interceptor);
     }
-}
-
-pub(crate) fn thread_appeared(id: u32) {
-    announce_thread(id);
 }
 
 pub(crate) fn thread_appeared_at(id: u32, routine: usize, parameter: usize) {

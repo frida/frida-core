@@ -746,7 +746,7 @@ fn place_shared_agent() -> (u32, u32) {
         crate::install_writable_half(base as usize, (base + private_offset as u32) as usize);
     }
 
-    let entry = base + (crate::win9x_user::frida_win9x_user_main as usize
+    let entry = base + (crate::win9x_user::frida_win9x_user_main as *const () as usize
         - own.base_address as usize) as u32;
 
     (base, entry)
@@ -1186,7 +1186,7 @@ mod kernel {
             vwin32_create_ring0_thread(
                 THREAD_STACK_SIZE as u32,
                 0,
-                frida_win9x_thread_thunk as u32,
+                frida_win9x_thread_thunk as *const () as u32,
                 0,
             ) as isize
         }
@@ -1513,16 +1513,12 @@ fn read_u8(address: u32) -> u8 {
 
 const EXPORT_DIRECTORY_OFFSET: u32 = 0x78;
 
-pub(crate) const MEM_COMMIT: u32 = 0x0000_1000;
 pub(crate) const MEM_RESERVE: u32 = 0x0000_2000;
 pub(crate) const MEM_RELEASE: u32 = 0x0000_8000;
-pub(crate) const PAGE_EXECUTE_READ: u32 = 0x20;
-pub(crate) const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 pub(crate) const INFINITE: u32 = 0xffff_ffff;
 pub(crate) const USER_THREAD_STACK_SIZE: u32 = 0x10000;
 
 const INJECTION_ARENA_SIZE: usize = 0x1000;
-const HANDSHAKE_SIZE: usize = 0x40;
 pub(crate) const RUNNING_FLAG: u32 = 0x00;
 pub(crate) const GO_FLAG: u32 = 0x04;
 pub(crate) const OBSERVED_PID: u32 = 0x08;
@@ -1559,7 +1555,6 @@ const PE_ENTRY_POINT_OFFSET: usize = 0x28;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
 const TEARDOWN_GRACE_US: u64 = 500_000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;
-const IDLE_SLEEP_MS: u32 = 1000;
 pub(crate) const PARKED_SLEEP_MS: u32 = 200;
 const STUB_OFFSET: u32 = 0x100;
 const PAYLOAD_OFFSET: u32 = 0x200;
@@ -1826,7 +1821,7 @@ pub(crate) unsafe fn cpu_state_of(base: *const u8) -> CpuState {
 }
 
 pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
-    let mut field = |offset: usize, value: u32| unsafe {
+    let field = |offset: usize, value: u32| unsafe {
         base.add(offset).cast::<u32>().write_unaligned(value)
     };
 
@@ -1901,11 +1896,6 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
         let next = unsafe { get_next_thread_handle(thread) };
         thread = if next == first { 0 } else { next };
     }
-}
-
-// KERNEL32 hands out its process database pointer XOR a per-boot value, and so must we.
-pub(crate) fn process_database(pid: u32) -> u32 {
-    process_id(pid)
 }
 
 fn process_id(pdb: u32) -> u32 {
@@ -2258,7 +2248,7 @@ pub fn hear_from_vmm() {
         ddb[DDB_SDK_VERSION / 4] = SDK_VERSION;
         ddb[DDB_NAME / 4] = u32::from_le_bytes(*b"FRID");
         ddb[DDB_NAME / 4 + 1] = u32::from_le_bytes(*b"A   ");
-        ddb[DDB_CONTROL_PROC / 4] = frida_win9x_control_thunk as u32;
+        ddb[DDB_CONTROL_PROC / 4] = frida_win9x_control_thunk as *const () as u32;
 
         vmm_add_ddb(ddb.as_mut_ptr() as u32);
     }
@@ -2447,7 +2437,7 @@ extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
     };
     if handled == 0 {
         report_unhandled_fault(fault, cpu_context.eip);
-        cpu_context.eip = frida_win9x_park as u32;
+        cpu_context.eip = frida_win9x_park as *const () as u32;
     }
 
     unsafe {
@@ -2646,29 +2636,6 @@ fn loop_semaphore() -> u32 {
     semaphore_in(slot_for_token(crate::glib::wakeup_token()))
 }
 
-fn release_slot(slot: usize, token: *const u8) {
-    if SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel) != 1 {
-        return;
-    }
-    if core::ptr::eq(token, crate::glib::wakeup_token()) {
-        return;
-    }
-
-    let _ = OWNERS[slot].compare_exchange(token as usize, 0, Ordering::AcqRel, Ordering::Acquire);
-}
-
-fn slot_owned_by(token: *const u8) -> Option<usize> {
-    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_SEMAPHORES;
-    for step in 0..NUM_SEMAPHORES {
-        let slot = (start + step) % NUM_SEMAPHORES;
-        if OWNERS[slot].load(Ordering::Acquire) == token as usize {
-            return Some(slot);
-        }
-    }
-
-    None
-}
-
 fn semaphore_in(slot: usize) -> u32 {
     let existing = SEMAPHORES[slot].load(Ordering::Acquire);
     if existing != 0 {
@@ -2714,13 +2681,10 @@ unsafe extern "C" {
     fn frida_win9x_fault_thunk_ud();
     fn frida_win9x_fault_thunk_gp();
     fn frida_win9x_fault_thunk_pf();
-    fn frida_win9x_time_out_thunk();
-    fn get_cur_vm_handle() -> u32;
     fn get_sys_vm_handle() -> u32;
     fn schedule_global_event(callback: unsafe extern "C" fn()) -> u32;
     fn frida_win9x_event_thunk();
     fn frida_win9x_wake_event_thunk();
-    fn get_next_vm_handle(vm: u32) -> u32;
     fn get_initial_thread_handle(vm: u32) -> u32;
     fn get_next_thread_handle(thread: u32) -> u32;
     fn ifsmgr_ring0_file_io(function: u32, ebx: u32, ecx: u32, edx: u32, esi: u32, edi: u32) -> u32;
@@ -2731,8 +2695,6 @@ unsafe extern "C" {
 
 core::arch::global_asm!(
     r#"
-.intel_syntax noprefix
-
 // A position-independent image cannot name its data in an instruction. Thus the code reads the
 // program counter, from which the offset to the data is known, and adds the offset. The frame
 // pointer holds the result, because no service reads that register.

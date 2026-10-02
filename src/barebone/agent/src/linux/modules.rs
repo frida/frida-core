@@ -651,10 +651,6 @@ impl Regions {
     }
 }
 
-fn reads_as_pointer(address: usize) -> bool {
-    address >= LOWEST_MAPPING && address & (OFFSET_SIZE - 1) == 0
-}
-
 fn try_read_word(address: usize) -> Option<usize> {
     Some(usize::from_ne_bytes(try_read(address)?))
 }
@@ -767,7 +763,6 @@ const REGION_WINDOW: usize = 512;
 const MAX_REGIONS: usize = 16;
 const OFFSET_SIZE: usize = 4;
 const SYMBOL_SIZE: usize = if WORD == 8 { 24 } else { 16 };
-const LOWEST_MAPPING: usize = 1 << 20;
 const MAX_SYMBOLS: usize = 1 << 20;
 const MAX_EXPORTS: usize = 1 << 16;
 const EXPORTS_SAMPLED: usize = 64;

@@ -38,6 +38,7 @@ fn main() {
         .clang_arg("-include")
         .clang_arg("stdint.h")
         .blocklist_type("max_align_t")
+        .blocklist_function("memcpy|memmove|memset|memcmp|bcmp|strlen")
         .merge_extern_blocks(true)
         .generate()
         .expect("Unable to generate bindings");

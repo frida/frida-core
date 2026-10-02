@@ -18,7 +18,6 @@ use crate::winnt::{
     USER_SHARED_DATA, AGENT_WAKE_HANDLE,
     LDR_IN_LOAD_ORDER_OFFSET, LOADER_LIBRARY, PEB_LDR_OFFSET,
     CONTEXT_ALIGNMENT, CONTEXT_CONTROL, CONTEXT_FLAGS, CONTEXT_FULL, CONTEXT_PC, CONTEXT_SIZE,
-    PEB_PARAMETERS_OFFSET,
     POINTER_SIZE, export, module_base, read_pointer, read_u32,
     select_user, take_frame_from_host, windows_fn,
 };
@@ -139,6 +138,7 @@ pub static USER: Primitives = Primitives {
     shared_data,
 };
 
+#[cfg(target_arch = "aarch64")]
 pub(crate) fn flush_code(start: *const u8, end: *const u8) -> bool {
     let Some(api) = (unsafe { (*core::ptr::addr_of!(USER_API)).as_ref() }) else {
         return false;
@@ -147,10 +147,6 @@ pub(crate) fn flush_code(start: *const u8, end: *const u8) -> bool {
     unsafe { (api.flush_code)(CURRENT_PROCESS, start as *mut u8, end as usize - start as usize) };
 
     true
-}
-
-pub(crate) fn yield_entry_point() -> usize {
-    unsafe { user_api().yield_execution as usize }
 }
 
 fn resolve_user_api() {
@@ -172,6 +168,7 @@ fn resolve_user_api() {
             create_event: core::mem::transmute(export(ntdll, b"NtCreateEvent")),
             close: core::mem::transmute(export(ntdll, b"NtClose")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
+            #[cfg(target_arch = "aarch64")]
             flush_code: core::mem::transmute(export(ntdll, b"NtFlushInstructionCache")),
             create_heap: core::mem::transmute(export(ntdll, b"RtlCreateHeap")),
             add_fault_handler: core::mem::transmute(
@@ -418,6 +415,7 @@ fn thread_starter() -> Option<usize> {
     Some((jump as isize + 5 + displacement as isize) as usize)
 }
 
+#[cfg(target_arch = "x86")]
 const THREAD_THUNK: [u8; 7] = [0x33, 0xed, 0x53, 0x50, 0x6a, 0x00, 0xe9];
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -425,6 +423,7 @@ fn thread_starter() -> Option<usize> {
     Some(export(module_base(peb(), b"kernel32.dll"), b"BaseThreadStart"))
 }
 
+#[cfg(target_arch = "x86")]
 fn image_size(base: usize) -> usize {
     unsafe {
         let headers = base + ((base + PE_SIGNATURE_OFFSET) as *const u32).read() as usize;
@@ -432,6 +431,7 @@ fn image_size(base: usize) -> usize {
     }
 }
 
+#[cfg(target_arch = "x86")]
 const PE_IMAGE_SIZE_OFFSET: usize = 0x50;
 
 pub struct LoaderEntryPoints {
@@ -529,12 +529,10 @@ pub fn spawn_process(command_line: &str) -> u32 {
         return 0;
     }
 
-    unsafe {
-        held().insert(made.pid, HeldProcess {
-            process: made.process,
-            thread: made.thread,
-        })
-    };
+    held().insert(made.pid, HeldProcess {
+        process: made.process,
+        thread: made.thread,
+    });
 
     made.pid
 }
@@ -681,7 +679,6 @@ fn make_process(command_line: &str) -> Option<MadeProcess> {
         process: read_handle(&information, PROCESS_INFORMATION_PROCESS),
         thread: read_handle(&information, PROCESS_INFORMATION_THREAD),
         pid: unsafe { read_u32(information.as_ptr() as usize + PROCESS_INFORMATION_PID) },
-        tid: unsafe { read_u32(information.as_ptr() as usize + PROCESS_INFORMATION_TID) },
     })
 }
 
@@ -689,11 +686,10 @@ struct MadeProcess {
     process: *mut c_void,
     thread: *mut c_void,
     pid: u32,
-    tid: u32,
 }
 
 pub fn resume_process(pid: u32) -> bool {
-    let Some(held) = (unsafe { held().remove(&pid) }) else {
+    let Some(held) = held().remove(&pid) else {
         return false;
     };
     let api = spawn_api();
@@ -762,10 +758,6 @@ const PROCESS_BASIC_INFORMATION_PEB: usize = 0x08;
 #[cfg(target_pointer_width = "64")]
 const PEB_IMAGE_BASE_OFFSET: usize = 0x10;
 
-#[cfg(target_arch = "x86")]
-const UNICODE_STRING_SIZE: usize = 8;
-#[cfg(target_arch = "x86")]
-const PARAMETERS_DESKTOP_OFFSET: usize = 0x78;
 #[cfg(target_pointer_width = "32")]
 const PROCESS_INFORMATION_SIZE: usize = 128;
 #[cfg(target_pointer_width = "32")]
@@ -775,14 +767,8 @@ const PROCESS_INFORMATION_THREAD: usize = 0x04;
 #[cfg(target_pointer_width = "32")]
 const PROCESS_INFORMATION_PID: usize = 0x08;
 #[cfg(target_pointer_width = "32")]
-const PROCESS_INFORMATION_TID: usize = 0x0c;
-#[cfg(target_pointer_width = "32")]
 const STARTUP_INFO_SIZE: usize = 0x44;
 
-#[cfg(target_arch = "x86_64")]
-const UNICODE_STRING_SIZE: usize = 16;
-#[cfg(target_arch = "x86_64")]
-const PARAMETERS_DESKTOP_OFFSET: usize = 0xc0;
 #[cfg(target_pointer_width = "64")]
 const PROCESS_INFORMATION_SIZE: usize = 192;
 #[cfg(target_pointer_width = "64")]
@@ -793,8 +779,6 @@ const PROCESS_INFORMATION_THREAD: usize = 0x08;
 const PROCESS_INFORMATION_PID: usize = 0x10;
 #[cfg(target_pointer_width = "64")]
 const STARTUP_INFO_SIZE: usize = 0x68;
-#[cfg(target_pointer_width = "64")]
-const PROCESS_INFORMATION_TID: usize = 0x20;
 
 fn spawn_api() -> &'static SpawnApi {
     unsafe { (*core::ptr::addr_of!(SPAWN_API)).as_ref().unwrap() }
@@ -814,6 +798,7 @@ struct UserApi {
     yield_execution: windows_fn!( => i32),
     wait_for_object: windows_fn!(*mut c_void, u8, *const i64 => i32),
     wait_for_objects: windows_fn!(u32, *const *mut c_void, u32, u8, *const i64 => i32),
+    #[cfg(target_arch = "aarch64")]
     flush_code: windows_fn!(*mut c_void, *mut u8, usize => i32),
     set_event: windows_fn!(*mut c_void, *mut u32 => i32),
     reset_event: windows_fn!(*mut c_void, *mut u32 => i32),
@@ -984,7 +969,8 @@ fn serve_the_copy() {
     }
 }
 
-unsafe extern "C" fn poll_handles(ufds: *mut crate::GPollFd, nfds: u32, timeout: i32) -> i32 {
+unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD, nfds: u32,
+        timeout: i32) -> i32 {
     const MAX_HANDLES: usize = 16;
     let fds = unsafe { core::slice::from_raw_parts_mut(ufds, nfds as usize) };
 

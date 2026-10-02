@@ -10,7 +10,9 @@ use crate::bindings::{
     gum_interceptor_replace_fast,
 };
 
-use super::layout::{field_offset, struct_size};
+use super::layout::field_offset;
+#[cfg(target_arch = "aarch64")]
+use super::layout::struct_size;
 use super::STACK_SPAN;
 use super::native;
 use super::processes::task_with_id;
@@ -43,10 +45,8 @@ pub fn inject_into_process(id: u32) -> u32 {
 
     let placed = Placement {
         task,
-        copy_pid: home.copy_pid,
         base: home.base,
         arena: home.arena,
-        seen_by_the_copy: home.seen_by_the_copy,
         stack: home.stack,
         says: ptr::null_mut(),
         hears: ptr::null_mut(),
@@ -79,10 +79,8 @@ unsafe extern "C" fn carry_what_the_copy_says(argument: *mut c_void, _reason: i3
 
 struct Placement {
     task: usize,
-    copy_pid: u32,
     base: usize,
     arena: usize,
-    seen_by_the_copy: usize,
     stack: usize,
     says: *mut c_void,
     hears: *mut c_void,
@@ -95,10 +93,8 @@ fn pid_reported_by(placed: &Placement) -> u32 {
 // The copy is given a task of its own that shares the address space it was mapped into, so
 // nothing of the target is borrowed and a target that never runs is no obstacle.
 struct Home {
-    copy_pid: u32,
     base: usize,
     arena: usize,
-    seen_by_the_copy: usize,
     stack: usize,
 }
 
@@ -136,19 +132,14 @@ fn map_and_start(id: u32) -> Option<Home> {
 
     let arena = view_of(where_the_copy_sees_it)?;
 
-    let copy_pid = start(base, where_the_copy_sees_it, stack);
+    start(base, where_the_copy_sees_it, stack);
 
-    Some(Home {
-        copy_pid,
-        base,
-        arena,
-        seen_by_the_copy: where_the_copy_sees_it,
-        stack,
-    })
+    Some(Home { base, arena, stack })
 }
 
 // The kernel half reaches the same pages by an address of its own, so what the two leave for
 // each other needs neither the address space borrowed nor a copy made.
+#[cfg(target_arch = "aarch64")]
 fn borrowed_memory() -> Option<usize> {
     let at = field_offset("task_struct", "mm")?;
 
@@ -346,7 +337,7 @@ unsafe fn open_user_access() -> usize {
 #[cfg(not(target_arch = "arm"))]
 unsafe fn close_user_access(_domains: usize) {}
 
-fn start(base: usize, arena: usize, stack: usize) -> u32 {
+fn start(base: usize, arena: usize, stack: usize) {
     let entry = native::alloc(size_of::<Entry>()) as *mut Entry;
     unsafe {
         entry.write(Entry {
@@ -355,7 +346,7 @@ fn start(base: usize, arena: usize, stack: usize) -> u32 {
             stack,
         });
 
-        _user_mode_thread(USER_ENTRY, entry as *mut c_void, CLONE_VM | CLONE_FS | CLONE_FILES) as u32
+        _user_mode_thread(USER_ENTRY, entry as *mut c_void, CLONE_VM | CLONE_FS | CLONE_FILES);
     }
 }
 
@@ -1061,7 +1052,7 @@ static COPY_TASK: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUs
 static WATCHING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 pub fn detach_from_process(id: u32) -> bool {
-    let Some(placed) = (unsafe { placements() }.remove(&id)) else {
+    let Some(placed) = unsafe { placements() }.remove(&id) else {
         return false;
     };
 
@@ -1194,9 +1185,6 @@ const MADV_NOHUGEPAGE: c_int = 15;
 const FIRST_ERROR_ADDRESS: usize = usize::MAX - 4095;
 const PAGE_SIZE: usize = 4096;
 const FOLL_WRITE: c_int = 1;
-const FUTEX_WAIT: c_int = 128;
-const FUTEX_WAKE: c_int = 129;
-const WAKE_EVERY_WAITER: u32 = i32::MAX as u32;
 
 const CLONE_VM: usize = 0x100;
 const CLONE_FS: usize = 0x200;

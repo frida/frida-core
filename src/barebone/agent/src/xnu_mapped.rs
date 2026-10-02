@@ -58,6 +58,7 @@ unsafe extern "C" fn note_an_export(details: *const GumDarwinExportDetails, aski
     1
 }
 
+#[cfg(not(feature = "xnu-kext"))]
 pub fn export_named(wanted: &str) -> u64 {
     let Some(ask_the_loader) = crate::xnu_libsystem::function_named(b"/libdyld.dylib", b"_dlsym")
     else {
@@ -76,6 +77,7 @@ pub fn export_named(wanted: &str) -> u64 {
     unsafe { crate::pac::ptrauth_strip_data(signed as *const u8) as u64 }
 }
 
+#[cfg(not(feature = "xnu-kext"))]
 const WHEREVER_IT_IS: *const core::ffi::c_void = -2isize as *const core::ffi::c_void;
 
 struct Image {

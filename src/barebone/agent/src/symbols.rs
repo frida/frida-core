@@ -37,7 +37,7 @@ impl SymbolTable {
         self.symbol_count
     }
 
-    pub fn find_symbol_by_name(&self, name: &str) -> Option<SymbolRef> {
+    pub fn find_symbol_by_name(&self, name: &str) -> Option<SymbolRef<'_>> {
         let (_, entry) = self.binary_search_by_name(name)?;
         Some(SymbolRef {
             symbol_table: self,
@@ -46,7 +46,7 @@ impl SymbolTable {
         })
     }
 
-    pub fn find_symbols_by_name(&self, name: &str) -> SymbolsByNameIterator {
+    pub fn find_symbols_by_name(&self, name: &str) -> SymbolsByNameIterator<'_> {
         let (found_index, _) = match self.binary_search_by_name(name) {
             Some(result) => result,
             None => return SymbolsByNameIterator::empty(self),
@@ -83,7 +83,7 @@ impl SymbolTable {
         }
     }
 
-    pub fn find_symbols_matching_glob(&self, pattern: &str) -> SymbolsMatchingIterator {
+    pub fn find_symbols_matching_glob(&self, pattern: &str) -> SymbolsMatchingIterator<'_> {
         if self.is_empty() {
             return SymbolsMatchingIterator::empty(self);
         }
@@ -100,7 +100,7 @@ impl SymbolTable {
         }
     }
 
-    pub fn find_symbol_by_address(&self, address: u64) -> Option<SymbolRef> {
+    pub fn find_symbol_by_address(&self, address: u64) -> Option<SymbolRef<'_>> {
         let target_offset = address - get_kernel_base();
         let (_, entry) = self.binary_search_by_address(target_offset)?;
         Some(SymbolRef {
@@ -119,7 +119,7 @@ impl SymbolTable {
         }
     }
 
-    pub fn find_closest_symbol_by_address(&self, address: u64) -> Option<SymbolRef> {
+    pub fn find_closest_symbol_by_address(&self, address: u64) -> Option<SymbolRef<'_>> {
         let kernel_base = get_kernel_base();
         let target_offset = address - kernel_base;
         let (_, entry) = self.binary_search_closest_by_address(target_offset)?;
@@ -130,7 +130,9 @@ impl SymbolTable {
         })
     }
 
-    pub fn iter_symbols_in_range(&self, start_address: u64, end_address: u64) -> SymbolsInRangeIterator {
+    pub fn iter_symbols_in_range(&self, start_address: u64, end_address: u64)
+        -> SymbolsInRangeIterator<'_>
+    {
         if self.is_empty() {
             return SymbolsInRangeIterator {
                 symbol_table: self,

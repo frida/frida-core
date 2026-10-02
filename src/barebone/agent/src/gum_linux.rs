@@ -6,15 +6,14 @@ use crate::{
     bindings::{
         _GumPageProtection_GUM_PAGE_EXECUTE, _GumPageProtection_GUM_PAGE_READ,
         _GumPageProtection_GUM_PAGE_WRITE, _GumRwxSupport_GUM_RWX_NONE, GArray,
-        GumDebugSymbolDetails, GumMemoryRange, GumModuleRegistry, GumPageProtection, GumRwxSupport,
-        g_array_append_vals, g_array_new, g_object_unref, g_pattern_spec_free, g_pattern_spec_match_string,
+        GumDebugSymbolDetails, GumModuleRegistry, GumPageProtection, GumRwxSupport,
+        g_array_append_vals, g_array_new, g_pattern_spec_free, g_pattern_spec_match_string,
         g_pattern_spec_new, g_strdup, gboolean, gchar, gconstpointer, gpointer, gsize, guint,
-        gum_barebone_register_module, gum_mprotect,
+        gum_mprotect,
     },
     gum::{self, FoundExportCallback},
     kernel,
 };
-use alloc::format;
 use core::ffi::CStr;
 use core::ptr;
 

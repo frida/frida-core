@@ -6,11 +6,9 @@ use crate::{
         _GInterfaceInfo, _GTypeInfo, GObject, GObjectClass, GPrivate, GType, GumAddress,
         GumExportDetails,
         GumExportType_GUM_EXPORT_FUNCTION, GumFoundExportFunc, GumMemoryRange, GumModule,
-        GumFoundSymbolFunc, GumModuleInterface, GumSymbolDetails, GumSymbolType_GUM_SYMBOL_FUNCTION,
-        GumSymbolType_GUM_SYMBOL_OBJECT, GumSymbolType_GUM_SYMBOL_UNKNOWN, GumThreadId, GumTlsKey,
-        gssize, g_free, g_object_get_type, g_object_new,
+        GumModuleInterface, GumThreadId, GumTlsKey, g_free, g_object_get_type, g_object_new,
         g_once_init_enter, g_once_init_leave, g_strdup, g_type_add_interface_static,
-        g_type_class_peek_parent, g_type_register_static, gchar, gboolean, gpointer, gsize, guint,
+        g_type_class_peek_parent, g_type_register_static, gchar, gpointer, gsize, guint,
     },
     gthread, kernel, libc,
 };
@@ -23,6 +21,11 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 #[cfg(feature = "linux")]
 use crate::gum_linux::enumerate_exports_in_range;
+#[cfg(any(feature = "linux", feature = "linux-injected"))]
+use crate::bindings::{
+    GumFoundSymbolFunc, GumSymbolDetails, GumSymbolType_GUM_SYMBOL_FUNCTION,
+    GumSymbolType_GUM_SYMBOL_OBJECT, GumSymbolType_GUM_SYMBOL_UNKNOWN, gboolean, gssize,
+};
 #[cfg(any(feature = "linux", feature = "linux-injected"))]
 use crate::gum_modules::enumerate_symbols_in_range;
 #[cfg(any(feature = "win9x", feature = "winnt"))]
@@ -401,24 +404,6 @@ pub(crate) fn unregister_slab(start: u64) {
     slab_unlock();
 }
 
-// For callers that must not block, primarily a fault handler, which can interrupt the code
-// that holds the lock. Report a busy registry and let the caller decide.
-pub(crate) fn is_agent_slab_if_idle(address: u64) -> Option<bool> {
-    if SLAB_LOCK
-        .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        return None;
-    }
-    let found = unsafe {
-        (*core::ptr::addr_of!(SLABS))
-            .iter()
-            .any(|&(begin, end)| address >= begin && address < end)
-    };
-    slab_unlock();
-    Some(found)
-}
-
 pub(crate) fn is_agent_slab(address: u64) -> bool {
     slab_lock();
     let found = unsafe {
@@ -435,7 +420,8 @@ pub(crate) fn is_agent_slab(address: u64) -> bool {
 mod symbolication {
     use super::*;
     use crate::bindings::{
-        GArray, GumAddress, GumDebugSymbolDetails, g_array_append_vals, g_array_new, gconstpointer,
+        GArray, GumAddress, GumDebugSymbolDetails, g_array_append_vals, g_array_new, gboolean,
+        gconstpointer,
     };
     use core::ffi::CStr;
 

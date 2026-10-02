@@ -1,4 +1,7 @@
-use core::ffi::{c_int, c_long, c_void};
+use core::ffi::{c_int, c_void};
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+use core::ffi::c_long;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use core::ptr;
 
 use crate::bindings::{
@@ -90,7 +93,7 @@ unsafe fn build_resume_stub() {
         stub.write(0xbf);
         (stub.add(1) as *mut u32).write((&raw mut RESUME_CONTEXT) as u32);
         stub.add(5).write(0xe9);
-        let rel = (frida_i386_resume as usize).wrapping_sub(stub as usize + 10) as u32;
+        let rel = (frida_i386_resume as *const () as usize).wrapping_sub(stub as usize + 10) as u32;
         (stub.add(6) as *mut u32).write(rel);
         RESUME_STUB = stub as usize;
     }
@@ -316,7 +319,7 @@ pub fn install() {
 
     unsafe {
         let addr = target as *mut u32;
-        _patch_text(addr.add(1) as *mut c_void, frida_arm_fixup as usize as u32);
+        _patch_text(addr.add(1) as *mut c_void, frida_arm_fixup as *const () as usize as u32);
         _patch_text(addr as *mut c_void, 0xe51ff004);
     }
 }
@@ -449,7 +452,7 @@ pub fn install() {
 
     unsafe { FRIDA_ARM64_ORIGINAL_CONT = target.add(4) as u64 };
 
-    let jump = detour_to(frida_arm64_fixup as usize);
+    let jump = detour_to(frida_arm64_fixup as *const () as usize);
     unsafe {
         let addr = target as *mut u32;
         _aarch64_insn_patch_text_nosync(addr.add(2) as *mut c_void, jump[2]);
@@ -526,7 +529,7 @@ unsafe fn recovered(regs: *mut c_void) -> bool {
         let esr: u64;
         unsafe { core::arch::asm!("mrs {}, esr_el1", out(reg) esr, options(nomem, nostack)) };
         crate::note_unhandled_fault(esr, faulted_at as u64, accessed as u64);
-        context.pc = frida_arm64_park as usize as u64;
+        context.pc = frida_arm64_park as *const () as usize as u64;
         unsafe { restore_context(regs, &context) };
         return true;
     }

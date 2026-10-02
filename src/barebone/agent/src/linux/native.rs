@@ -7,7 +7,9 @@
 use core::ffi::{c_char, c_int, c_uint, c_void};
 use core::ptr;
 use core::ptr::read_volatile;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(target_arch = "aarch64")]
+use core::sync::atomic::AtomicUsize;
 
 use crate::kernel::ThreadEntry;
 
@@ -55,10 +57,6 @@ pub fn release_interrupt() {
     };
 
     unsafe { _free_irq(interrupt.irq, interrupt.target) };
-}
-
-pub fn take_the_file(descriptor: u32) -> *mut c_void {
-    unsafe { _fget(descriptor) }
 }
 
 pub fn take_the_file_of(task: *mut c_void, descriptor: u32) -> *mut c_void {
@@ -168,7 +166,10 @@ fn kcfi_thunk_cached(cache: &AtomicUsize, callback: usize, type_ref: Option<usiz
 #[cfg(target_arch = "aarch64")]
 fn thread_entry() -> unsafe extern "C" fn(*mut c_void) -> c_int {
     let ref_fn = unsafe { _kthread_worker_fn.map(|f| f as usize) };
-    unsafe { core::mem::transmute(kcfi_thunk_cached(&THREAD_THUNK, frida_cb_thread as usize, ref_fn)) }
+    unsafe {
+        core::mem::transmute(kcfi_thunk_cached(&THREAD_THUNK, frida_cb_thread as *const () as usize,
+            ref_fn))
+    }
 }
 
 #[cfg(not(target_arch = "aarch64"))]
@@ -180,7 +181,8 @@ fn thread_entry() -> unsafe extern "C" fn(*mut c_void) -> c_int {
 fn interrupt_entry() -> unsafe extern "C" fn(c_int, *mut c_void) -> c_int {
     let ref_fn = unsafe { _vring_interrupt.map(|f| f as usize) };
     unsafe {
-        core::mem::transmute(kcfi_thunk_cached(&INTERRUPT_THUNK, frida_cb_interrupt as usize, ref_fn))
+        core::mem::transmute(kcfi_thunk_cached(&INTERRUPT_THUNK,
+            frida_cb_interrupt as *const () as usize, ref_fn))
     }
 }
 
@@ -373,7 +375,9 @@ pub fn set_protection(address: u64, size: usize, protection: u32) -> bool {
     true
 }
 
+#[cfg(not(target_arch = "x86"))]
 const GUM_PAGE_WRITE: u32 = 2;
+#[cfg(not(target_arch = "x86"))]
 const GUM_PAGE_EXECUTE: u32 = 4;
 
 pub fn current_process_id() -> u32 {
@@ -828,16 +832,25 @@ const WAIT_ENTRY_WAKE: usize = 2;
 const WAIT_ENTRY_QUEUED: usize = 3;
 const WAIT_QUEUE_WORDS: usize = 16;
 const LOCK_KEY_WORDS: usize = 8;
+#[cfg(target_arch = "aarch64")]
 const DEVICE_MEMORY: u64 = 0x04;
 const ORDINARY_MEMORY: u64 = 0xff;
+#[cfg(target_arch = "aarch64")]
 const ATTRIBUTES_KEPT: u64 = 8;
 const VM_MAP: u64 = 0x4;
+#[cfg(target_arch = "aarch64")]
 const PTE_TYPE_PAGE: u64 = 0x3;
+#[cfg(target_arch = "aarch64")]
 const PTE_SHARED: u64 = 3 << 8;
+#[cfg(target_arch = "aarch64")]
 const PTE_AF: u64 = 1 << 10;
+#[cfg(target_arch = "aarch64")]
 const PTE_WRITE: u64 = 1 << 51;
+#[cfg(target_arch = "aarch64")]
 const PTE_DIRTY: u64 = 1 << 55;
+#[cfg(target_arch = "aarch64")]
 const PTE_PXN: u64 = 1 << 53;
+#[cfg(target_arch = "aarch64")]
 const PTE_UXN: u64 = 1 << 54;
 const IRQF_SHARED: usize = 0x80;
 const IRQ_NONE: c_int = 0;
@@ -1055,10 +1068,10 @@ unsafe extern "C" {
 
 #[cfg(target_arch = "x86")]
 const THREAD_ENTRY: unsafe extern "C" fn(*mut c_void) -> c_int = frida_kcb_thread;
-#[cfg(not(target_arch = "x86"))]
+#[cfg(not(any(target_arch = "x86", target_arch = "aarch64")))]
 const THREAD_ENTRY: unsafe extern "C" fn(*mut c_void) -> c_int = frida_cb_thread;
 
 #[cfg(target_arch = "x86")]
 const INTERRUPT_ENTRY: unsafe extern "C" fn(c_int, *mut c_void) -> c_int = frida_kcb_interrupt;
-#[cfg(not(target_arch = "x86"))]
+#[cfg(not(any(target_arch = "x86", target_arch = "aarch64")))]
 const INTERRUPT_ENTRY: unsafe extern "C" fn(c_int, *mut c_void) -> c_int = frida_cb_interrupt;

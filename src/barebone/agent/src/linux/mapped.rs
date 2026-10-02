@@ -83,7 +83,7 @@ fn announce(image: &Image) {
 
     let module = gum::gum_native_module_new(&image.path, "", &range);
     unsafe {
-        gum_barebone_register_module(unsafe { REGISTRY }, module);
+        gum_barebone_register_module(REGISTRY, module);
         g_object_unref(module as gpointer);
     }
 }

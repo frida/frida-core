@@ -489,7 +489,7 @@ pub fn one_of_ours(number: u64) {
 }
 
 pub fn forget_the_threads_of(arena: u64) {
-    let said = unsafe { ((arena + crate::xnu_relay::OUR_THREADS) as *const u64) };
+    let said = (arena + crate::xnu_relay::OUR_THREADS) as *const u64;
     for step in 0..MOST_OF_OURS_IN_ONE {
         let number = unsafe { said.add(step).read_volatile() };
         for kept in ours().iter_mut().filter(|kept| **kept == number && number != 0) {
@@ -499,7 +499,7 @@ pub fn forget_the_threads_of(arena: u64) {
 }
 
 pub fn take_note_of_what_a_copy_says(arena: u64) {
-    let said = unsafe { ((arena + crate::xnu_relay::OUR_THREADS) as *const u64) };
+    let said = (arena + crate::xnu_relay::OUR_THREADS) as *const u64;
     for step in 0..MOST_OF_OURS_IN_ONE {
         one_of_ours(unsafe { said.add(step).read_volatile() });
     }

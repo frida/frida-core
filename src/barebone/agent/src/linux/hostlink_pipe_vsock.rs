@@ -191,7 +191,8 @@ unsafe fn hook_data_ready(so: Socket) {
     let slot = (sk + dr_off) as *mut usize;
     ORIG_DATA_READY.store(unsafe { *slot }, Ordering::Release);
 
-    let thunk = super::native::kcfi_thunk(on_data_ready as usize, sock_def_readable_ref());
+    let thunk =
+        super::native::kcfi_thunk(on_data_ready as *const () as usize, sock_def_readable_ref());
     unsafe { *slot = thunk };
 }
 
@@ -257,11 +258,11 @@ unsafe fn send_all(so: Socket, bytes: &[u8]) {
 }
 
 unsafe fn _init_net_addr() -> *mut c_void {
-    unsafe { ptr::addr_of!(_init_net) as *mut c_void }
+    ptr::addr_of!(_init_net) as *mut c_void
 }
 
 unsafe fn _sock_def_readable_addr() -> usize {
-    _sock_def_readable.map_or(0, |f| f as usize)
+    unsafe { _sock_def_readable }.map_or(0, |f| f as usize)
 }
 
 unsafe extern "C" {

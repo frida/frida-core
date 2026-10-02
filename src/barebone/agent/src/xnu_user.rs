@@ -1,6 +1,6 @@
 
 pub fn entry_offset() -> usize {
-    (frida_xnu_user_entry as usize) - crate::own_range().0
+    (frida_xnu_user_entry as *const () as usize) - crate::own_range().0
 }
 
 pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {

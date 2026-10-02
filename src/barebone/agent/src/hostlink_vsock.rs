@@ -8,8 +8,6 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use alloc::vec::Vec;
 
-use crate::kernel;
-
 const AF_VSOCK: c_int = 40;
 const SOCK_STREAM: c_int = 1;
 const VMADDR_CID_HOST: u32 = 2;

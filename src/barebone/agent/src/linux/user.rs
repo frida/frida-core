@@ -8,7 +8,7 @@ use super::arena::{Arena, FAULT_ADDRESS, FAULT_KIND, FAULT_LR, FAULT_PC, WOKEN};
 use super::facade::Primitives;
 
 pub fn entry_offset() -> usize {
-    (frida_linux_user_entry as usize) - crate::own_range().0
+    (frida_linux_user_entry as *const () as usize) - crate::own_range().0
 }
 
 // The copy's first word in the address space it was placed in: it says it is up, and from then
@@ -95,10 +95,6 @@ pub fn range_is_ours(address: u64) -> bool {
 
 pub fn thread_is_ours(id: u32) -> bool {
     id != 0 && unsafe { CLOAK_THREADS }.contains(&id)
-}
-
-pub fn fd_is_ours(fd: u32) -> bool {
-    fd != 0 && unsafe { CLOAK_FDS }.contains(&fd)
 }
 
 fn serve_the_copy() {
@@ -329,6 +325,7 @@ fn stand_on_a_thread_pointer() {
     unsafe { core::arch::asm!("mov gs, {:e}", in(reg) selector, options(nomem, nostack)) };
 }
 
+#[cfg(target_arch = "x86")]
 #[repr(C)]
 struct UserDesc {
     entry_number: u32,
@@ -464,7 +461,7 @@ unsafe extern "C" {
 unsafe fn start_thread(stack: usize, carried: usize) -> isize {
     let launch = stack - 8;
     unsafe {
-        (launch as *mut usize).write(enter_thread as usize);
+        (launch as *mut usize).write(enter_thread as *const () as usize);
         ((launch + 4) as *mut usize).write(carried);
 
         frida_start_thread(CLONE, THREAD_FLAGS, launch)
@@ -598,7 +595,8 @@ struct TimeSpec {
     nanoseconds: i64,
 }
 
-unsafe extern "C" fn frida_poll(ufds: *mut crate::GPollFd, nfds: u32, timeout: i32) -> i32 {
+unsafe extern "C" fn frida_poll(ufds: *mut crate::bindings::GPollFD, nfds: u32,
+        timeout: i32) -> i32 {
     const MAX_FDS: usize = 16;
     let fds = unsafe { core::slice::from_raw_parts_mut(ufds, nfds as usize) };
 
@@ -727,7 +725,7 @@ fn current_thread_id() -> u64 {
 fn install_fault_reporter() {
     for signal in [ILLEGAL, ABORTED, BUS, SEGMENT, ARITHMETIC, TRAPPED, BAD_CALL] {
         let action = Action {
-            handler: report_fault as usize,
+            handler: report_fault as *const () as usize,
             flags: SIGINFO | RESTORER_FLAG,
             restorer: restorer(),
             blocked: 0,
@@ -1101,7 +1099,7 @@ const RESTORER_FLAG: usize = 0;
     target_arch = "arm"
 ))]
 fn restorer() -> usize {
-    sigreturn_trampoline as usize
+    sigreturn_trampoline as *const () as usize
 }
 #[cfg(not(any(
     target_arch = "aarch64",
@@ -1472,12 +1470,6 @@ const GETDENTS: usize = 220;
 const GETDENTS: usize = 217;
 #[cfg(target_arch = "aarch64")]
 const GETDENTS: usize = 61;
-#[cfg(target_arch = "x86")]
-const POLL: usize = 168;
-#[cfg(target_arch = "x86_64")]
-const POLL: usize = 7;
-#[cfg(target_arch = "aarch64")]
-const POLL: usize = 73;
 #[cfg(target_arch = "arm")]
 const READ: usize = 3;
 #[cfg(target_arch = "x86")]
@@ -1583,7 +1575,6 @@ const MPROTECT: usize = 10;
 #[cfg(target_arch = "aarch64")]
 const MPROTECT: usize = 226;
 
-const STANDARD_ERROR: usize = 2;
 const WORKING_DIRECTORY: usize = -100isize as usize;
 const READ_ONLY: usize = 0;
 const POLL_IN: i32 = 1;

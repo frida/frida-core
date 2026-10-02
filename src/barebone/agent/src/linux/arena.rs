@@ -13,10 +13,6 @@ impl Arena {
         Arena { begins }
     }
 
-    pub fn at_offset(&self, offset: usize) -> usize {
-        self.begins + offset
-    }
-
     // Until the frames flow, what the copy has to say is left here for the kernel half to read.
     pub fn say(&self, msg: &str) {
         let said = msg.as_bytes();
@@ -43,10 +39,6 @@ impl Arena {
 
     pub fn leave(&self, offset: usize, value: u64) {
         unsafe { ((self.begins + offset) as *mut u64).write_volatile(value) };
-    }
-
-    pub fn progress(&self) -> u32 {
-        self.word(PROGRESS).load(Ordering::Acquire)
     }
 
     pub fn note(&self, step: u32) {
@@ -126,6 +118,7 @@ impl Arena {
         super::user::say_something();
     }
 
+    #[cfg(target_arch = "aarch64")]
     pub fn request_executable(&self, address: u64, size: u64) -> u32 {
         self.leave(EXEC_ADDR, address);
         self.leave(EXEC_SIZE, size);
@@ -134,10 +127,12 @@ impl Arena {
         seq
     }
 
+    #[cfg(target_arch = "aarch64")]
     pub fn executable_settled(&self, seq: u32) -> bool {
         self.word(EXEC_ACK).load(Ordering::Acquire) == seq
     }
 
+    #[cfg(target_arch = "aarch64")]
     pub fn executable_was_granted(&self) -> bool {
         self.word(EXEC_OK).load(Ordering::Acquire) != 0
     }
@@ -150,6 +145,7 @@ impl Arena {
         Some((self.read_wide(EXEC_ADDR), self.read_wide(EXEC_SIZE)))
     }
 
+    #[cfg(target_arch = "aarch64")]
     pub fn grant_executable(&self, ok: bool) {
         self.word(EXEC_OK).store(ok as u32, Ordering::Release);
         let seq = self.word(EXEC_SEQ).load(Ordering::Acquire);
@@ -231,6 +227,7 @@ const EXEC_SEQ: usize = 432;
 const EXEC_ACK: usize = 436;
 const EXEC_ADDR: usize = 440;
 const EXEC_SIZE: usize = 448;
+#[cfg(target_arch = "aarch64")]
 const EXEC_OK: usize = 456;
 
 const REG_SEQ: usize = 460;
