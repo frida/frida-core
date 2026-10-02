@@ -1938,9 +1938,9 @@ namespace Frida.Gadget {
 			public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 					Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
-				//冻结优化
-				//if (resume_on_attach)
-					//Frida.Gadget.resume ();
+
+				if (resume_on_attach)
+					Frida.Gadget.resume ();
 	
 
 				return yield parent.attach (options, this, cancellable);
@@ -2012,16 +2012,6 @@ namespace Frida.Gadget {
 					dbus_context: dbus_context
 				);
 			}
-			// 【新增代码】：重写父类的 load_script
-		    public override async void load_script (AgentScriptId id, Cancellable? cancellable = null) throws Error, IOError {
-		        // 1. 调用父类方法，等待 JS 脚本完成接收与顶层 Hook 的执行
-		        yield base.load_script (id, cancellable);
-		
-				// 2. 直接调用 resume()。
-		        // 若当前处于 WAITING 状态（wait模式），它会解冻进程；
-		        // 若已经处于 RESUMED 状态（resume模式），函数内部会自动 return，无任何副作用。
-		        Frida.Gadget.resume ();
-		    }
 		}
 	}
 
