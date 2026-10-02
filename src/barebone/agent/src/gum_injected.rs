@@ -797,6 +797,7 @@ fn cpu_context_from(state: &kernel::CpuState) -> GumCpuContext {
         r12: state.r12,
         lr: state.lr,
         r: state.r,
+        ..unsafe { core::mem::zeroed() }
     }
 }
 
