@@ -2076,6 +2076,7 @@ namespace Frida {
 			return
 				"boot.art" in m.path ||
 				"boot-framework.art" in m.path ||
+				"boot-image-methods.art" in m.path ||
 				"dalvik-LinearAlloc" in m.path;
 		}
 
