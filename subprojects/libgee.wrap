@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/libgee.git
-revision = ad17ed847039469fcc2dc711ecfee2bbf7d2bf87
+revision = 69621d2c665b75c1e064abdecd540ef1749615ee
 depth = 1
 
 [provide]

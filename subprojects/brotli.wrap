@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/brotli.git
-revision = 01d9e2922ca878965ebcd71ee8965d2a7aadb47a
+revision = dd581fd4fea06096e3949ad6cb16775538d0ef47
 depth = 1
 
 [provide]
