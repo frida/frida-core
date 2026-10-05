@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/libusb.git
-revision = ffff4bdfe8faa38cecfad5aab106cae923502d55
+revision = 619d003babefbf2fea1f7f98996b3d12a4e6e21f
 depth = 1
 
 [provide]
