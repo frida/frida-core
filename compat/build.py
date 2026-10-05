@@ -592,8 +592,10 @@ def load_meson_options(top_builddir: Path,
                        subprojects: set[str]) -> Sequence[str]:
     from mesonbuild import coredata
 
-    return [f"-D{adapt_key(k, role)}={v.value}" for k, v in coredata.load(top_builddir).options.items()
-            if option_should_be_forwarded(k, v, role, subprojects)]
+    optstore = coredata.load(top_builddir).optstore
+
+    return [f"-D{adapt_key(k, role)}={v.value}" for k, v in optstore.options.items()
+            if option_should_be_forwarded(k, v, optstore, role, subprojects)]
 
 
 def adapt_key(k: "OptionKey", role: Role) -> "OptionKey":
@@ -603,44 +605,46 @@ def adapt_key(k: "OptionKey", role: Role) -> "OptionKey":
 
 
 def option_should_be_forwarded(k: "OptionKey",
-                               v: "coredata.UserOption[Any]",
+                               v: "options.UserOption[Any]",
+                               optstore: "options.OptionStore",
                                role: Role,
                                subprojects: set[str]) -> bool:
-    from mesonbuild import coredata
+    from mesonbuild import options
+    from mesonbuild.mesonlib import MachineChoice
 
     our_project_id = "frida-core" if role == "subproject" else ""
     is_for_us = k.subproject == our_project_id
     is_for_child = k.subproject in subprojects
 
-    if k.is_project():
+    if optstore.is_project_option(k):
         if is_for_us:
             if k.name == "compiler_backend":
                 return False
             tokens = k.name.split("_")
             if tokens[0] in {"helper", "agent"} and tokens[-1] in {"modern", "legacy"}:
                 return False
-        if k.subproject and k.machine is not coredata.MachineChoice.HOST:
+        if k.subproject and k.machine is not MachineChoice.HOST:
             return False
         return is_for_us or is_for_child
 
-    if coredata.CoreData.is_per_machine_option(k):
+    if optstore.is_per_machine_option(k):
         # The compat build generates its own machine files, so forwarding the
         # parent's build-machine options would inject a foreign toolchain. In a
         # native compat build that conjures a compiler-less build machine and
         # breaks any native: true target.
         return False
 
-    if k.is_builtin():
+    if optstore.is_builtin_option(k):
         if k.name in {"buildtype", "genvslite"}:
             return False
         if not str(v.value):
             return False
         if not is_for_child and role == "subproject" and k.subproject in {"", our_project_id}:
-            if not coredata.BUILTIN_OPTIONS[k.as_root()].yielding:
+            if not options.BUILTIN_OPTIONS[k.evolve(subproject=None, machine=MachineChoice.HOST)].yielding:
                 return k.subproject == our_project_id
             return True
 
-    if k.module == "python":
+    if k.get_module_prefix() == "python":
         if k.name == "install_env" and v.value == "prefix":
             return False
         if not str(v.value):
