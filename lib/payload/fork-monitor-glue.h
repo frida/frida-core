@@ -11,6 +11,10 @@ gboolean _frida_fork_monitor_syscall_creates_process (gssize number,
 gboolean _frida_fork_monitor_clone3_creates_process (void * args, gsize size,
     gsize * flags);
 
+void _frida_fork_monitor_install_atfork (void);
+void * _frida_fork_monitor_child_pack_new (void * fn, void * arg);
+int _frida_fork_monitor_child_trampoline (void * data);
+
 G_END_DECLS
 
 #endif
