@@ -373,6 +373,10 @@ namespace Frida.Gadget {
 	private Controller? controller;
 	private Gum.Interceptor? interceptor;
 	private Gum.Exceptor? exceptor;
+#if !WINDOWS
+	private ForkMonitor? fork_monitor;
+	private GadgetForkHandler? fork_handler;
+#endif
 	private Mutex mutex;
 	private Cond cond;
 
@@ -412,6 +416,11 @@ namespace Frida.Gadget {
 #endif
 
 		exceptor = Gum.Exceptor.obtain ();
+
+#if !WINDOWS
+		fork_handler = new GadgetForkHandler ();
+		fork_monitor = new ForkMonitor (fork_handler);
+#endif
 
 		try {
 			var interaction = config.interaction;
@@ -518,6 +527,11 @@ namespace Frida.Gadget {
 
 		if (config.teardown == Gum.TeardownRequirement.FULL) {
 			config = null;
+
+#if !WINDOWS
+			fork_monitor = null;
+			fork_handler = null;
+#endif
 
 			invalidate_dbus_context ();
 
@@ -746,6 +760,42 @@ namespace Frida.Gadget {
 		return new Location (executable_name, our_path, our_range);
 	}
 
+#if !WINDOWS
+	private sealed class GadgetForkHandler : Object, ForkHandler {
+		public void prepare_to_fork () {
+			Environment.prepare_to_fork ();
+			GumJS.prepare_to_fork ();
+			Gum.prepare_to_fork ();
+			GIOFork.prepare_to_fork ();
+			GLibFork.prepare_to_fork ();
+		}
+
+		public void recover_from_fork_in_parent () {
+			GLibFork.recover_from_fork_in_parent ();
+			GIOFork.recover_from_fork_in_parent ();
+			Gum.recover_from_fork_in_parent ();
+			GumJS.recover_from_fork_in_parent ();
+			Environment.recover_from_fork_in_parent ();
+		}
+
+		public void recover_from_fork_in_child (string? identifier) {
+			GLibFork.recover_from_fork_in_child ();
+			GIOFork.recover_from_fork_in_child ();
+			Gum.recover_from_fork_in_child ();
+			GumJS.recover_from_fork_in_child ();
+			Environment.recover_from_fork_in_child ();
+		}
+
+		public void prepare_to_specialize (string identifier) {
+			prepare_to_fork ();
+		}
+
+		public void recover_from_specialization (string identifier) {
+			recover_from_fork_in_parent ();
+		}
+	}
+#endif
+
 	private interface Controller : Object {
 		public abstract bool is_eternal {
 			get;
@@ -894,7 +944,6 @@ namespace Frida.Gadget {
 		}
 
 		private bool supports_async_exit () {
-			// Avoid deadlocking in case a fork() happened that we weren't made aware of.
 			return Gum.Process.has_thread (Environment.get_worker_tid ());
 		}
 
@@ -2128,6 +2177,11 @@ namespace Frida.Gadget {
 
 		private extern Gum.ThreadId get_worker_tid ();
 		private extern unowned MainContext get_worker_context ();
+#if !WINDOWS
+		private extern void prepare_to_fork ();
+		private extern void recover_from_fork_in_parent ();
+		private extern void recover_from_fork_in_child ();
+#endif
 
 		private extern string? detect_bundle_id ();
 		private extern string? detect_bundle_name ();

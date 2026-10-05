@@ -152,6 +152,70 @@ frida_gadget_environment_deinit (void)
 #endif
 }
 
+#ifndef HAVE_WINDOWS
+
+static gboolean worker_was_running;
+static gboolean forked_on_worker;
+
+void
+frida_gadget_environment_prepare_to_fork (void)
+{
+  forked_on_worker = (worker_tid != 0 &&
+      gum_process_get_current_thread_id () == worker_tid);
+  worker_was_running = (worker_thread != NULL);
+
+  if (worker_was_running && !forked_on_worker)
+  {
+    GSource * source;
+
+    source = g_idle_source_new ();
+    g_source_set_priority (source, G_PRIORITY_LOW);
+    g_source_set_callback (source, stop_worker_loop, NULL, NULL);
+    g_source_attach (source, worker_context);
+    g_source_unref (source);
+
+    g_thread_join (worker_thread);
+    worker_tid = 0;
+    worker_thread = NULL;
+
+    g_main_loop_unref (worker_loop);
+    worker_loop = g_main_loop_new (worker_context, FALSE);
+  }
+}
+
+void
+frida_gadget_environment_recover_from_fork_in_parent (void)
+{
+  if (worker_was_running && worker_thread == NULL)
+    worker_thread = g_thread_new ("frida-gadget", run_worker_loop, NULL);
+}
+
+void
+frida_gadget_environment_recover_from_fork_in_child (void)
+{
+  if (forked_on_worker)
+  {
+    worker_tid = gum_process_get_current_thread_id ();
+    worker_thread = g_thread_self ();
+    return;
+  }
+
+  worker_tid = 0;
+  worker_thread = NULL;
+  if (worker_loop != NULL)
+  {
+    g_main_loop_unref (worker_loop);
+    worker_loop = NULL;
+  }
+  if (worker_context == NULL)
+    worker_context = g_main_context_ref (g_main_context_default ());
+  worker_loop = g_main_loop_new (worker_context, FALSE);
+  if (worker_was_running)
+    worker_thread = g_thread_new ("frida-gadget", run_worker_loop, NULL);
+}
+
+#endif
+
 gboolean
 frida_gadget_environment_can_block_at_load_time (void)
 {
