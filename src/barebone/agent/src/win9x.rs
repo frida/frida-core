@@ -2436,6 +2436,10 @@ extern "C" fn frida_win9x_on_fault(fault: u32, frame: *mut u32) -> u32 {
         )
     };
     if handled == 0 {
+        if fault == PAGE_FAULT && page_is_absent(registers) {
+            return unsafe { FAULT_CHAIN[fault as usize] };
+        }
+
         report_unhandled_fault(fault, cpu_context.eip);
         cpu_context.eip = frida_win9x_park as *const () as u32;
     }
@@ -2470,6 +2474,12 @@ fn our_fault_frame(frame: *mut u32) -> Option<*const u32> {
 
 fn recovery_stack(frame: *mut u32) -> u32 {
     unsafe { frame.add(THUNK_FRAME_ESP).read() }
+}
+
+fn page_is_absent(registers: *const u32) -> bool {
+    let error_code = unsafe { registers.byte_add(FAULT_FRAME_ERROR_CODE).read() };
+
+    error_code & PAGE_FAULT_PRESENT == 0
 }
 
 fn report_unhandled_fault(fault: u32, eip: u32) {
@@ -2524,8 +2534,10 @@ const SIMD_FLOATING_POINT: u32 = 19;
 
 const THUNK_FRAME_EBP: usize = 2;
 const THUNK_FRAME_ESP: usize = 3;
+const FAULT_FRAME_ERROR_CODE: usize = 0x20;
 const FAULT_FRAME_EIP: usize = 0x24;
 const FAULT_FRAME_CS: usize = 0x28;
+const PAGE_FAULT_PRESENT: u32 = 1 << 0;
 const PARK_SLICE_US: u64 = 1_000_000;
 
 fn faulting_address() -> u32 {
