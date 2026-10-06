@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/termux-elf-cleaner.git
-revision = da04d59a83275b3b644fba4b6a83bd27ab08a96f
+revision = 85ed0baf1ce6abc1bf2cde92c808cc853d0bf791
 depth = 1
 
 [provide]
