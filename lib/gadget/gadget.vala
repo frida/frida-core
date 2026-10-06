@@ -941,6 +941,15 @@ namespace Frida.Gadget {
 		}
 
 		private bool supports_async_exit () {
+#if !WINDOWS
+			/*
+			 * A fork child is not a live Gadget session. Async unload posts
+			 * to the worker and waits; short-lived helpers never finish it,
+			 * so _exit sticks on g_cond_wait. Empty sync teardown is enough.
+			 */
+			if (Environment.is_fork_child ())
+				return false;
+#endif
 			return Gum.Process.has_thread (Environment.get_worker_tid ());
 		}
 
@@ -2175,6 +2184,7 @@ namespace Frida.Gadget {
 		private extern Gum.ThreadId get_worker_tid ();
 		private extern unowned MainContext get_worker_context ();
 #if !WINDOWS
+		private extern bool is_fork_child ();
 		private extern void prepare_to_fork ();
 		private extern void recover_from_fork_in_parent ();
 		private extern void recover_from_fork_in_child ();
