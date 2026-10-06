@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/ngtcp2.git
-revision = 8809ca153a7c98395da4d7ae8728749e3ead7d28
+revision = 0009518d5ac5e4ce80343fb5f3c719991ffd47af
 depth = 1
 
 [provide]

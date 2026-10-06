@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/libbpf.git
-revision = b879b5cf8d9de0b2d64b6d7041a68df05db7b8e5
+revision = 41f3b7376fcec7bdb570d3fc7d31e42b25429926
 depth = 1
 
 [provide]
