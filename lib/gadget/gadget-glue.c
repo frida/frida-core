@@ -207,11 +207,6 @@ frida_gadget_environment_recover_from_fork_in_child (void)
     g_main_loop_unref (worker_loop);
     worker_loop = NULL;
   }
-  if (worker_context == NULL)
-    worker_context = g_main_context_ref (g_main_context_default ());
-  worker_loop = g_main_loop_new (worker_context, FALSE);
-  if (worker_was_running)
-    worker_thread = g_thread_new ("frida-gadget", run_worker_loop, NULL);
 }
 
 #endif

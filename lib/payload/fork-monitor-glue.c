@@ -11,7 +11,18 @@
 
 #if defined (HAVE_LINUX) || defined (HAVE_DARWIN)
 # include <pthread.h>
+# include <unistd.h>
 #endif
+
+gint
+_frida_fork_monitor_getpid (void)
+{
+#if defined (HAVE_LINUX) || defined (HAVE_DARWIN)
+  return (gint) getpid ();
+#else
+  return 0;
+#endif
+}
 
 gboolean
 _frida_fork_monitor_flags_create_process (gsize flags)
@@ -37,8 +48,14 @@ _frida_fork_monitor_syscall_creates_process (gssize number,
     return TRUE;
 # endif
 # ifdef SYS_vfork
+  /*
+   * vfork() is clone(CLONE_VFORK|CLONE_VM): the child shares the parent's
+   * address space until exec/exit. Treating it as process creation runs
+   * child recovery against live parent locks. libc vfork is already
+   * redirected to fork(); raw SYS_vfork is not.
+   */
   if (number == SYS_vfork)
-    return TRUE;
+    return FALSE;
 # endif
 # ifdef SYS_clone
   if (number == SYS_clone)

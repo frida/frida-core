@@ -763,19 +763,16 @@ namespace Frida.Gadget {
 #if !WINDOWS
 	private sealed class GadgetForkHandler : Object, ForkHandler {
 		public void prepare_to_fork () {
-			Environment.prepare_to_fork ();
-			GumJS.prepare_to_fork ();
-			Gum.prepare_to_fork ();
-			GIOFork.prepare_to_fork ();
-			GLibFork.prepare_to_fork ();
+			/*
+			 * Keep the parent running. Joining gum-js-loop or the Gadget
+			 * worker around fork() wedges the host's main thread (input
+			 * timeout, then the system kills the process because it cannot
+			 * deliver broadcasts). Child-only recover reinitializes copied
+			 * locks.
+			 */
 		}
 
 		public void recover_from_fork_in_parent () {
-			GLibFork.recover_from_fork_in_parent ();
-			GIOFork.recover_from_fork_in_parent ();
-			Gum.recover_from_fork_in_parent ();
-			GumJS.recover_from_fork_in_parent ();
-			Environment.recover_from_fork_in_parent ();
 		}
 
 		public void recover_from_fork_in_child (string? identifier) {

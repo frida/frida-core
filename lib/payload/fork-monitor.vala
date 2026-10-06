@@ -19,6 +19,7 @@ namespace Frida {
 
 		private State state = IDLE;
 		private HookId forking_hook = HookId.FORK;
+		private int forking_pid;
 		private ChildRecoveryBehavior child_recovery_behavior = NORMAL;
 		private string? identifier;
 
@@ -252,6 +253,7 @@ namespace Frida {
 		private void begin_process_creation (HookId hook) {
 			state = FORKING;
 			forking_hook = hook;
+			forking_pid = _frida_fork_monitor_getpid ();
 			identifier = null;
 			handler.prepare_to_fork ();
 		}
@@ -260,7 +262,13 @@ namespace Frida {
 			if (state != State.FORKING || forking_hook != hook)
 				return;
 
-			if (result != 0) {
+			/*
+			 * clone/syscall on_leave can report 0 in a thread that still
+			 * shares this process. Child recovery reinitializes locks and
+			 * tears down gum-js-loop; doing that in the live parent wedges
+			 * the host. Only a real fork child has a new pid.
+			 */
+			if (result != 0 || _frida_fork_monitor_getpid () == forking_pid) {
 				handler.recover_from_fork_in_parent ();
 				state = IDLE;
 			} else {
@@ -350,6 +358,9 @@ namespace Frida {
 		private void finish_from_atfork (bool in_child) {
 			finish_process_creation (HookId.ATFORK, in_child ? 0 : 1);
 		}
+
+		[CCode (cname = "_frida_fork_monitor_getpid", cheader_filename = "fork-monitor-glue.h")]
+		private static extern int _frida_fork_monitor_getpid ();
 
 		[CCode (cname = "_frida_fork_monitor_install_atfork", cheader_filename = "fork-monitor-glue.h")]
 		private static extern void _frida_fork_monitor_install_atfork ();

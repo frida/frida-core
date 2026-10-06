@@ -5,6 +5,7 @@
 
 G_BEGIN_DECLS
 
+gint _frida_fork_monitor_getpid (void);
 gboolean _frida_fork_monitor_flags_create_process (gsize flags);
 gboolean _frida_fork_monitor_syscall_creates_process (gssize number,
     gsize arg0, gsize arg1, gsize * flags);
