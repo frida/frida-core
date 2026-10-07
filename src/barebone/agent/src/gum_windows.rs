@@ -24,6 +24,16 @@ pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn gum_thread_get_system_error() -> crate::bindings::gint {
+    kernel::thread_error() as crate::bindings::gint
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_thread_set_system_error(value: crate::bindings::gint) {
+    kernel::set_thread_error(value as u32)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_stack_size() -> crate::bindings::gsize {
     if crate::on_js_thread() {
         kernel::THREAD_STACK_SIZE as crate::bindings::gsize

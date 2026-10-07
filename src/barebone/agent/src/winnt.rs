@@ -3447,6 +3447,16 @@ pub fn in_copy() -> bool {
     core::ptr::eq(primitives(), &crate::winnt_user::USER)
 }
 
+pub fn thread_error() -> u32 {
+    if in_copy() { crate::winnt_user::last_error() } else { 0 }
+}
+
+pub fn set_thread_error(value: u32) {
+    if in_copy() {
+        crate::winnt_user::set_last_error(value);
+    }
+}
+
 fn primitives() -> &'static Primitives {
     unsafe { ACTIVE }
 }

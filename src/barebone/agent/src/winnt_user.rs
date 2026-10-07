@@ -788,6 +788,34 @@ fn user_api() -> &'static UserApi {
     unsafe { (*core::ptr::addr_of!(USER_API)).as_ref().unwrap() }
 }
 
+pub fn last_error() -> u32 {
+    unsafe { (error_api().get_last_error)() }
+}
+
+pub fn set_last_error(value: u32) {
+    unsafe { (error_api().set_last_error)(value) }
+}
+
+fn error_api() -> &'static ErrorApi {
+    unsafe {
+        if (*core::ptr::addr_of!(ERROR_API)).is_none() {
+            let library = module_base(peb(), b"kernel32.dll");
+            ERROR_API = Some(ErrorApi {
+                get_last_error: core::mem::transmute(export(library, b"GetLastError")),
+                set_last_error: core::mem::transmute(export(library, b"SetLastError")),
+            });
+        }
+        (*core::ptr::addr_of!(ERROR_API)).as_ref().unwrap()
+    }
+}
+
+struct ErrorApi {
+    get_last_error: windows_fn!(=> u32),
+    set_last_error: windows_fn!(u32),
+}
+
+static mut ERROR_API: Option<ErrorApi> = None;
+
 struct UserApi {
     allocate_heap: windows_fn!(usize, u32, usize => *mut u8),
     free_heap: windows_fn!(usize, u32, *mut u8 => u8),

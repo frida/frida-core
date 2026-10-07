@@ -510,6 +510,8 @@ fn resolve_user_api() {
             find_first_file: kernel32_export(b"FindFirstFileA"),
             find_next_file: kernel32_export(b"FindNextFileA"),
             find_close: kernel32_export(b"FindClose"),
+            get_last_error: kernel32_export(b"GetLastError"),
+            set_last_error: kernel32_export(b"SetLastError"),
             set_unhandled_exception_filter: kernel32_export(b"SetUnhandledExceptionFilter"),
             tls_alloc: kernel32_export(b"TlsAlloc"),
             tls_get_value: kernel32_export(b"TlsGetValue"),
@@ -520,6 +522,18 @@ fn resolve_user_api() {
 
 fn user_api() -> &'static UserApi {
     unsafe { &*core::ptr::addr_of!(USER_API) }
+}
+
+pub fn last_error() -> u32 {
+    let get_last_error: unsafe extern "stdcall" fn() -> u32 =
+        unsafe { core::mem::transmute(user_api().get_last_error as usize) };
+    unsafe { get_last_error() }
+}
+
+pub fn set_last_error(value: u32) {
+    let set_last_error: unsafe extern "stdcall" fn(u32) =
+        unsafe { core::mem::transmute(user_api().set_last_error as usize) };
+    unsafe { set_last_error(value) }
 }
 
 struct UserApi {
@@ -549,6 +563,8 @@ struct UserApi {
     find_first_file: u32,
     find_next_file: u32,
     find_close: u32,
+    get_last_error: u32,
+    set_last_error: u32,
     set_unhandled_exception_filter: u32,
     tls_alloc: u32,
     tls_get_value: u32,
@@ -582,6 +598,8 @@ static mut USER_API: UserApi = UserApi {
     find_first_file: 0,
     find_next_file: 0,
     find_close: 0,
+    get_last_error: 0,
+    set_last_error: 0,
     set_unhandled_exception_filter: 0,
     tls_alloc: 0,
     tls_get_value: 0,
