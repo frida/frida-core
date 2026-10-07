@@ -7,14 +7,16 @@ import (
 	"testing"
 )
 
-const playerPattern = `
-#pragma abi native
-
+const vec3Pattern = `
 struct Vec3 {
 	float x;
 	float y;
 	float z;
 };
+`
+
+const playerPattern = `
+#pragma abi native
 
 struct Player {
 	u32 hitpoints;
@@ -26,7 +28,7 @@ struct Player {
 
 func TestBuildAgentWithPatterns(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "player.pat"), playerPattern)
+	writeFile(t, filepath.Join(dir, "player.pat"), vec3Pattern+playerPattern)
 	writeFile(t, filepath.Join(dir, "agent.ts"), `
 import { Player } from "./player.pat";
 
@@ -125,8 +127,8 @@ console.log(isRed, position.x);
 	if err != nil {
 		t.Fatalf("build failed: %v\n%+v", err, diagnostics)
 	}
-	if !strings.Contains(bundle, "geo.Vec2 = class Vec2") {
-		t.Errorf("bundle lacks the imported type:\n%s", bundle)
+	if !strings.Contains(bundle, "geometry.Vec2 = class Vec2") || !strings.Contains(bundle, "geo.Vec2 = geometry.Vec2") {
+		t.Errorf("bundle lacks the imported type under its alias:\n%s", bundle)
 	}
 }
 

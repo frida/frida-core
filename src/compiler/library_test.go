@@ -27,13 +27,7 @@ export function describe(hitpoints: number): string {
 }
 `)
 	writeFile(t, filepath.Join(dir, "lib", "patterns", "player.pat"), "import geometry;\n"+playerPattern)
-	writeFile(t, filepath.Join(dir, "lib", "patterns", "geometry.pat"), `
-struct Vec3 {
-	float x;
-	float y;
-	float z;
-};
-`)
+	writeFile(t, filepath.Join(dir, "lib", "patterns", "geometry.pat"), vec3Pattern)
 
 	var diagnostics []Diagnostic
 	err := buildLibrary(LibraryOptions{ProjectRoot: dir, Entrypoint: "lib/index.ts", OutputDir: "dist", SourceMap: true}, func(d Diagnostic) {
