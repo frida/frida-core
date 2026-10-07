@@ -220,7 +220,8 @@ pub fn inject_agent(pid: u32) -> u32 {
         0xff, 0x74, 0x24, 0x04,
         0xba, 0, 0, 0, 0,
         0xff, 0xd2,
-        0xeb, 0xfe,
+        0x59,
+        0xc3,
     ];
     payload[5..9].copy_from_slice(&entry.to_le_bytes());
 
@@ -244,6 +245,7 @@ pub fn inject_agent(pid: u32) -> u32 {
     unsafe {
         targets().insert(observed, Target {
             arena: injection.arena,
+            thread: injection.thread,
             stack: injection.stack,
             image_base,
         })
@@ -532,15 +534,14 @@ pub fn detach_from_process(pid: u32) -> bool {
     };
     let arena = target.arena;
 
+    unsafe { DEPARTING_THREAD = target.thread };
     unsafe { ((arena + STOP_REQUEST) as *mut u32).write_volatile(1) };
     wake_copy(arena);
-    if !await_flag(arena + WORKER_STOPPED) || !await_flag(arena + MAIN_STOPPED) {
+    if !await_flag(arena + WORKER_STOPPED) || !await_flag(arena + MAIN_STOPPED)
+        || !await_departure()
+    {
         return false;
     }
-
-    // A thread sets the flag before it leaves. Thus wait for the time it needs to run its last
-    // instructions and return into KERNEL32.
-    wait(core::ptr::addr_of!(TEARDOWN_TOKEN), Some(TEARDOWN_GRACE_US), &mut || false);
 
     forget_hold(arena);
 
@@ -557,13 +558,26 @@ pub fn detach_from_process(pid: u32) -> bool {
     true
 }
 
+fn await_departure() -> bool {
+    for _ in 0..INJECTION_ATTEMPTS {
+        if unsafe { (&raw const DEPARTING_THREAD).read_volatile() } == 0 {
+            return true;
+        }
+        wait(core::ptr::addr_of!(DEPARTURE_TOKEN), Some(INJECTION_POLL_US), &mut || false);
+    }
+
+    false
+}
+
 struct Target {
     arena: u32,
+    thread: u32,
     stack: u32,
     image_base: u32,
 }
 
-static mut TEARDOWN_TOKEN: u8 = 0;
+static mut DEPARTING_THREAD: u32 = 0;
+static mut DEPARTURE_TOKEN: u8 = 0;
 
 pub fn arena_for_pid(pid: u32) -> Option<u64> {
     unsafe { targets().get(&pid).map(|t| t.arena as u64) }
@@ -1032,13 +1046,19 @@ fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
         0x50,
         0xba, 0, 0, 0, 0,
         0xff, 0xd2,
+        0x64, 0xa1, 0x18, 0x00, 0x00, 0x00,
+        0x89, 0x60, 0x58,
+        0x89, 0x60, 0x04,
+        0xc7, 0x40, 0x08, 0, 0, 0, 0,
         0x6a, 0x00,
         0xba, 0, 0, 0, 0,
         0xff, 0xd2,
     ];
+    let stack_bottom = stack_top + 0x40 - INJECTION_STACK_SIZE as u32;
     code[5..9].copy_from_slice(&stack_top.to_le_bytes());
     code[11..15].copy_from_slice(&entry.to_le_bytes());
-    code[20..24].copy_from_slice(&kernel32_export(b"ExitThread").to_le_bytes());
+    code[32..36].copy_from_slice(&stack_bottom.to_le_bytes());
+    code[39..43].copy_from_slice(&kernel32_export(b"ExitThread").to_le_bytes());
 
     unsafe { core::ptr::copy_nonoverlapping(code.as_ptr(), trampoline as *mut u8, code.len()) };
 }
@@ -1557,7 +1577,6 @@ const PATCH_SIZE: usize = 2;
 const PE_SIGNATURE_OFFSET: usize = 0x3c;
 const PE_ENTRY_POINT_OFFSET: usize = 0x28;
 const FRAME_BUFFER_SIZE: usize = 0x4000;
-const TEARDOWN_GRACE_US: u64 = 500_000;
 const TDB_CONTROL_BLOCK: usize = 0x5c;
 pub(crate) const PARKED_SLEEP_MS: u32 = 200;
 const STUB_OFFSET: u32 = 0x100;
@@ -2293,6 +2312,10 @@ const START_PARAMETER: usize = 12;
 extern "C" fn frida_win9x_on_control(message: u32, thread: u32) {
     if message == TERMINATE_THREAD {
         tell_the_copy_of_a_departure(thread);
+    }
+
+    if message == DESTROY_THREAD && thread == unsafe { DEPARTING_THREAD } {
+        unsafe { (&raw mut DEPARTING_THREAD).write_volatile(0) };
     }
 
     let told = match message {

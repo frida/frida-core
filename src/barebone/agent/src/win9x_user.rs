@@ -48,9 +48,6 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
 
     stop_hearing_about_faults();
     unsafe { ((arena + MAIN_STOPPED) as *mut u32).write_volatile(1) };
-    loop {
-        unsafe { sleep(PARKED_SLEEP_MS) };
-    }
 }
 
 // The group that the user-mode half runs on. The order is the order in Primitives.
