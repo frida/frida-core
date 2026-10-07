@@ -18,6 +18,33 @@ use crate::bindings::{GumCpuContext, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT
 use alloc::format;
 use core::ptr;
 
+#[cfg(target_arch = "x86")]
+macro_rules! windows_fn {
+    ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "stdcall" fn($($argument),*) -> $result
+    };
+}
+
+#[cfg(target_arch = "x86_64")]
+macro_rules! windows_fn {
+    ($($argument:ty),* $(,)?) => { unsafe extern "win64" fn($($argument),*) };
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "win64" fn($($argument),*) -> $result
+    };
+}
+
+#[cfg(target_arch = "aarch64")]
+macro_rules! windows_fn {
+    ($($argument:ty),* $(,)?) => { unsafe extern "C" fn($($argument),*) };
+    ($($argument:ty),* $(,)? => $result:ty) => {
+        unsafe extern "C" fn($($argument),*) -> $result
+    };
+}
+
+#[allow(unused_imports)]
+pub(crate) use windows_fn;
+
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar {
     c"windows".as_ptr() as *const crate::bindings::gchar

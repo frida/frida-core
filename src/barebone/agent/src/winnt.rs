@@ -28,31 +28,7 @@ type ThreadChangeRoutine = unsafe extern "win64" fn(usize, usize, u8);
 #[cfg(target_arch = "aarch64")]
 type ThreadChangeRoutine = unsafe extern "C" fn(usize, usize, u8);
 
-#[cfg(target_arch = "x86")]
-macro_rules! windows_fn {
-    ($($argument:ty),* $(,)?) => { unsafe extern "stdcall" fn($($argument),*) };
-    ($($argument:ty),* $(,)? => $result:ty) => {
-        unsafe extern "stdcall" fn($($argument),*) -> $result
-    };
-}
-
-#[cfg(target_arch = "x86_64")]
-macro_rules! windows_fn {
-    ($($argument:ty),* $(,)?) => { unsafe extern "win64" fn($($argument),*) };
-    ($($argument:ty),* $(,)? => $result:ty) => {
-        unsafe extern "win64" fn($($argument),*) -> $result
-    };
-}
-
-#[cfg(target_arch = "aarch64")]
-macro_rules! windows_fn {
-    ($($argument:ty),* $(,)?) => { unsafe extern "C" fn($($argument),*) };
-    ($($argument:ty),* $(,)? => $result:ty) => {
-        unsafe extern "C" fn($($argument),*) -> $result
-    };
-}
-
-pub(crate) use windows_fn;
+pub(crate) use crate::gum_windows::windows_fn;
 
 pub const MODULE_DIRECTORY: &str = "/WINDOWS/system32/";
 
