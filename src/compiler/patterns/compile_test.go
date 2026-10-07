@@ -626,3 +626,16 @@ func TestImportedDeclarationsAreShared(t *testing.T) {
 		}
 	}
 }
+
+func TestCompileReportsEndlessTemplateRecursion(t *testing.T) {
+	_, diagnostics := Compile(`
+struct Level<auto Depth> {
+	u8 value;
+	Level<Depth + 1> next;
+};
+Level<0> root @ 0;
+`)
+	if len(diagnostics) == 0 || !strings.Contains(diagnostics[0].Message, "recursively") {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+}

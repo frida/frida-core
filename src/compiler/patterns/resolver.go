@@ -293,6 +293,8 @@ func structLocals(t *Struct) []*Local {
 	return locals
 }
 
+const maxInstantiationDepth = 64
+
 func (r *resolver) instantiate(ref TypeRef, scope *fieldScope) Type {
 	decl, isTemplate := r.lookupTemplate(ref.Name)
 	if !isTemplate {
@@ -307,6 +309,12 @@ func (r *resolver) instantiate(ref TypeRef, scope *fieldScope) Type {
 		r.report(ref.Position, fmt.Sprintf("%s takes %d template arguments", ref.Name, len(params)))
 		return nil
 	}
+	if r.instantiations >= maxInstantiationDepth {
+		r.report(ref.Position, fmt.Sprintf("%s is instantiated recursively without end", ref.Name))
+		return nil
+	}
+	r.instantiations++
+	defer func() { r.instantiations-- }()
 
 	subst := &substitution{types: map[string]Type{}, values: map[string]Value{}, namings: map[string][]NamePart{}, outer: r.subst}
 	keys := make([]string, len(params))
