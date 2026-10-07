@@ -451,3 +451,30 @@ struct Table {
 		}
 	}
 }
+
+func TestDecodeTemplateLocalArgumentAcrossInstantiations(t *testing.T) {
+	const source = `
+struct Leaf<auto Kind> {
+	u8 value;
+	str summary = std::format("kind {}", Kind) [[export]];
+};
+struct First<auto Kind> {
+	Leaf<Kind> leaf;
+};
+struct Second<auto Kind> {
+	Leaf<Kind> leaf;
+};
+struct Top {
+	u8 kind;
+	First<kind> first;
+	Second<kind + 1> second;
+};
+`
+	decoded, err := DecodeSource(source, "Top", []byte{7, 1, 2}, 0, Targets[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(decoded, `"value":"kind 7"`) || !strings.Contains(decoded, `"value":"kind 8"`) {
+		t.Errorf("each instantiation should see its own argument: %s", decoded)
+	}
+}

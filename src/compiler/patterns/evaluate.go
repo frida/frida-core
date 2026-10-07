@@ -457,6 +457,13 @@ func (f *frame) lookupLocal(local *Local) (runtimeValue, error) {
 			return value, nil
 		}
 	}
+	for scope := f; scope != nil; scope = scope.parent {
+		for bound, value := range scope.locals {
+			if bound.Name == local.Name {
+				return value, nil
+			}
+		}
+	}
 	return nil, fmt.Errorf("%s is not available", local.Name)
 }
 
