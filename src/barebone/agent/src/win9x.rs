@@ -533,6 +533,7 @@ pub fn detach_from_process(pid: u32) -> bool {
     let arena = target.arena;
 
     unsafe { ((arena + STOP_REQUEST) as *mut u32).write_volatile(1) };
+    wake_copy(arena);
     if !await_flag(arena + WORKER_STOPPED) || !await_flag(arena + MAIN_STOPPED) {
         return false;
     }
