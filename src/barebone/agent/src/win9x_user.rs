@@ -328,19 +328,11 @@ const GUM_PAGE_WRITE: u32 = 0x2;
 const GUM_PAGE_EXECUTE: u32 = 0x4;
 
 pub unsafe extern "stdcall" fn on_module_load(name: *const u8) -> u32 {
-    unsafe {
-        let n = (ARENA + 0xb0) as *mut u32;
-        n.write_volatile(n.read_volatile() + 1);
-    }
     let original: extern "stdcall" fn(*const u8) -> u32 =
         unsafe { core::mem::transmute(crate::gum_windows::loader_load()) };
 
     let handle = original(name);
     note_module(handle, name);
-    unsafe {
-        let n = (ARENA + 0xb4) as *mut u32;
-        n.write_volatile(n.read_volatile() + 1);
-    }
 
     handle
 }
