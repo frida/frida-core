@@ -29,7 +29,9 @@ use crate::bindings::{
 #[cfg(any(feature = "linux", feature = "linux-injected"))]
 use crate::gum_modules::enumerate_symbols_in_range;
 #[cfg(any(feature = "win9x", feature = "winnt"))]
-use crate::gum_windows::enumerate_exports_in_range;
+use crate::gum_windows::{enumerate_exports_in_range, enumerate_imports_in_module};
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+use crate::bindings::{GumFoundImportFunc, GumImportDetails, GumImportType_GUM_IMPORT_FUNCTION};
 #[cfg(any(feature = "xnu-core", feature = "linux-injected"))]
 use crate::gum_injected::enumerate_exports_in_range;
 
@@ -184,6 +186,11 @@ extern "C" fn gum_native_module_iface_init(g_iface: gpointer, _iface_data: gpoin
         (*iface).get_path = Some(crate::signed_to_be_called_back(gum_native_module_get_path, 0));
         (*iface).get_range = Some(crate::signed_to_be_called_back(gum_native_module_get_range, 0));
         (*iface).enumerate_exports = Some(crate::signed_to_be_called_back(gum_native_module_enumerate_exports, 0));
+        #[cfg(any(feature = "win9x", feature = "winnt"))]
+        {
+            (*iface).enumerate_imports =
+                Some(crate::signed_to_be_called_back(gum_native_module_enumerate_imports, 0));
+        }
         (*iface).find_export_by_name = Some(crate::signed_to_be_called_back(gum_native_module_find_export_by_name, 0));
         #[cfg(any(feature = "linux", feature = "linux-injected"))]
         {
@@ -317,6 +324,32 @@ unsafe extern "C" fn gum_native_module_enumerate_exports(
     }
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+unsafe extern "C" fn gum_native_module_enumerate_imports(
+    self_: *mut GumModule,
+    func: GumFoundImportFunc,
+    user_data: gpointer,
+) {
+    unsafe {
+        let module = self_ as *mut GumNativeModule;
+        let base = (*module).range.base_address;
+
+        let mut on_import = |library: *const gchar, name: *const gchar, slot: u64, address: u64| {
+            let details = GumImportDetails {
+                type_: GumImportType_GUM_IMPORT_FUNCTION,
+                name,
+                module: library,
+                address,
+                slot,
+            };
+
+            func.unwrap()(&details as *const GumImportDetails, user_data) != 0
+        };
+
+        enumerate_imports_in_module(base, &mut on_import);
+    }
+}
+
 #[cfg(any(feature = "linux", feature = "linux-injected"))]
 unsafe extern "C" fn gum_native_module_enumerate_symbols(
     self_: *mut GumModule,
@@ -367,6 +400,9 @@ const SYMBOL_IS_FUNCTION: u8 = 2;
 /// `callback` for every exported function in `[start, end)`, stopping early when
 /// it returns false.
 pub(crate) type FoundExportCallback<'a> = dyn FnMut(*const gchar, u64) -> bool + 'a;
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+pub(crate) type FoundImportCallback<'a> = dyn FnMut(*const gchar, *const gchar, u64, u64) -> bool + 'a;
 
 // Code slabs the agent allocates are normal writable RAM, so Gum can keep a real writable alias to
 // them across the slab's lifetime. Pre-existing kernel text is write-protected — CTRR-locked on

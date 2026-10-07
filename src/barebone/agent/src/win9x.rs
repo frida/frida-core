@@ -1486,6 +1486,48 @@ pub(crate) fn enumerate_exports(base: u32, found: &mut dyn FnMut(*const u8, u64)
     }
 }
 
+pub(crate) fn enumerate_imports(base: u32,
+    found: &mut dyn FnMut(*const u8, *const u8, u64, u64) -> bool) {
+    let headers = base + read_u32(base + DOS_HEADERS_OFFSET);
+    let directory_rva = read_u32(headers + IMPORT_DIRECTORY_OFFSET);
+    if directory_rva == 0 {
+        return;
+    }
+
+    let mut descriptor = base + directory_rva;
+    loop {
+        let library_rva = read_u32(descriptor + IMPORT_NAME_OFFSET);
+        if library_rva == 0 {
+            return;
+        }
+        let library = (base + library_rva) as *const u8;
+        let thunks = base + read_u32(descriptor + IMPORT_THUNKS_OFFSET);
+        let lookups = match read_u32(descriptor + IMPORT_LOOKUPS_OFFSET) {
+            0 => thunks,
+            rva => base + rva,
+        };
+
+        let mut index = 0;
+        loop {
+            let lookup = read_u32(lookups + index * 4);
+            if lookup == 0 {
+                break;
+            }
+            let slot = thunks + index * 4;
+            let imported_by_name = lookup & IMPORT_BY_ORDINAL == 0;
+            if imported_by_name {
+                let name = (base + lookup + IMPORT_HINT_SIZE) as *const u8;
+                if !found(library, name, slot as u64, read_u32(slot) as u64) {
+                    return;
+                }
+            }
+            index += 1;
+        }
+
+        descriptor += IMPORT_DESCRIPTOR_SIZE;
+    }
+}
+
 pub fn kernel32_export(wanted: &[u8]) -> u32 {
     let base = unsafe { core::ptr::addr_of!(_KERNEL32_Base).read() };
     let headers = base + read_u32(base + DOS_HEADERS_OFFSET);
@@ -1536,6 +1578,13 @@ fn read_u8(address: u32) -> u8 {
 }
 
 const EXPORT_DIRECTORY_OFFSET: u32 = 0x78;
+const IMPORT_DIRECTORY_OFFSET: u32 = 0x80;
+const IMPORT_DESCRIPTOR_SIZE: u32 = 20;
+const IMPORT_LOOKUPS_OFFSET: u32 = 0;
+const IMPORT_NAME_OFFSET: u32 = 12;
+const IMPORT_THUNKS_OFFSET: u32 = 16;
+const IMPORT_BY_ORDINAL: u32 = 0x8000_0000;
+const IMPORT_HINT_SIZE: u32 = 2;
 
 pub(crate) const MEM_RESERVE: u32 = 0x0000_2000;
 pub(crate) const MEM_RELEASE: u32 = 0x0000_8000;

@@ -3749,19 +3749,83 @@ pub(crate) fn enumerate_exports(base: usize, found: &mut dyn FnMut(*const u8, u6
     }
 }
 
+pub(crate) fn enumerate_imports(base: usize,
+    found: &mut dyn FnMut(*const u8, *const u8, u64, u64) -> bool) {
+    unsafe {
+        let directories = data_directories(base);
+        let directory_rva = read_u32(directories + IMPORT_DIRECTORY_INDEX * 8) as usize;
+        if directory_rva == 0 {
+            return;
+        }
+        let wide = is_pe32_plus(base);
+        let thunk_size = if wide { 8 } else { 4 };
+        let by_ordinal: u64 = if wide { 1 << 63 } else { 1 << 31 };
+
+        let mut descriptor = base + directory_rva;
+        loop {
+            let library_rva = read_u32(descriptor + IMPORT_NAME_OFFSET) as usize;
+            if library_rva == 0 {
+                return;
+            }
+            let library = (base + library_rva) as *const u8;
+            let thunks = base + read_u32(descriptor + IMPORT_THUNKS_OFFSET) as usize;
+            let lookups = match read_u32(descriptor + IMPORT_LOOKUPS_OFFSET) as usize {
+                0 => thunks,
+                rva => base + rva,
+            };
+
+            let mut index = 0;
+            loop {
+                let lookup = read_thunk(lookups + index * thunk_size, wide);
+                if lookup == 0 {
+                    break;
+                }
+                let slot = thunks + index * thunk_size;
+                if lookup & by_ordinal == 0 {
+                    let name = (base + lookup as usize + IMPORT_HINT_SIZE) as *const u8;
+                    if !found(library, name, slot as u64, read_thunk(slot, wide)) {
+                        return;
+                    }
+                }
+                index += 1;
+            }
+
+            descriptor += IMPORT_DESCRIPTOR_SIZE;
+        }
+    }
+}
+
+unsafe fn read_thunk(address: usize, wide: bool) -> u64 {
+    unsafe {
+        if wide {
+            (address as *const u64).read()
+        } else {
+            read_u32(address) as u64
+        }
+    }
+}
+
 unsafe fn export_directory(base: usize) -> usize {
+    unsafe { base + read_u32(data_directories(base)) as usize }
+}
+
+unsafe fn is_pe32_plus(base: usize) -> bool {
     unsafe {
         let headers = base + read_u32(base + PE_HEADERS_OFFSET) as usize;
-        let magic = (headers + OPTIONAL_HEADER_OFFSET) as *const u16;
-        let directories = headers
+        ((headers + OPTIONAL_HEADER_OFFSET) as *const u16).read() == PE32_PLUS_MAGIC
+    }
+}
+
+unsafe fn data_directories(base: usize) -> usize {
+    unsafe {
+        let headers = base + read_u32(base + PE_HEADERS_OFFSET) as usize;
+        headers
             + OPTIONAL_HEADER_OFFSET
-            + if magic.read() == PE32_PLUS_MAGIC {
+            + if is_pe32_plus(base) {
                 DATA_DIRECTORIES_OFFSET_64
             } else {
                 DATA_DIRECTORIES_OFFSET_32
-            };
-
-        base + read_u32(directories) as usize
+            }
     }
 }
 
@@ -3840,6 +3904,12 @@ const PE32_PLUS_MAGIC: u16 = 0x20b;
 const DATA_DIRECTORIES_OFFSET_32: usize = 0x60;
 const DATA_DIRECTORIES_OFFSET_64: usize = 0x70;
 const EXPORT_NAME_COUNT_OFFSET: usize = 0x18;
+const IMPORT_DIRECTORY_INDEX: usize = 1;
+const IMPORT_DESCRIPTOR_SIZE: usize = 20;
+const IMPORT_LOOKUPS_OFFSET: usize = 0;
+const IMPORT_NAME_OFFSET: usize = 12;
+const IMPORT_THUNKS_OFFSET: usize = 16;
+const IMPORT_HINT_SIZE: usize = 2;
 const EXPORT_FUNCTIONS_OFFSET: usize = 0x1c;
 const EXPORT_NAMES_OFFSET: usize = 0x20;
 const EXPORT_ORDINALS_OFFSET: usize = 0x24;

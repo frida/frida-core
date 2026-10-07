@@ -10,7 +10,7 @@ use crate::{
         GumThreadDetails, GumThreadFlags, GumThreadId, GumThreadRegistry,
         gconstpointer, gum_thread_details_copy,
     },
-    gum::{self, FoundExportCallback},
+    gum::{self, FoundExportCallback, FoundImportCallback},
     kernel,
 };
 use crate::bindings::{GumCpuContext, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT};
@@ -652,6 +652,14 @@ const INTEGER_DIVIDE_BY_ZERO: u32 = 0xc000_0094;
 const INTEGER_OVERFLOW: u32 = 0xc000_0095;
 const BREAKPOINT: u32 = 0x8000_0003;
 const SINGLE_STEP: u32 = 0x8000_0004;
+
+pub(crate) unsafe fn enumerate_imports_in_module(base: u64, callback: &mut FoundImportCallback) {
+    if crate::running_in_a_process() {
+        kernel::enumerate_imports(base as _, &mut |library, name, slot, address| {
+            callback(library as *const crate::bindings::gchar, name as *const crate::bindings::gchar, slot, address)
+        });
+    }
+}
 
 pub(crate) unsafe fn enumerate_exports_in_range(
     start_address: u64,
