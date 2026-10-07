@@ -38,9 +38,21 @@ func init() {
 	defineHashBuiltins()
 }
 
+var patternArguments = map[string]bool{
+	"std::core::formatted_value": true, "std::core::set_display_name": true, "std::core::member_count": true, "std::core::has_member": true,
+}
+
 func (f *frame) builtin(call *Builtin) (runtimeValue, error) {
 	arguments := make([]runtimeValue, len(call.Arguments))
 	for i, argument := range call.Arguments {
+		if patternArguments[call.Name] && isReference(argument) {
+			node, err := f.target(argument)
+			if err != nil {
+				return nil, err
+			}
+			arguments[i] = node
+			continue
+		}
 		result, err := f.eval(argument)
 		if err != nil {
 			return nil, err
@@ -343,7 +355,7 @@ func defineCoreBuiltins() {
 			if node.Formatted != "" {
 				return node.Formatted, nil
 			}
-			return display(node.raw), nil
+			return display(node.runtimeValue()), nil
 		}
 		return display(args[0]), nil
 	})

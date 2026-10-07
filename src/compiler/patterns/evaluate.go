@@ -360,6 +360,21 @@ func (f *frame) element(v *Index) (*DecodedValue, error) {
 	return nil, fmt.Errorf("value cannot be indexed")
 }
 
+func (v *DecodedValue) runtimeValue() runtimeValue {
+	if v.typ == nil {
+		return v.raw
+	}
+	enum, isEnum := Unalias(v.typ).(*Enum)
+	if !isEnum {
+		return v.raw
+	}
+	number, err := toInt(v.raw)
+	if err != nil {
+		return v.raw
+	}
+	return enumValue{enum: enum, value: number}
+}
+
 func (f *frame) memberOf(v *MemberOf) (*DecodedValue, error) {
 	owner, err := f.memberOwner(v)
 	if err != nil {
@@ -582,13 +597,13 @@ func (f *frame) eval(v Value) (runtimeValue, error) {
 		if err != nil {
 			return nil, err
 		}
-		return node.raw, nil
+		return node.runtimeValue(), nil
 	case *ParentFieldRef:
 		node, err := f.parentNode(v.Depth, v.Path)
 		if err != nil {
 			return nil, err
 		}
-		return node.raw, nil
+		return node.runtimeValue(), nil
 	case *LocalRef:
 		return f.lookupLocal(v.Local)
 	case *BitRef:
@@ -596,7 +611,7 @@ func (f *frame) eval(v Value) (runtimeValue, error) {
 		if !isDecoded {
 			return nil, fmt.Errorf("%s is not available", v.Member.Name)
 		}
-		return node.raw, nil
+		return node.runtimeValue(), nil
 	case *GlobalRef:
 		return f.global(v)
 	case *ArrayValue:
@@ -614,13 +629,13 @@ func (f *frame) eval(v Value) (runtimeValue, error) {
 		if err != nil {
 			return nil, err
 		}
-		return element.raw, nil
+		return element.runtimeValue(), nil
 	case *MemberOf:
 		member, err := f.memberOf(v)
 		if err != nil {
 			return nil, err
 		}
-		return member.raw, nil
+		return member.runtimeValue(), nil
 	case *Cursor:
 		owner := f.cursorOwner()
 		return int64(owner.cursor - owner.base), nil

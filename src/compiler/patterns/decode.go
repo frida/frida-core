@@ -843,6 +843,7 @@ func (d *decoder) decodeBitfield(value *DecodedValue, t *Bitfield, offset int, p
 			field.Value, field.ValueKind, field.raw = integerJSON(bits, false), "uint", bits
 			if member.Enum != nil {
 				field.Label = enumLabel(member.Enum, int64(bits))
+				field.typ = member.Enum
 			}
 		}
 		value.Fields = append(value.Fields, field)
@@ -928,6 +929,7 @@ func (f *frame) placeBits(member *BitfieldMember) error {
 		node.Value, node.ValueKind, node.raw = integerJSON(bits, false), "uint", bits
 		if member.Enum != nil {
 			node.Label = enumLabel(member.Enum, int64(bits))
+			node.typ = member.Enum
 		}
 	}
 	f.value.Fields = append(f.value.Fields, node)

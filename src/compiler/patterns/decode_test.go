@@ -354,3 +354,75 @@ struct File {
 		}
 	}
 }
+
+func TestDecodeEnumsKeepTheirNames(t *testing.T) {
+	const source = `
+enum Kind : u8 {
+	Circle = 1,
+	Square = 2,
+};
+bitfield Packed {
+	Kind kind : 4;
+	padding : 4;
+};
+fn describe(ref auto shape) {
+	return std::format("{} {}", shape.inner.kind, std::core::formatted_value(shape.packed.kind));
+};
+struct Inner {
+	Kind kind;
+};
+struct Shape {
+	Inner inner;
+	Packed packed;
+	str nested = std::format("{}", inner.kind) [[export]];
+	str bits = std::format("{}", packed.kind) [[export]];
+	str formatted = std::core::formatted_value(packed.kind) [[export]];
+} [[format("describe")]];
+struct Shapes {
+	Shape shapes[1];
+};
+`
+	decoded, err := DecodeSource(source, "Shapes", []byte{2, 1}, 0, Targets[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value DecodedValue
+	if err := json.Unmarshal([]byte(decoded), &value); err != nil {
+		t.Fatal(err)
+	}
+	shape := value.Fields[0].Elements[0]
+	if shape.Formatted != "Kind::Square Kind::Circle" {
+		t.Errorf("a ref parameter should see enum names: %q", shape.Formatted)
+	}
+	if shape.Fields[2].Value != "Kind::Square" || shape.Fields[3].Value != "Kind::Circle" || shape.Fields[4].Value != "Kind::Circle" {
+		t.Errorf("nested and bitfield members should keep their enum names: %s", shape)
+	}
+}
+
+func TestDecodeFormattedValueOfScalar(t *testing.T) {
+	const source = `
+fn seconds(u32 millis) {
+	return std::format("{}s", millis / 1000);
+};
+bitfield Prot {
+	bool read : 1;
+	bool write : 1;
+	padding : 6;
+} [[format("describeProt")]];
+fn describeProt(ref auto prot) {
+	return prot.read ? "r" : "-";
+};
+struct Timing {
+	u32 elapsed [[format("seconds")]];
+	Prot prot;
+	str summary = std::format("{} {}", std::core::formatted_value(elapsed), std::core::formatted_value(prot)) [[export]];
+};
+`
+	decoded, err := DecodeSource(source, "Timing", []byte{0xd0, 0x07, 0, 0, 1}, 0, Targets[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(decoded, `"value":"2s r"`) {
+		t.Errorf("formatted_value should format scalar and bitfield fields: %s", decoded)
+	}
+}
