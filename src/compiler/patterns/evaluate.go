@@ -1313,7 +1313,7 @@ func (f *frame) call(c *FunctionCall) (runtimeValue, error) {
 		return nil, err
 	}
 	for i, param := range c.Function.Params {
-		if i < len(c.Arguments) && isComposite(param.Type) && denotesPattern(c.Arguments[i]) {
+		if i < len(c.Arguments) && (param.Ref || isComposite(param.Type)) && denotesPattern(c.Arguments[i]) {
 			if arguments[i], err = f.target(c.Arguments[i]); err != nil {
 				return nil, err
 			}

@@ -478,3 +478,36 @@ struct Top {
 		t.Errorf("each instantiation should see its own argument: %s", decoded)
 	}
 }
+
+func TestDecodeRefParametersReceivePatterns(t *testing.T) {
+	const source = `
+bitfield Bits {
+	bool read : 1;
+	bool write : 1;
+	padding : 6;
+};
+fn describeBits(ref auto bits) {
+	return (bits.read ? "r" : "-") + (bits.write ? "w" : "-");
+};
+fn describePair(ref auto pair) {
+	return std::format("{}/{}", pair.a, pair.b);
+};
+struct Pair {
+	u8 a;
+	u8 b;
+};
+struct Root {
+	Bits bits;
+	Pair pair;
+	str viaBitfield = describeBits(bits) [[export]];
+	str viaStruct = describePair(pair) [[export]];
+};
+`
+	decoded, err := DecodeSource(source, "Root", []byte{3, 5, 6}, 0, Targets[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(decoded, `"value":"rw"`) || !strings.Contains(decoded, `"value":"5/6"`) {
+		t.Errorf("ref parameters should receive the pattern: %s", decoded)
+	}
+}
