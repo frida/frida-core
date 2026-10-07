@@ -324,3 +324,33 @@ struct Header {
 		t.Errorf("the enum should read through VarInt and take its size: %s", decoded)
 	}
 }
+
+func TestDecodeTemplateFieldArgumentAcrossInstantiations(t *testing.T) {
+	const source = `
+struct Payload<auto Size> {
+	u8 data[Size];
+};
+struct Record<Addr> {
+	u8 size;
+	u8 tag = std::mem::read_unsigned($, 1);
+	Payload<size> payload;
+};
+struct File {
+	u8 wide;
+	if (wide == 1) {
+		Record<u32> record;
+	} else {
+		Record<u64> record;
+	}
+};
+`
+	for _, wide := range []byte{1, 2} {
+		decoded, err := DecodeSource(source, "File", []byte{wide, 2, 0xaa, 0xbb}, 0, Targets[0], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(decoded, "is not available") || !strings.Contains(decoded, `"count":2`) {
+			t.Errorf("wide=%d: the template argument should bind in every instantiation: %s", wide, decoded)
+		}
+	}
+}

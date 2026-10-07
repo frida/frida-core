@@ -399,6 +399,9 @@ func (f *frame) node(path []*Field) (*DecodedValue, error) {
 	for i, field := range path {
 		node, isDecoded := scope.nodes[field]
 		if !isDecoded {
+			node = scope.nodeNamed(field.Name)
+		}
+		if node == nil {
 			return nil, fmt.Errorf("%s is not available", field.Name)
 		}
 		if node.pointee != nil {
