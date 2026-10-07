@@ -1380,11 +1380,11 @@ pub(crate) fn watch_for_work(main_context: *mut GMainContext, ready: fn() -> boo
 #[cfg(any(feature = "blob", feature = "xnu-core"))]
 static mut WORK_SOURCE: *mut GSource = ptr::null_mut();
 
-#[cfg(any(feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 static mut WAKEUP_POLLFD: bindings::GPollFD =
     bindings::GPollFD { fd: -1, events: 0, revents: 0, user_data: ptr::null_mut() };
 
-#[cfg(any(feature = "winnt", feature = "linux-injected"))]
+#[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
 pub(crate) fn watch_a_descriptor(context: *mut GMainContext, fd: i32,
         poll: unsafe extern "C" fn(*mut bindings::GPollFD, u32, i32) -> i32) {
     const G_IO_IN: u16 = 1;

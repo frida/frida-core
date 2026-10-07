@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::gum_windows::{FileApi, TextApi};
 use crate::kernel::{MemoryRegion, ThreadEntry};
 use crate::win9x::*;
 
@@ -163,6 +164,66 @@ fn copy_has_work() -> bool {
     }
 }
 
+fn loop_wake_event() -> u32 {
+    event_in(slot_for_token(crate::glib::wakeup_token()))
+}
+
+pub(crate) unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD, nfds: u32,
+        timeout: i32) -> i32 {
+    const MAX_HANDLES: usize = 16;
+    let fds = unsafe { core::slice::from_raw_parts_mut(ufds, nfds as usize) };
+
+    let mut handles = [0u32; MAX_HANDLES];
+    let mut origin = [0usize; MAX_HANDLES];
+    let mut count = 0usize;
+    let mut ready = 0i32;
+
+    for (index, fd) in fds.iter_mut().enumerate() {
+        fd.revents = 0;
+
+        if fd.fd == G_WAIT_WAKEUP_HANDLE {
+            if !fd.user_data.is_null() {
+                if unsafe { (fd.user_data as *const i32).read_volatile() } != 0 {
+                    fd.revents = POLL_IN;
+                    ready += 1;
+                }
+                let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
+                unsafe { token.write(fd.user_data) };
+            }
+        } else if fd.fd != -1 && count < MAX_HANDLES {
+            handles[count] = fd.fd as u32;
+            origin[count] = index;
+            count += 1;
+        }
+    }
+
+    if ready == 0 && count != 0 {
+        let wait_for_multiple_objects_ex: unsafe extern "stdcall" fn(u32, *const u32, u32, u32, u32) -> u32 =
+            unsafe { core::mem::transmute(user_api().wait_for_multiple_objects_ex as usize) };
+        let timeout_ms = if timeout < 0 { INFINITE } else { timeout as u32 };
+        let status = unsafe {
+            wait_for_multiple_objects_ex(count as u32, handles.as_ptr(), 0, timeout_ms, 1)
+        };
+        if (status as usize) < count {
+            fds[origin[status as usize]].revents = POLL_IN;
+            ready += 1;
+        }
+    }
+
+    for fd in fds.iter() {
+        if fd.fd == G_WAIT_WAKEUP_HANDLE && !fd.user_data.is_null() {
+            let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
+            unsafe { token.write(core::ptr::null_mut()) };
+        }
+    }
+
+    ready
+}
+
+const G_WAIT_WAKEUP_HANDLE: i32 = -43;
+const GWAKEUP_TOKEN: usize = 4;
+const POLL_IN: u16 = 1;
+
 fn serve_the_copy() {
     let arena = unsafe { ARENA };
 
@@ -221,6 +282,7 @@ unsafe extern "C" fn user_worker(parameter: *mut c_void, _wait_result: i32) {
     crate::gum_windows::watch_the_loader();
     crate::glib::own_the_loop();
     crate::watch_for_work(context, copy_has_work, serve_the_copy);
+    crate::watch_a_descriptor(context, loop_wake_event() as i32, poll_handles);
 
     while unsafe { ((arena + STOP_REQUEST) as *const u32).read_volatile() } == 0 {
         unsafe { crate::dispatch_pending_work(context) };
@@ -503,15 +565,20 @@ fn resolve_user_api() {
             create_event: kernel32_export(b"CreateEventA"),
             set_event: kernel32_export(b"SetEvent"),
             wait_for_single_object_ex: kernel32_export(b"WaitForSingleObjectEx"),
+            wait_for_multiple_objects_ex: kernel32_export(b"WaitForMultipleObjectsEx"),
             close_handle: kernel32_export(b"CloseHandle"),
             set_file_pointer: kernel32_export(b"SetFilePointer"),
             create_file: kernel32_export(b"CreateFileA"),
             read_file: kernel32_export(b"ReadFile"),
+            write_file: kernel32_export(b"WriteFile"),
             find_first_file: kernel32_export(b"FindFirstFileA"),
             find_next_file: kernel32_export(b"FindNextFileA"),
             find_close: kernel32_export(b"FindClose"),
             get_last_error: kernel32_export(b"GetLastError"),
             set_last_error: kernel32_export(b"SetLastError"),
+            format_message: kernel32_export(b"FormatMessageA"),
+            multi_byte_to_wide_char: kernel32_export(b"MultiByteToWideChar"),
+            wide_char_to_multi_byte: kernel32_export(b"WideCharToMultiByte"),
             set_unhandled_exception_filter: kernel32_export(b"SetUnhandledExceptionFilter"),
             tls_alloc: kernel32_export(b"TlsAlloc"),
             tls_get_value: kernel32_export(b"TlsGetValue"),
@@ -536,6 +603,38 @@ pub fn set_last_error(value: u32) {
     unsafe { set_last_error(value) }
 }
 
+pub fn file_api() -> &'static FileApi {
+    unsafe {
+        if (*core::ptr::addr_of!(FILE_API)).is_none() {
+            let api = user_api();
+            FILE_API = Some(FileApi {
+                read_file: core::mem::transmute(api.read_file as usize),
+                write_file: core::mem::transmute(api.write_file as usize),
+                close_handle: core::mem::transmute(api.close_handle as usize),
+                format_message: core::mem::transmute(api.format_message as usize),
+            });
+        }
+        (*core::ptr::addr_of!(FILE_API)).as_ref().unwrap()
+    }
+}
+
+static mut FILE_API: Option<FileApi> = None;
+
+pub fn text_api() -> &'static TextApi {
+    unsafe {
+        if (*core::ptr::addr_of!(TEXT_API)).is_none() {
+            let api = user_api();
+            TEXT_API = Some(TextApi {
+                multi_byte_to_wide_char: core::mem::transmute(api.multi_byte_to_wide_char as usize),
+                wide_char_to_multi_byte: core::mem::transmute(api.wide_char_to_multi_byte as usize),
+            });
+        }
+        (*core::ptr::addr_of!(TEXT_API)).as_ref().unwrap()
+    }
+}
+
+static mut TEXT_API: Option<TextApi> = None;
+
 struct UserApi {
     sleep: u32,
     get_tick_count: u32,
@@ -556,15 +655,20 @@ struct UserApi {
     create_event: u32,
     set_event: u32,
     wait_for_single_object_ex: u32,
+    wait_for_multiple_objects_ex: u32,
     close_handle: u32,
     set_file_pointer: u32,
     create_file: u32,
     read_file: u32,
+    write_file: u32,
     find_first_file: u32,
     find_next_file: u32,
     find_close: u32,
     get_last_error: u32,
     set_last_error: u32,
+    format_message: u32,
+    multi_byte_to_wide_char: u32,
+    wide_char_to_multi_byte: u32,
     set_unhandled_exception_filter: u32,
     tls_alloc: u32,
     tls_get_value: u32,
@@ -591,15 +695,20 @@ static mut USER_API: UserApi = UserApi {
     create_event: 0,
     set_event: 0,
     wait_for_single_object_ex: 0,
+    wait_for_multiple_objects_ex: 0,
     close_handle: 0,
     set_file_pointer: 0,
     create_file: 0,
     read_file: 0,
+    write_file: 0,
     find_first_file: 0,
     find_next_file: 0,
     find_close: 0,
     get_last_error: 0,
     set_last_error: 0,
+    format_message: 0,
+    multi_byte_to_wide_char: 0,
+    wide_char_to_multi_byte: 0,
     set_unhandled_exception_filter: 0,
     tls_alloc: 0,
     tls_get_value: 0,

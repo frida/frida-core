@@ -3,19 +3,26 @@
 
 use crate::{
     bindings::{
-        _GumPageProtection_GUM_PAGE_EXECUTE, _GumRwxSupport_GUM_RWX_FULL, GumMemoryRange,
-        GumModuleRegistry, GumPageProtection, GumRwxSupport, g_object_unref, gboolean, gpointer,
-        gsize, guint, gum_barebone_register_module, gum_mprotect, GumFoundRangeFunc,
-        GumFoundThreadFunc, GumModifyThreadFlags, GumModifyThreadFunc, GumRangeDetails,
-        GumThreadDetails, GumThreadFlags, GumThreadId, GumThreadRegistry,
+        _GumPageProtection_GUM_PAGE_EXECUTE, _GumRwxSupport_GUM_RWX_FULL, GError,
+        GIOErrorEnum_G_IO_ERROR_BROKEN_PIPE, GIOErrorEnum_G_IO_ERROR_FAILED,
+        GIOErrorEnum_G_IO_ERROR_INVALID_ARGUMENT, GIOErrorEnum_G_IO_ERROR_NOT_FOUND,
+        GIOErrorEnum_G_IO_ERROR_PERMISSION_DENIED, GumBareboneStreamOps, GumMemoryRange,
+        GumModuleRegistry, GumPageProtection, GumRwxSupport, g_free, g_io_error_quark, g_malloc,
+        g_object_unref, g_set_error_literal, g_utf8_to_utf16, g_utf16_to_utf8, gboolean, gchar,
+        gint, gpointer, gsize, gssize, guint, gum_barebone_register_module, gum_mprotect,
+        GumFoundRangeFunc, GumFoundThreadFunc, GumModifyThreadFlags, GumModifyThreadFunc,
+        GumRangeDetails, GumThreadDetails, GumThreadFlags, GumThreadId, GumThreadRegistry,
         gconstpointer, gum_thread_details_copy,
     },
     gum::{self, FoundExportCallback, FoundImportCallback},
     kernel,
 };
 use crate::bindings::{GumCpuContext, GumThreadFlags_GUM_THREAD_FLAGS_CPU_CONTEXT};
+use alloc::ffi::CString;
 #[cfg(not(feature = "winnt"))]
 use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::ptr;
 
 #[cfg(target_arch = "x86")]
@@ -45,6 +52,19 @@ macro_rules! windows_fn {
 #[allow(unused_imports)]
 pub(crate) use windows_fn;
 
+pub struct FileApi {
+    pub read_file: windows_fn!(usize, *mut u8, u32, *mut u32, usize => i32),
+    pub write_file: windows_fn!(usize, *const u8, u32, *mut u32, usize => i32),
+    pub close_handle: windows_fn!(usize => i32),
+    pub format_message: windows_fn!(u32, usize, u32, u32, *mut u8, u32, usize => u32),
+}
+
+pub struct TextApi {
+    pub multi_byte_to_wide_char: windows_fn!(u32, u32, *const u8, i32, *mut u16, i32 => i32),
+    pub wide_char_to_multi_byte:
+        windows_fn!(u32, u32, *const u16, i32, *mut u8, i32, usize, usize => i32),
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_platform() -> *const crate::bindings::gchar {
     c"windows".as_ptr() as *const crate::bindings::gchar
@@ -59,6 +79,163 @@ pub extern "C" fn gum_thread_get_system_error() -> crate::bindings::gint {
 pub extern "C" fn gum_thread_set_system_error(value: crate::bindings::gint) {
     kernel::set_thread_error(value as u32)
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_ansi_string_to_utf8(str_ansi: *const gchar, length: gint) -> *mut gchar {
+    let ansi = unsafe { bytes_of(str_ansi as *const u8, length) };
+    match kernel::text_api() {
+        Some(api) => ansi_to_utf8(api, ansi),
+        None => handed_to_glib(ansi.iter().map(|&byte| byte as char).collect::<String>().as_bytes()),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_ansi_string_from_utf8(str_utf8: *const gchar) -> *mut gchar {
+    match kernel::text_api() {
+        Some(api) => ansi_from_utf8(api, str_utf8),
+        None => {
+            let utf8 = unsafe { core::ffi::CStr::from_ptr(str_utf8) }.to_str().unwrap();
+            let latin1: Vec<u8> =
+                utf8.chars().map(|c| if (c as u32) <= 0xff { c as u8 } else { b'?' }).collect();
+            handed_to_glib(&latin1)
+        }
+    }
+}
+
+unsafe fn bytes_of<'a>(str: *const u8, length: gint) -> &'a [u8] {
+    let length = if length < 0 {
+        unsafe { core::ffi::CStr::from_ptr(str as *const core::ffi::c_char) }.to_bytes().len()
+    } else {
+        length as usize
+    };
+    unsafe { core::slice::from_raw_parts(str, length) }
+}
+
+fn ansi_to_utf8(api: &TextApi, ansi: &[u8]) -> *mut gchar {
+    let count = unsafe {
+        (api.multi_byte_to_wide_char)(CP_ACP, 0, ansi.as_ptr(), ansi.len() as i32,
+            ptr::null_mut(), 0)
+    };
+    let mut wide = alloc::vec![0u16; count as usize];
+    unsafe {
+        (api.multi_byte_to_wide_char)(CP_ACP, 0, ansi.as_ptr(), ansi.len() as i32,
+            wide.as_mut_ptr(), count);
+        g_utf16_to_utf8(wide.as_ptr(), count as _, ptr::null_mut(), ptr::null_mut(),
+            ptr::null_mut())
+    }
+}
+
+fn ansi_from_utf8(api: &TextApi, utf8: *const gchar) -> *mut gchar {
+    unsafe {
+        let wide = g_utf8_to_utf16(utf8, -1, ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
+        let size = (api.wide_char_to_multi_byte)(CP_ACP, 0, wide, -1, ptr::null_mut(), 0, 0, 0);
+        let ansi = g_malloc(size as gsize) as *mut u8;
+        (api.wide_char_to_multi_byte)(CP_ACP, 0, wide, -1, ansi, size, 0, 0);
+        g_free(wide as gpointer);
+        ansi as *mut gchar
+    }
+}
+
+fn handed_to_glib(bytes: &[u8]) -> *mut gchar {
+    unsafe {
+        let copy = g_malloc((bytes.len() + 1) as gsize) as *mut u8;
+        ptr::copy_nonoverlapping(bytes.as_ptr(), copy, bytes.len());
+        *copy.add(bytes.len()) = 0;
+        copy as *mut gchar
+    }
+}
+
+const CP_ACP: u32 = 0;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_stream_ops() -> *const GumBareboneStreamOps {
+    if kernel::in_copy() { &STREAM_OPS } else { ptr::null() }
+}
+
+static STREAM_OPS: GumBareboneStreamOps = GumBareboneStreamOps {
+    poll: Some(kernel::poll_handles),
+    read: Some(read_handle),
+    write: Some(write_handle),
+    close: Some(close_handle),
+};
+
+unsafe extern "C" fn read_handle(handle: gpointer, buffer: gpointer, count: gsize,
+        error: *mut *mut GError) -> gssize {
+    let mut transferred = 0u32;
+    let succeeded = unsafe {
+        (kernel::file_api().read_file)(handle as usize, buffer as *mut u8, count as u32,
+            &mut transferred, 0)
+    };
+    if succeeded == 0 {
+        return failed(error);
+    }
+    transferred as gssize
+}
+
+unsafe extern "C" fn write_handle(handle: gpointer, buffer: gconstpointer, count: gsize,
+        error: *mut *mut GError) -> gssize {
+    let mut transferred = 0u32;
+    let succeeded = unsafe {
+        (kernel::file_api().write_file)(handle as usize, buffer as *const u8, count as u32,
+            &mut transferred, 0)
+    };
+    if succeeded == 0 {
+        return failed(error);
+    }
+    transferred as gssize
+}
+
+unsafe extern "C" fn close_handle(handle: gpointer, error: *mut *mut GError) -> gboolean {
+    let succeeded = unsafe { (kernel::file_api().close_handle)(handle as usize) };
+    if succeeded == 0 {
+        failed(error);
+        return 0;
+    }
+    1
+}
+
+fn failed(error: *mut *mut GError) -> gssize {
+    let code = kernel::thread_error();
+    let message = CString::new(describe_error(code)).unwrap();
+    unsafe {
+        g_set_error_literal(error, g_io_error_quark(), io_error_from_win32(code) as gint,
+            message.as_ptr())
+    };
+    -1
+}
+
+fn describe_error(code: u32) -> String {
+    let mut ansi = [0u8; 512];
+    let length = unsafe {
+        (kernel::file_api().format_message)(
+            FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, 0, code, 0,
+            ansi.as_mut_ptr(), ansi.len() as u32, 0)
+    };
+    let utf8 = ansi_to_utf8(kernel::text_api().unwrap(), &ansi[..length as usize]);
+    let message = unsafe { core::ffi::CStr::from_ptr(utf8) }.to_str().unwrap().trim_end();
+    let described = String::from(message);
+    unsafe { g_free(utf8 as gpointer) };
+    described
+}
+
+fn io_error_from_win32(code: u32) -> u32 {
+    match code {
+        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => GIOErrorEnum_G_IO_ERROR_NOT_FOUND,
+        ERROR_ACCESS_DENIED => GIOErrorEnum_G_IO_ERROR_PERMISSION_DENIED,
+        ERROR_INVALID_HANDLE | ERROR_INVALID_PARAMETER => GIOErrorEnum_G_IO_ERROR_INVALID_ARGUMENT,
+        ERROR_BROKEN_PIPE => GIOErrorEnum_G_IO_ERROR_BROKEN_PIPE,
+        _ => GIOErrorEnum_G_IO_ERROR_FAILED,
+    }
+}
+
+const FORMAT_MESSAGE_IGNORE_INSERTS: u32 = 0x200;
+const FORMAT_MESSAGE_FROM_SYSTEM: u32 = 0x1000;
+const ERROR_FILE_NOT_FOUND: u32 = 2;
+const ERROR_PATH_NOT_FOUND: u32 = 3;
+const ERROR_ACCESS_DENIED: u32 = 5;
+const ERROR_INVALID_HANDLE: u32 = 6;
+const ERROR_INVALID_PARAMETER: u32 = 87;
+const ERROR_BROKEN_PIPE: u32 = 109;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_query_stack_size() -> crate::bindings::gsize {

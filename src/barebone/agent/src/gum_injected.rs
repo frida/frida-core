@@ -23,7 +23,10 @@ use crate::{
 #[cfg(feature = "xnu-core")]
 use crate::bindings::{g_object_unref, gum_barebone_register_module};
 #[cfg(feature = "linux-injected")]
-use crate::bindings::gum_barebone_unregister_thread;
+use crate::bindings::{
+    GError, GumBareboneStreamOps, g_io_error_from_errno, g_io_error_quark, g_set_error_literal,
+    g_strerror, gint, gssize, gum_barebone_unregister_thread,
+};
 #[cfg(not(feature = "xnu-kext"))]
 use crate::bindings::{
     g_variant_get_boolean, g_variant_new,
@@ -175,6 +178,51 @@ fn remap_agent_pages_through_host(first_page: gpointer, n_pages: guint) -> gpoin
 
 #[cfg(all(feature = "linux-injected", not(target_arch = "arm")))]
 const GUM_PAGE_RWX: u32 = 7;
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_barebone_query_stream_ops() -> *const GumBareboneStreamOps {
+    if kernel::in_copy() { &STREAM_OPS } else { ptr::null() }
+}
+
+#[cfg(feature = "linux-injected")]
+static STREAM_OPS: GumBareboneStreamOps = GumBareboneStreamOps {
+    poll: Some(crate::linux::user::frida_poll),
+    read: Some(read_descriptor),
+    write: Some(write_descriptor),
+    close: Some(close_descriptor),
+};
+
+#[cfg(feature = "linux-injected")]
+unsafe extern "C" fn read_descriptor(handle: gpointer, buffer: gpointer, count: gsize,
+        error: *mut *mut GError) -> gssize {
+    transferred(crate::linux::user::read(handle as i32, buffer as *mut u8, count as usize), error)
+}
+
+#[cfg(feature = "linux-injected")]
+unsafe extern "C" fn write_descriptor(handle: gpointer, buffer: gconstpointer, count: gsize,
+        error: *mut *mut GError) -> gssize {
+    transferred(crate::linux::user::write(handle as i32, buffer as *const u8, count as usize),
+        error)
+}
+
+#[cfg(feature = "linux-injected")]
+unsafe extern "C" fn close_descriptor(handle: gpointer, error: *mut *mut GError) -> gboolean {
+    (transferred(crate::linux::user::close(handle as i32), error) >= 0) as gboolean
+}
+
+#[cfg(feature = "linux-injected")]
+fn transferred(result: isize, error: *mut *mut GError) -> gssize {
+    if result < 0 {
+        let errno = -result as gint;
+        unsafe {
+            g_set_error_literal(error, g_io_error_quark(), g_io_error_from_errno(errno) as gint,
+                g_strerror(errno))
+        };
+        return -1;
+    }
+    result as gssize
+}
 
 unsafe fn what_changed(first_page: u64, shadow: *const u8, total: usize) -> Option<(usize, usize)> {
     let live = unsafe { core::slice::from_raw_parts(first_page as *const u8, total) };

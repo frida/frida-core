@@ -595,7 +595,7 @@ struct TimeSpec {
     nanoseconds: i64,
 }
 
-unsafe extern "C" fn frida_poll(ufds: *mut crate::bindings::GPollFD, nfds: u32,
+pub(crate) unsafe extern "C" fn frida_poll(ufds: *mut crate::bindings::GPollFD, nfds: u32,
         timeout: i32) -> i32 {
     const MAX_FDS: usize = 16;
     let fds = unsafe { core::slice::from_raw_parts_mut(ufds, nfds as usize) };
@@ -1202,6 +1202,18 @@ pub fn names_in(directory: &core::ffi::CStr) -> Vec<String> {
     syscall(CLOSE, listed as usize, 0, 0, 0, 0, 0);
 
     names
+}
+
+pub(crate) fn read(fd: i32, buffer: *mut u8, count: usize) -> isize {
+    syscall(READ, fd as usize, buffer as usize, count, 0, 0, 0)
+}
+
+pub(crate) fn write(fd: i32, buffer: *const u8, count: usize) -> isize {
+    syscall(WRITE, fd as usize, buffer as usize, count, 0, 0, 0)
+}
+
+pub(crate) fn close(fd: i32) -> isize {
+    syscall(CLOSE, fd as usize, 0, 0, 0, 0, 0)
 }
 
 pub fn contents_of(path: &core::ffi::CStr) -> Vec<u8> {

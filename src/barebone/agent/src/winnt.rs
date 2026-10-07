@@ -3433,6 +3433,16 @@ pub fn set_thread_error(value: u32) {
     }
 }
 
+pub fn file_api() -> &'static crate::gum_windows::FileApi {
+    crate::winnt_user::file_api()
+}
+
+pub fn text_api() -> Option<&'static crate::gum_windows::TextApi> {
+    if in_copy() { Some(crate::winnt_user::text_api()) } else { None }
+}
+
+pub(crate) use crate::winnt_user::poll_handles;
+
 fn primitives() -> &'static Primitives {
     unsafe { ACTIVE }
 }

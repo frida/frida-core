@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::gum_windows::{FileApi, TextApi};
 use crate::kernel::MemoryRegion;
 use crate::winnt::{
     BLOCK_PROCESS_ID, BLOCK_THREAD_ID, CURRENT_PROCESS, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
@@ -816,6 +817,40 @@ struct ErrorApi {
 
 static mut ERROR_API: Option<ErrorApi> = None;
 
+pub fn file_api() -> &'static FileApi {
+    unsafe {
+        if (*core::ptr::addr_of!(FILE_API)).is_none() {
+            let library = module_base(peb(), b"kernel32.dll");
+            FILE_API = Some(FileApi {
+                read_file: core::mem::transmute(export(library, b"ReadFile")),
+                write_file: core::mem::transmute(export(library, b"WriteFile")),
+                close_handle: core::mem::transmute(export(library, b"CloseHandle")),
+                format_message: core::mem::transmute(export(library, b"FormatMessageA")),
+            });
+        }
+        (*core::ptr::addr_of!(FILE_API)).as_ref().unwrap()
+    }
+}
+
+static mut FILE_API: Option<FileApi> = None;
+
+pub fn text_api() -> &'static TextApi {
+    unsafe {
+        if (*core::ptr::addr_of!(TEXT_API)).is_none() {
+            let library = module_base(peb(), b"kernel32.dll");
+            TEXT_API = Some(TextApi {
+                multi_byte_to_wide_char: core::mem::transmute(
+                    export(library, b"MultiByteToWideChar")),
+                wide_char_to_multi_byte: core::mem::transmute(
+                    export(library, b"WideCharToMultiByte")),
+            });
+        }
+        (*core::ptr::addr_of!(TEXT_API)).as_ref().unwrap()
+    }
+}
+
+static mut TEXT_API: Option<TextApi> = None;
+
 struct UserApi {
     allocate_heap: windows_fn!(usize, u32, usize => *mut u8),
     free_heap: windows_fn!(usize, u32, *mut u8 => u8),
@@ -997,7 +1032,7 @@ fn serve_the_copy() {
     }
 }
 
-unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD, nfds: u32,
+pub(crate) unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD, nfds: u32,
         timeout: i32) -> i32 {
     const MAX_HANDLES: usize = 16;
     let fds = unsafe { core::slice::from_raw_parts_mut(ufds, nfds as usize) };
