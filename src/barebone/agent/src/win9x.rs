@@ -785,12 +785,13 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
 
     let database = unsafe { ((arena + THREAD_DATABASE) as *const u32).read_volatile() };
     let thread = unsafe { (database as *const u32).byte_add(TDB_CONTROL_BLOCK).read() };
-    redirect_to_trampoline(arena, thread);
+    let start_stack = redirect_to_trampoline(arena, thread);
 
     resume_thread(arena + RESUME_STUB_OFFSET, arena);
     if !await_flag(arena + RUNNING_FLAG) {
         return Injection { arena, thread: 0, stack };
     }
+    free_shared(start_stack);
     unsafe {
         ((arena + GATING) as *mut u32).write_volatile(spawns_are_gated() as u32);
         ((arena + GO_FLAG) as *mut u32).write_volatile(1);
@@ -1042,7 +1043,7 @@ fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
     unsafe { core::ptr::copy_nonoverlapping(code.as_ptr(), trampoline as *mut u8, code.len()) };
 }
 
-fn redirect_to_trampoline(arena: u32, thread: u32) {
+fn redirect_to_trampoline(arena: u32, thread: u32) -> u32 {
     let mut context = [0u8; CONTEXT_SIZE];
     let base = context.as_mut_ptr();
     unsafe {
@@ -1066,6 +1067,8 @@ fn redirect_to_trampoline(arena: u32, thread: u32) {
         base.add(CONTEXT_ESP).cast::<u32>().write_unaligned(top);
         __VWIN32_Set_Thread_Context(thread, base);
     }
+
+    stack
 }
 
 fn await_flag(address: u32) -> bool {
