@@ -426,3 +426,28 @@ struct Timing {
 		t.Errorf("formatted_value should format scalar and bitfield fields: %s", decoded)
 	}
 }
+
+func TestDecodeArrayIndexInsideElement(t *testing.T) {
+	const source = `
+struct Entry {
+	u8 value;
+	u32 index = std::core::array_index() [[export]];
+};
+struct Table {
+	Entry entries[3];
+};
+`
+	decoded, err := DecodeSource(source, "Table", []byte{10, 20, 30}, 0, Targets[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value DecodedValue
+	if err := json.Unmarshal([]byte(decoded), &value); err != nil {
+		t.Fatal(err)
+	}
+	for i, element := range value.Fields[0].Elements {
+		if element.Fields[1].Value != float64(i) {
+			t.Errorf("element %d reports index %v", i, element.Fields[1].Value)
+		}
+	}
+}

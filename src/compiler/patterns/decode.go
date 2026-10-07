@@ -363,6 +363,7 @@ type frame struct {
 	caller      *frame
 	depth       int
 	arrayIndex  int
+	inArray     bool
 	bits        bool
 	bitfield    *Bitfield
 	bitCursor   int
@@ -438,6 +439,21 @@ func (f *frame) parentNode(depth int, path []string) (*DecodedValue, error) {
 		scope = node.frame
 	}
 	return node, nil
+}
+
+func (f *frame) iterate() func() {
+	saved := f.inArray
+	f.inArray = true
+	return func() { f.inArray = saved }
+}
+
+func (f *frame) arrayIndexInScope() int {
+	for scope := f.cursorOwner(); scope != nil; scope = scope.parent {
+		if scope.inArray {
+			return scope.arrayIndex
+		}
+	}
+	return 0
 }
 
 func (f *frame) nodeNamed(name string) *DecodedValue {
@@ -1519,6 +1535,7 @@ func (d *decoder) decodeArray(value *DecodedValue, t *Array, offset int, scope *
 	value.Count = &count
 	value.Elements = []*DecodedValue{}
 	end := offset
+	defer scope.iterate()()
 	for i := 0; i != count; i++ {
 		scope.arrayIndex = i
 		elementValue := d.decode("", t.Element, end, scope)
@@ -1544,11 +1561,13 @@ func (d *decoder) decodeWhileArray(value *DecodedValue, t *Array, offset int, sc
 	value.Elements = []*DecodedValue{}
 	end := offset
 	count := 0
+	defer scope.iterate()()
 	for {
 		if err := d.step(); err != nil {
 			value.fail(err)
 			return
 		}
+		scope.arrayIndex = count
 		owner := scope.cursorOwner()
 		saved := owner.cursor
 		owner.cursor = end
@@ -1561,7 +1580,6 @@ func (d *decoder) decodeWhileArray(value *DecodedValue, t *Array, offset int, sc
 		if !proceed {
 			break
 		}
-		scope.arrayIndex = count
 		elementValue := d.decode("", t.Element, end, scope)
 		if elementValue.ending != flowContinue {
 			if count < maxDecodedElements {

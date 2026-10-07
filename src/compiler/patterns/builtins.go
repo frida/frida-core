@@ -313,7 +313,7 @@ func (f *frame) findBytes(occurrenceValue runtimeValue, fromValue runtimeValue, 
 
 func defineCoreBuiltins() {
 	defineBuiltin("std::core::array_index", 0, "$std_core_array_index", func(f *frame, args []runtimeValue) (runtimeValue, error) {
-		return int64(f.cursorOwner().arrayIndex), nil
+		return int64(f.arrayIndexInScope()), nil
 	})
 	defineBuiltin("std::core::member_count", 1, "$std_core_member_count", func(f *frame, args []runtimeValue) (runtimeValue, error) {
 		if elements, isArray := args[0].([]runtimeValue); isArray {
