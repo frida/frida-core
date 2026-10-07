@@ -100,6 +100,15 @@ func preprocess(tokens []token, diagnostics []Diagnostic, incoming macros, inclu
 	return p.output, append(diagnostics, p.diagnostics...), p.defines
 }
 
+func definedMacros(defines map[string]string) macros {
+	defined := make(macros, len(defines))
+	for name, body := range defines {
+		tokens, _ := lex("", body)
+		defined[name] = tokens[:len(tokens)-1]
+	}
+	return defined
+}
+
 func (m macros) clone() macros {
 	cloned := make(macros, len(m))
 	for name, body := range m {

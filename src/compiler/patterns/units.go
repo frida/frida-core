@@ -34,7 +34,11 @@ func Compile(source string) (*Module, []Diagnostic) {
 }
 
 func CompileSource(main Source, resolver Resolver) (*Module, []Diagnostic) {
-	return compileUnit(main, nil, &unitRegistry{resolver: resolver, byKey: map[string]*sharedUnit{}})
+	return compileUnit(main, nil, newUnitRegistry(resolver))
+}
+
+func newUnitRegistry(resolver Resolver) *unitRegistry {
+	return &unitRegistry{resolver: resolver, byKey: map[string]*sharedUnit{}}
 }
 
 func compileUnit(main Source, incoming macros, registry *unitRegistry) (*Module, []Diagnostic) {

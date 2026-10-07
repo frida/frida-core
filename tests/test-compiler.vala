@@ -190,6 +190,17 @@ struct Image { u8 magic[2]; u8 width; };
 				var scaled = yield configurable.decode ("Configurable", new Bytes ({ 7 }), 0, decode_options);
 				assert (scaled.fields.get (0).fields.get (1).value.get_int64 () == 21);
 
+				write_pattern (project_dir, "layout.hexpat",
+					"#ifdef WIDE\nstruct Layout { u16 value; };\n#else\nstruct Layout { u8 value; };\n#endif\n");
+				var narrow = yield compiler.compile ("layout.hexpat", options);
+				assert (narrow.lookup ("Layout").size == 1);
+				var wide_options = make_pattern_options (project_dir);
+				wide_options.defines["WIDE"] = new Variant.string ("");
+				var wide = yield compiler.compile ("layout.hexpat", wide_options);
+				assert (wide.lookup ("Layout").size == 2);
+				var wide_value = yield wide.decode ("Layout", new Bytes ({ 1, 2 }), 0);
+				assert (wide_value.fields.get (0).value.get_uint64 () == 0x201);
+
 				var data = new uint8[32];
 				data[0] = 94;
 				data[4] = 7;

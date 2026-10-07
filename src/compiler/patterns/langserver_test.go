@@ -243,3 +243,15 @@ func TestServiceCompletionsFollowContext(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceDefines(t *testing.T) {
+	service := NewLanguageService()
+	service.Open("file:///layout.hexpat", "#ifdef LIVE\nstruct Layout { u8 live; };\n#else\nstruct Layout { u8 file[missing]; };\n#endif\n")
+	if diagnostics := service.Diagnostics("file:///layout.hexpat"); len(diagnostics) != 1 {
+		t.Fatalf("the undefined branch should be compiled: %+v", diagnostics)
+	}
+	service.Define(map[string]string{"LIVE": ""})
+	if diagnostics := service.Diagnostics("file:///layout.hexpat"); len(diagnostics) != 0 {
+		t.Fatalf("the defined branch should be compiled: %+v", diagnostics)
+	}
+}

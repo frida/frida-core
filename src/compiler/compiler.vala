@@ -553,6 +553,7 @@ namespace Frida {
 			string project_root = compute_project_root (entrypoint, opts.project_root);
 			string platform = (opts.platform != null) ? opts.platform : "";
 			string arch = (opts.arch != null) ? opts.arch : "";
+			string? defines = PatternJson.serialize_dict (opts.defines);
 
 			string? result = null;
 			string? error_message = null;
@@ -562,13 +563,13 @@ namespace Frida {
 				schedule_on_frida_thread (compile.callback);
 			};
 
-			CompilerBackend.Patterns.describe (project_root, entrypoint, platform, arch, (owned) on_result);
+			CompilerBackend.Patterns.describe (project_root, entrypoint, platform, arch, defines, (owned) on_result);
 			yield;
 
 			if (error_message != null)
 				throw new Error.INVALID_ARGUMENT ("%s", error_message);
 
-			return PatternJson.parse_module (result, this, project_root, entrypoint, platform, arch);
+			return PatternJson.parse_module (result, this, project_root, entrypoint, platform, arch, defines);
 		}
 
 		public PatternModule compile_sync (string entrypoint, PatternCompileOptions? options = null, Cancellable? cancellable = null)
@@ -589,8 +590,8 @@ namespace Frida {
 		}
 
 		internal async PatternValue decode_value (string project_root, string entrypoint, string platform, string arch,
-				string type_name, Bytes data, uint64 address, PatternDecodeOptions? options, Cancellable? cancellable)
-				throws Error, IOError {
+				string? defines, string type_name, Bytes data, uint64 address, PatternDecodeOptions? options,
+				Cancellable? cancellable) throws Error, IOError {
 			CompilerBackend.check_available ();
 
 			string? result = null;
@@ -602,7 +603,7 @@ namespace Frida {
 			};
 
 			CompilerBackend.Patterns.decode (project_root, entrypoint, type_name, data.get_data (), address, platform, arch,
-				PatternJson.serialize_inputs (options), (owned) on_result);
+				defines, PatternJson.serialize_inputs (options), (owned) on_result);
 			yield;
 
 			if (error_message != null)
@@ -612,8 +613,8 @@ namespace Frida {
 		}
 
 		internal async string call_value_function (string project_root, string entrypoint, string platform, string arch,
-				string type_name, Bytes data, uint64 address, uint pattern, string function, PatternDecodeOptions? options,
-				Cancellable? cancellable) throws Error, IOError {
+				string? defines, string type_name, Bytes data, uint64 address, uint pattern, string function,
+				PatternDecodeOptions? options, Cancellable? cancellable) throws Error, IOError {
 			CompilerBackend.check_available ();
 
 			string? result = null;
@@ -625,7 +626,7 @@ namespace Frida {
 			};
 
 			CompilerBackend.Patterns.call (project_root, entrypoint, type_name, data.get_data (), address, platform, arch,
-				PatternJson.serialize_inputs (options), pattern, function, (owned) on_result);
+				defines, PatternJson.serialize_inputs (options), pattern, function, (owned) on_result);
 			yield;
 
 			if (error_message != null)
@@ -681,6 +682,16 @@ namespace Frida {
 			get;
 			set;
 		}
+
+		/**
+		 * Preprocessor macros to define before the source is read, by name,
+		 * the way a `#define` at the top of the entrypoint would.
+		 */
+		public HashTable<string, Variant> defines {
+			get;
+			set;
+			default = make_parameters_dict ();
+		}
 	}
 
 	/**
@@ -727,9 +738,11 @@ namespace Frida {
 		private string entrypoint;
 		private string platform;
 		private string arch;
+		private string? defines;
 
 		internal PatternModule (PatternCompiler compiler, string project_root, string entrypoint, string platform, string arch,
-				PatternTypeList types, string? root_type, PatternInputList inputs, PatternDiagnosticList diagnostics) {
+				string? defines, PatternTypeList types, string? root_type, PatternInputList inputs,
+				PatternDiagnosticList diagnostics) {
 			Object (types: types, root_type: root_type, inputs: inputs, diagnostics: diagnostics);
 
 			this.compiler = compiler;
@@ -737,6 +750,7 @@ namespace Frida {
 			this.entrypoint = entrypoint;
 			this.platform = platform;
 			this.arch = arch;
+			this.defines = defines;
 		}
 
 		/**
@@ -760,8 +774,8 @@ namespace Frida {
 		 */
 		public async PatternValue decode (string type_name, Bytes data, uint64 address, PatternDecodeOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
-			return yield compiler.decode_value (project_root, entrypoint, platform, arch, type_name, data, address, options,
-				cancellable);
+			return yield compiler.decode_value (project_root, entrypoint, platform, arch, defines, type_name, data, address,
+				options, cancellable);
 		}
 
 		public PatternValue decode_sync (string type_name, Bytes data, uint64 address, PatternDecodeOptions? options = null,
@@ -800,8 +814,8 @@ namespace Frida {
 		 */
 		public async string call_function (string type_name, Bytes data, uint64 address, uint pattern, string function,
 				PatternDecodeOptions? options = null, Cancellable? cancellable = null) throws Error, IOError {
-			return yield compiler.call_value_function (project_root, entrypoint, platform, arch, type_name, data, address, pattern,
-				function, options, cancellable);
+			return yield compiler.call_value_function (project_root, entrypoint, platform, arch, defines, type_name, data, address,
+				pattern, function, options, cancellable);
 		}
 
 		public string call_function_sync (string type_name, Bytes data, uint64 address, uint pattern, string function,
@@ -2106,7 +2120,7 @@ namespace Frida {
 
 	namespace PatternJson {
 		private PatternModule parse_module (string json, PatternCompiler compiler, string project_root, string entrypoint,
-				string platform, string arch) throws Error {
+				string platform, string arch, string? defines) throws Error {
 			var reader = make_reader (json);
 
 			var types = new Gee.ArrayList<PatternType> ();
@@ -2148,17 +2162,23 @@ namespace Frida {
 			}
 			reader.end_member ();
 
-			return new PatternModule (compiler, project_root, entrypoint, platform, arch, new PatternTypeList (types),
+			return new PatternModule (compiler, project_root, entrypoint, platform, arch, defines, new PatternTypeList (types),
 				read_optional_string (reader, "root"), new PatternInputList (inputs), new PatternDiagnosticList (diagnostics));
 		}
 
 		internal string? serialize_inputs (PatternDecodeOptions? options) {
-			if (options == null || options.inputs.size () == 0)
+			if (options == null)
+				return null;
+			return serialize_dict (options.inputs);
+		}
+
+		internal string? serialize_dict (HashTable<string, Variant> dict) {
+			if (dict.size () == 0)
 				return null;
 
 			var builder = new Json.Builder ();
 			builder.begin_object ();
-			options.inputs.for_each ((name, value) => {
+			dict.for_each ((name, value) => {
 				builder.set_member_name (name);
 				if (value.is_of_type (VariantType.INT64))
 					builder.add_int_value (value.get_int64 ());
@@ -2675,15 +2695,16 @@ namespace Frida {
 		namespace Patterns {
 			[CCode (has_target = false)]
 			private delegate void DescribeFunc (string project_root, string entrypoint, string platform, string arch,
-				owned PatternResultFunc on_result);
+				string? defines, owned PatternResultFunc on_result);
 
 			[CCode (has_target = false)]
 			private delegate void DecodeFunc (string project_root, string entrypoint, string type_name, uint8[] data, uint64 address,
-				string platform, string arch, string? inputs, owned PatternResultFunc on_result);
+				string platform, string arch, string? defines, string? inputs, owned PatternResultFunc on_result);
 
 			[CCode (has_target = false)]
 			private delegate void CallFunc (string project_root, string entrypoint, string type_name, uint8[] data, uint64 address,
-				string platform, string arch, string? inputs, uint pattern, string function, owned PatternResultFunc on_result);
+				string platform, string arch, string? defines, string? inputs, uint pattern, string function,
+				owned PatternResultFunc on_result);
 
 			private DescribeFunc? describe;
 			private DecodeFunc? decode;
@@ -2763,21 +2784,21 @@ namespace Frida {
 		}
 
 		private static void executable_patterns_describe (string project_root, string entrypoint, string platform, string arch,
-				owned PatternResultFunc on_result) {
-			backend_process.describe_patterns (project_root, entrypoint, platform, arch, (owned) on_result);
+				string? defines, owned PatternResultFunc on_result) {
+			backend_process.describe_patterns (project_root, entrypoint, platform, arch, defines, (owned) on_result);
 		}
 
 		private static void executable_patterns_decode (string project_root, string entrypoint, string type_name, uint8[] data,
-				uint64 address, string platform, string arch, string? inputs, owned PatternResultFunc on_result) {
-			backend_process.decode_pattern (project_root, entrypoint, type_name, data, address, platform, arch, inputs,
+				uint64 address, string platform, string arch, string? defines, string? inputs, owned PatternResultFunc on_result) {
+			backend_process.decode_pattern (project_root, entrypoint, type_name, data, address, platform, arch, defines, inputs,
 				(owned) on_result);
 		}
 
 		private static void executable_patterns_call (string project_root, string entrypoint, string type_name, uint8[] data,
-				uint64 address, string platform, string arch, string? inputs, uint pattern, string function,
+				uint64 address, string platform, string arch, string? defines, string? inputs, uint pattern, string function,
 				owned PatternResultFunc on_result) {
-			backend_process.call_pattern_function (project_root, entrypoint, type_name, data, address, platform, arch, inputs,
-				pattern, function, (owned) on_result);
+			backend_process.call_pattern_function (project_root, entrypoint, type_name, data, address, platform, arch, defines,
+				inputs, pattern, function, (owned) on_result);
 		}
 
 		private class BackendProcess : Object {
@@ -3072,7 +3093,7 @@ namespace Frida {
 				return null;
 			}
 
-			public void describe_patterns (string project_root, string entrypoint, string platform, string arch,
+			public void describe_patterns (string project_root, string entrypoint, string platform, string arch, string? defines,
 					owned PatternResultFunc on_result) {
 				try {
 					ensure_started ();
@@ -3085,11 +3106,11 @@ namespace Frida {
 
 				pending_pattern_requests[request_id] = new PendingPatternRequest ((owned) on_result);
 
-				post_message (make_patterns_describe_request (request_id, project_root, entrypoint, platform, arch));
+				post_message (make_patterns_describe_request (request_id, project_root, entrypoint, platform, arch, defines));
 			}
 
 			public void decode_pattern (string project_root, string entrypoint, string type_name, uint8[] data, uint64 address,
-					string platform, string arch, string? inputs, owned PatternResultFunc on_result) {
+					string platform, string arch, string? defines, string? inputs, owned PatternResultFunc on_result) {
 				try {
 					ensure_started ();
 				} catch (GLib.Error e) {
@@ -3102,11 +3123,11 @@ namespace Frida {
 				pending_pattern_requests[request_id] = new PendingPatternRequest ((owned) on_result);
 
 				post_message (make_patterns_decode_request (request_id, project_root, entrypoint, type_name, data, address, platform,
-					arch, inputs));
+					arch, defines, inputs));
 			}
 
 			public void call_pattern_function (string project_root, string entrypoint, string type_name, uint8[] data,
-					uint64 address, string platform, string arch, string? inputs, uint pattern, string function,
+					uint64 address, string platform, string arch, string? defines, string? inputs, uint pattern, string function,
 					owned PatternResultFunc on_result) {
 				try {
 					ensure_started ();
@@ -3120,7 +3141,7 @@ namespace Frida {
 				pending_pattern_requests[request_id] = new PendingPatternRequest ((owned) on_result);
 
 				post_message (make_patterns_call_request (request_id, project_root, entrypoint, type_name, data, address, platform,
-					arch, inputs, pattern, function));
+					arch, defines, inputs, pattern, function));
 			}
 
 			private class PendingPatternRequest {
@@ -3266,7 +3287,7 @@ namespace Frida {
 			}
 
 			private static string make_patterns_describe_request (uint id, string project_root, string entrypoint, string platform,
-					string arch) {
+					string arch, string? defines) {
 				var builder = new Json.Builder ();
 
 				builder
@@ -3282,25 +3303,27 @@ namespace Frida {
 						.set_member_name ("platform")
 						.add_string_value (platform)
 						.set_member_name ("arch")
-						.add_string_value (arch)
-					.end_object ();
+						.add_string_value (arch);
+				add_patterns_dict (builder, "defines", defines);
+				builder.end_object ();
 
 				return Json.to_string (builder.get_root (), false);
 			}
 
 			private static string make_patterns_decode_request (uint id, string project_root, string entrypoint, string type_name,
-					uint8[] data, uint64 address, string platform, string arch, string? inputs) {
+					uint8[] data, uint64 address, string platform, string arch, string? defines, string? inputs) {
 				var builder = begin_patterns_data_request ("patterns:decode", id, project_root, entrypoint, type_name, data, address,
-					platform, arch, inputs);
+					platform, arch, defines, inputs);
 				builder.end_object ();
 
 				return Json.to_string (builder.get_root (), false);
 			}
 
 			private static string make_patterns_call_request (uint id, string project_root, string entrypoint, string type_name,
-					uint8[] data, uint64 address, string platform, string arch, string? inputs, uint pattern, string function) {
+					uint8[] data, uint64 address, string platform, string arch, string? defines, string? inputs, uint pattern,
+					string function) {
 				var builder = begin_patterns_data_request ("patterns:call", id, project_root, entrypoint, type_name, data, address,
-					platform, arch, inputs);
+					platform, arch, defines, inputs);
 				builder
 					.set_member_name ("pattern")
 					.add_int_value (pattern)
@@ -3312,7 +3335,7 @@ namespace Frida {
 			}
 
 			private static Json.Builder begin_patterns_data_request (string type, uint id, string project_root, string entrypoint,
-					string type_name, uint8[] data, uint64 address, string platform, string arch, string? inputs) {
+					string type_name, uint8[] data, uint64 address, string platform, string arch, string? defines, string? inputs) {
 				var builder = new Json.Builder ();
 
 				builder
@@ -3335,16 +3358,21 @@ namespace Frida {
 						.add_string_value (platform)
 						.set_member_name ("arch")
 						.add_string_value (arch);
-				if (inputs != null) {
-					try {
-						builder
-							.set_member_name ("inputs")
-							.add_value (Json.from_string (inputs));
-					} catch (GLib.Error e) {
-					}
-				}
+				add_patterns_dict (builder, "defines", defines);
+				add_patterns_dict (builder, "inputs", inputs);
 
 				return builder;
+			}
+
+			private static void add_patterns_dict (Json.Builder builder, string name, string? json) {
+				if (json == null)
+					return;
+				try {
+					builder
+						.set_member_name (name)
+						.add_value (Json.from_string (json));
+				} catch (GLib.Error e) {
+				}
 			}
 
 			private static string make_dispose_request (uint session_id) {

@@ -2,6 +2,8 @@ package patterns
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -637,5 +639,41 @@ Level<0> root @ 0;
 `)
 	if len(diagnostics) == 0 || !strings.Contains(diagnostics[0].Message, "recursively") {
 		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+}
+
+func TestCompileFileWithDefines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "layout.hexpat")
+	if err := os.WriteFile(path, []byte(`
+#ifdef WIDE
+struct Layout { u16 value; };
+#else
+struct Layout { u8 value; };
+#endif
+
+struct Scaled { u8 bytes[SCALE * 2]; };
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	narrow, diagnostics, err := CompileFile(path, nil, map[string]string{"SCALE": "3"})
+	if err != nil || len(diagnostics) > 0 {
+		t.Fatalf("compile failed: %v %v", err, diagnostics)
+	}
+	wide, diagnostics, err := CompileFile(path, nil, map[string]string{"WIDE": "", "SCALE": "4"})
+	if err != nil || len(diagnostics) > 0 {
+		t.Fatalf("compile failed: %v %v", err, diagnostics)
+	}
+	sizeOf := func(module *Module, name string) int {
+		return module.Layout(Targets[0]).Of(findType(module, name)).Size
+	}
+	if sizeOf(narrow, "Layout") != 1 || sizeOf(wide, "Layout") != 2 {
+		t.Fatalf("the define should select the branch: %d %d", sizeOf(narrow, "Layout"), sizeOf(wide, "Layout"))
+	}
+	if sizeOf(narrow, "Scaled") != 6 || sizeOf(wide, "Scaled") != 8 {
+		t.Fatalf("the define's body should expand: %d %d", sizeOf(narrow, "Scaled"), sizeOf(wide, "Scaled"))
+	}
+	again, _, _ := CompileFile(path, nil, map[string]string{"SCALE": "3"})
+	if again != narrow {
+		t.Fatal("the cache should keep one compilation per set of defines")
 	}
 }

@@ -64,3 +64,16 @@ func TestPatternRouterAdjustsInitializeResponse(t *testing.T) {
 		t.Fatalf("unexpected tokens: %s", reply)
 	}
 }
+
+func TestPatternRouterTakesDefinesFromConfiguration(t *testing.T) {
+	var emitted []string
+	router := newPatternRouter(func(text string) { emitted = append(emitted, text) })
+	if router.route(`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"patterns":{"defines":{"LIVE":""}}}}}`) {
+		t.Fatal("configuration changes belong to both servers")
+	}
+	router.route(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///p.hexpat","text":"#ifdef LIVE\nstruct A { u8 x; };\n#else\nstruct A { u8 x[missing]; };\n#endif\n"}}}`)
+	router.route(`{"jsonrpc":"2.0","id":4,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":"file:///p.hexpat"}}}`)
+	if len(emitted) != 1 || !strings.Contains(emitted[0], `"items":[]`) {
+		t.Fatalf("the defined branch should be compiled: %v", emitted)
+	}
+}

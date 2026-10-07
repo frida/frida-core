@@ -13,6 +13,7 @@ import (
 
 type LanguageService struct {
 	documents map[string]*serviceDocument
+	defines   map[string]string
 }
 
 type serviceDocument struct {
@@ -147,6 +148,13 @@ func (s *LanguageService) Handles(uri string) bool {
 	return strings.HasSuffix(uri, ".hexpat") || strings.HasSuffix(uri, ".pat")
 }
 
+func (s *LanguageService) Define(defines map[string]string) {
+	s.defines = defines
+	for uri, d := range s.documents {
+		s.documents[uri] = s.newDocument(uri, d.text)
+	}
+}
+
 func (s *LanguageService) Open(uri string, text string) {
 	s.documents[uri] = s.newDocument(uri, text)
 }
@@ -163,7 +171,7 @@ func (s *LanguageService) newDocument(uri string, text string) *serviceDocument 
 	path := documentPath(uri)
 	overlays := s.overlays()
 	overlays[path] = text
-	parsed := parseShared(Source{Path: path, Text: text}, nil, NewFileResolver(overlays))
+	parsed := parseShared(Source{Path: path, Text: text}, definedMacros(s.defines), NewFileResolver(overlays))
 	return &serviceDocument{service: s, uri: uri, path: path, text: text, lines: lineStarts(text), file: parsed.file,
 		diags: parsed.diagnostics, toks: parsed.tokens}
 }
@@ -202,7 +210,7 @@ func (s *LanguageService) Diagnostics(uri string) []LSPDiagnostic {
 }
 
 func (d *serviceDocument) compile() (*Module, []Diagnostic) {
-	module, diagnostics, _ := CompileFile(d.path, d.service.overlays())
+	module, diagnostics, _ := CompileFile(d.path, d.service.overlays(), d.service.defines)
 	return module, diagnostics
 }
 

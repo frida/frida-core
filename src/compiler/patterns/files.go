@@ -27,8 +27,9 @@ type fileCompilation struct {
 
 var fileCompilations = newCache[string, *fileCompilation](16)
 
-func CompileFile(path string, overrides map[string]string) (*Module, []Diagnostic, error) {
-	if cached, isCached := fileCompilations.get(path); isCached && cached.resolver.Fresh(overrides) {
+func CompileFile(path string, overrides map[string]string, defines map[string]string) (*Module, []Diagnostic, error) {
+	key := path + "\x00" + definedMacros(defines).signature()
+	if cached, isCached := fileCompilations.get(key); isCached && cached.resolver.Fresh(overrides) {
 		return cached.module, cached.diagnostics, nil
 	}
 	resolver := NewFileResolver(overrides)
@@ -36,8 +37,8 @@ func CompileFile(path string, overrides map[string]string) (*Module, []Diagnosti
 	if err != nil {
 		return nil, nil, err
 	}
-	module, diagnostics := CompileSource(main, resolver)
-	fileCompilations.put(path, &fileCompilation{module: module, diagnostics: diagnostics, resolver: resolver})
+	module, diagnostics := compileUnit(main, definedMacros(defines), newUnitRegistry(resolver))
+	fileCompilations.put(key, &fileCompilation{module: module, diagnostics: diagnostics, resolver: resolver})
 	return module, diagnostics, nil
 }
 

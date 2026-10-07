@@ -13,6 +13,7 @@ type patternQuery struct {
 	entrypoint  string
 	platform    string
 	arch        string
+	defines     map[string]any
 }
 
 type patternCompilation struct {
@@ -63,11 +64,23 @@ func (q patternQuery) compile() (*patternCompilation, error) {
 		return nil, fmt.Errorf("Failed to resolve entrypoint: %w", err)
 	}
 
-	module, diagnostics, err := patterns.CompileFile(entrypoint, nil)
+	module, diagnostics, err := patterns.CompileFile(entrypoint, nil, defineBodies(q.defines))
 	if err != nil {
 		return nil, err
 	}
 	return &patternCompilation{module: module, diagnostics: diagnostics, target: targetFor(q.platform, q.arch), projectRoot: projectRoot}, nil
+}
+
+func defineBodies(defines map[string]any) map[string]string {
+	bodies := make(map[string]string, len(defines))
+	for name, value := range defines {
+		if text, isText := value.(string); isText {
+			bodies[name] = text
+		} else {
+			bodies[name] = fmt.Sprint(value)
+		}
+	}
+	return bodies
 }
 
 func targetFor(platform string, arch string) patterns.Target {

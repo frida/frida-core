@@ -28,6 +28,7 @@ type BackendRequest struct {
 	SourceMap        bool           `json:"source_map,omitempty"`
 	Compress         bool           `json:"compress,omitempty"`
 	Platform         string         `json:"platform,omitempty"`
+	Defines          map[string]any `json:"defines,omitempty"`
 	Inputs           map[string]any `json:"inputs,omitempty"`
 	Externals        []string       `json:"externals,omitempty"`
 	Text             string         `json:"text,omitempty"`
@@ -355,7 +356,8 @@ func patternRequestData(req BackendRequest) ([]byte, uint64, error) {
 }
 
 func patternQueryFromRequest(req BackendRequest) patternQuery {
-	return patternQuery{projectRoot: req.ProjectRoot, entrypoint: req.Entrypoint, platform: req.Platform, arch: req.Arch}
+	return patternQuery{projectRoot: req.ProjectRoot, entrypoint: req.Entrypoint, platform: req.Platform, arch: req.Arch,
+		defines: req.Defines}
 }
 
 func libraryOptionsFromRequest(req BackendRequest) LibraryOptions {

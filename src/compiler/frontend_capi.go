@@ -361,9 +361,9 @@ func _frida_compiler_backend_language_server_post(h uintptr, cText *C.char) *C.c
 }
 
 //export _frida_compiler_backend_patterns_describe
-func _frida_compiler_backend_patterns_describe(cProjectRoot, cEntrypoint, cPlatform, cArch *C.char,
+func _frida_compiler_backend_patterns_describe(cProjectRoot, cEntrypoint, cPlatform, cArch, cDefines *C.char,
 	onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
-	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch)
+	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch, cDefines)
 	onResult := NewCDelegate(onResultFn, onResultData, onResultDataDestroy)
 
 	go func() {
@@ -376,9 +376,9 @@ func _frida_compiler_backend_patterns_describe(cProjectRoot, cEntrypoint, cPlatf
 
 //export _frida_compiler_backend_patterns_decode
 func _frida_compiler_backend_patterns_decode(cProjectRoot, cEntrypoint, cTypeName *C.char, cData *C.uint8_t, dataLength C.int,
-	address C.uint64_t, cPlatform, cArch, cInputs *C.char, onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer,
-	onResultDataDestroy C.FridaDestroyFunc) {
-	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch)
+	address C.uint64_t, cPlatform, cArch, cDefines, cInputs *C.char, onResultFn C.FridaPatternResultFunc,
+	onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
+	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch, cDefines)
 	typeName := C.GoString(cTypeName)
 	data := C.GoBytes(unsafe.Pointer(cData), dataLength)
 	inputs := parsePatternInputs(cInputs)
@@ -394,9 +394,9 @@ func _frida_compiler_backend_patterns_decode(cProjectRoot, cEntrypoint, cTypeNam
 
 //export _frida_compiler_backend_patterns_call
 func _frida_compiler_backend_patterns_call(cProjectRoot, cEntrypoint, cTypeName *C.char, cData *C.uint8_t, dataLength C.int,
-	address C.uint64_t, cPlatform, cArch, cInputs *C.char, patternID C.uint, cFunctionName *C.char,
+	address C.uint64_t, cPlatform, cArch, cDefines, cInputs *C.char, patternID C.uint, cFunctionName *C.char,
 	onResultFn C.FridaPatternResultFunc, onResultData unsafe.Pointer, onResultDataDestroy C.FridaDestroyFunc) {
-	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch)
+	query := patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch, cDefines)
 	typeName := C.GoString(cTypeName)
 	data := C.GoBytes(unsafe.Pointer(cData), dataLength)
 	inputs := parsePatternInputs(cInputs)
@@ -411,24 +411,29 @@ func _frida_compiler_backend_patterns_call(cProjectRoot, cEntrypoint, cTypeName 
 	}()
 }
 
-func patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch *C.char) patternQuery {
+func patternQueryFromC(cProjectRoot, cEntrypoint, cPlatform, cArch, cDefines *C.char) patternQuery {
 	return patternQuery{
 		projectRoot: C.GoString(cProjectRoot),
 		entrypoint:  C.GoString(cEntrypoint),
 		platform:    C.GoString(cPlatform),
 		arch:        C.GoString(cArch),
+		defines:     parsePatternDict(cDefines),
 	}
 }
 
 func parsePatternInputs(cInputs *C.char) map[string]any {
-	if cInputs == nil {
+	return parsePatternDict(cInputs)
+}
+
+func parsePatternDict(cJSON *C.char) map[string]any {
+	if cJSON == nil {
 		return nil
 	}
-	var inputs map[string]any
-	if err := json.Unmarshal([]byte(C.GoString(cInputs)), &inputs); err != nil {
+	var dict map[string]any
+	if err := json.Unmarshal([]byte(C.GoString(cJSON)), &dict); err != nil {
 		return nil
 	}
-	return inputs
+	return dict
 }
 
 func invokePatternResultFunc(onResult *CDelegate[C.FridaPatternResultFunc], result string, err error) {

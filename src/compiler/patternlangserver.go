@@ -21,6 +21,14 @@ type routedMessage struct {
 	Params json.RawMessage `json:"params"`
 }
 
+type configurationParams struct {
+	Settings struct {
+		Patterns struct {
+			Defines map[string]string `json:"defines"`
+		} `json:"patterns"`
+	} `json:"settings"`
+}
+
 type documentParams struct {
 	TextDocument struct {
 		URI  string `json:"uri"`
@@ -45,6 +53,12 @@ func (r *patternRouter) route(text string) bool {
 	}
 	if message.Method == "initialize" {
 		r.initializeID = message.ID
+		return false
+	}
+	if message.Method == "workspace/didChangeConfiguration" {
+		var params configurationParams
+		json.Unmarshal(message.Params, &params)
+		r.service.Define(params.Settings.Patterns.Defines)
 		return false
 	}
 	var params documentParams
