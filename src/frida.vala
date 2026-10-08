@@ -2416,9 +2416,12 @@ namespace Frida {
 
 				var config = (BareboneLinuxKernelConfig) Json.gobject_deserialize (
 					typeof (BareboneLinuxKernelConfig), node);
-				config.kernel = (kind == "linux-system-map")
-					? (LinuxKernelSymbols) LinuxSystemMap.open (file)
-					: (LinuxKernelSymbols) LinuxKernelImage.open (file);
+				// FIXME: Work around Vala compiler bug where upcasting the result inside the
+				//        ?: drops its ownership, freeing it before set_kernel () stores it.
+				if (kind == "linux-system-map")
+					config.kernel = LinuxSystemMap.open (file);
+				else
+					config.kernel = LinuxKernelImage.open (file);
 				return config;
 			} catch (Error e) {
 				return new BareboneInvalidImageConfig (e.message);
