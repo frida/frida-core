@@ -1120,7 +1120,18 @@ unsafe fn init_gum() {
 // do. A copy in a process would take it from the half that uses it.
 #[cfg(any(feature = "blob", feature = "xnu-core"))]
 pub(crate) unsafe fn init_gum_without_exceptor() {
-    unsafe { init_gum_with_exceptor(false) };
+    unsafe {
+        init_gum_with_exceptor(false);
+        warm_async_io();
+    }
+}
+
+pub(crate) unsafe fn warm_async_io() {
+    unsafe {
+        let task = bindings::g_task_new(core::ptr::null_mut(), core::ptr::null_mut(), None,
+            core::ptr::null_mut());
+        bindings::g_object_unref(task as bindings::gpointer);
+    }
 }
 
 unsafe fn init_gum_with_exceptor(exceptor: bool) {
