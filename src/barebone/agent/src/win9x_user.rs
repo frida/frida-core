@@ -164,8 +164,33 @@ fn copy_has_work() -> bool {
     }
 }
 
+static LOOP_WAKE_EVENT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 fn loop_wake_event() -> u32 {
-    event_in(slot_for_token(crate::glib::wakeup_token()))
+    let existing = LOOP_WAKE_EVENT.load(Ordering::Acquire);
+    if existing != 0 {
+        return existing;
+    }
+
+    let create_event: unsafe extern "stdcall" fn(u32, u32, u32, u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().create_event as usize) };
+    let created = unsafe { create_event(0, 0, 0, 0) };
+
+    match LOOP_WAKE_EVENT.compare_exchange(0, created, Ordering::AcqRel, Ordering::Acquire) {
+        Ok(_) => created,
+        Err(raced) => {
+            let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
+                unsafe { core::mem::transmute(user_api().close_handle as usize) };
+            unsafe { close_handle(created) };
+            raced
+        }
+    }
+}
+
+pub(crate) fn poke_loop_wakeup() {
+    let set_event: unsafe extern "stdcall" fn(u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().set_event as usize) };
+    unsafe { set_event(loop_wake_event()) };
 }
 
 pub(crate) unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD, nfds: u32,
@@ -173,9 +198,12 @@ pub(crate) unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD
     const MAX_HANDLES: usize = 16;
     let fds = unsafe { core::slice::from_raw_parts_mut(ufds, nfds as usize) };
 
+    let wake = loop_wake_event();
+
     let mut handles = [0u32; MAX_HANDLES];
-    let mut origin = [0usize; MAX_HANDLES];
-    let mut count = 0usize;
+    let mut origin = [usize::MAX; MAX_HANDLES];
+    handles[0] = wake;
+    let mut count = 1usize;
     let mut ready = 0i32;
 
     for (index, fd) in fds.iter_mut().enumerate() {
@@ -190,14 +218,14 @@ pub(crate) unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD
                 let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
                 unsafe { token.write(fd.user_data) };
             }
-        } else if fd.fd != -1 && count < MAX_HANDLES {
+        } else if fd.fd != -1 && fd.fd as u32 != wake && count < MAX_HANDLES {
             handles[count] = fd.fd as u32;
             origin[count] = index;
             count += 1;
         }
     }
 
-    if ready == 0 && count != 0 {
+    if ready == 0 {
         let wait_for_multiple_objects_ex: unsafe extern "stdcall" fn(u32, *const u32, u32, u32, u32) -> u32 =
             unsafe { core::mem::transmute(user_api().wait_for_multiple_objects_ex as usize) };
         let timeout_ms = if timeout < 0 { INFINITE } else { timeout as u32 };
@@ -205,8 +233,11 @@ pub(crate) unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD
             wait_for_multiple_objects_ex(count as u32, handles.as_ptr(), 0, timeout_ms, 1)
         };
         if (status as usize) < count {
-            fds[origin[status as usize]].revents = POLL_IN;
-            ready += 1;
+            let slot = origin[status as usize];
+            if slot != usize::MAX {
+                fds[slot].revents = POLL_IN;
+                ready += 1;
+            }
         }
     }
 

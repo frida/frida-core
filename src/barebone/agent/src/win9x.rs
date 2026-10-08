@@ -192,7 +192,11 @@ fn block_until_signalled_or_timed_out(semaphore: u32, timeout_us: u64) {
     }
 }
 
-pub fn poke_loop_wakeup() {}
+pub fn poke_loop_wakeup() {
+    if in_copy() {
+        crate::win9x_user::poke_loop_wakeup();
+    }
+}
 
 pub fn wake(token: *const u8) {
     (primitives().wake)(token)
