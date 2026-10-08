@@ -1,4 +1,5 @@
 #![no_std]
+#![cfg_attr(feature = "linux", feature(linkage))]
 
 #[cfg(not(any(
     feature = "xnu-core",
@@ -1133,6 +1134,23 @@ pub(crate) unsafe fn warm_async_io() {
         bindings::g_object_unref(task as bindings::gpointer);
     }
 }
+
+// TEMPORARY: g_io_watch_funcs lives in GLib's giounix.c / giowin32.c, and a
+// freestanding GLib builds neither, so gobject's gsourceclosure.c is left taking the
+// address of a symbol nothing defines. The kernel module must resolve every symbol,
+// and the agent never creates a GIOChannel watch, so stand in with a placeholder that
+// GLib's own definition overrides once the freestanding build ships one.
+#[cfg(feature = "linux")]
+#[unsafe(no_mangle)]
+#[linkage = "weak"]
+pub static g_io_watch_funcs: bindings::GSourceFuncs = bindings::GSourceFuncs {
+    prepare: None,
+    check: None,
+    dispatch: None,
+    finalize: None,
+    closure_callback: None,
+    closure_marshal: None,
+};
 
 unsafe fn init_gum_with_exceptor(exceptor: bool) {
     unsafe {
