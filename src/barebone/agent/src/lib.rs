@@ -1127,6 +1127,7 @@ unsafe fn init_gum_with_exceptor(exceptor: bool) {
     unsafe {
         bindings::g_set_panic_handler(Some(signed_to_be_called_back(frida_panic_handler, 0)), ptr::null_mut());
         bindings::gum_init_embedded();
+        bindings::glib_enable_io_features();
         if exceptor {
             bindings::gum_exceptor_obtain();
         }
