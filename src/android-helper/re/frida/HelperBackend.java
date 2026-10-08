@@ -18,7 +18,6 @@ import android.graphics.drawable.Drawable;
 import android.os.Looper;
 import android.os.Process;
 import android.util.Base64;
-import android.util.Base64OutputStream;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -982,10 +981,10 @@ public class HelperBackend {
 		icon.setBounds(0, 0, width, height);
 		icon.draw(canvas);
 
-		ByteArrayOutputStream output = new ByteArrayOutputStream();
-		bitmap.compress(CompressFormat.PNG, 100, new Base64OutputStream(output, Base64.NO_WRAP));
+		ByteArrayOutputStream png = new ByteArrayOutputStream();
+		bitmap.compress(CompressFormat.PNG, 100, png);
 
-		return output.toString();
+		return Base64.encodeToString(png.toByteArray(), Base64.NO_WRAP);
 	}
 
 	private Map<String, List<RunningAppProcessInfo>> getAppProcesses() {
