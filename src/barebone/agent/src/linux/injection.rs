@@ -2,7 +2,6 @@ use core::ffi::{c_int, c_void};
 use core::ptr;
 
 use alloc::collections::BTreeMap;
-use alloc::string::String;
 
 #[cfg(not(target_arch = "x86"))]
 use crate::bindings::{
@@ -857,31 +856,10 @@ pub fn serve_register_requests() {
 
 pub fn report_what_the_copies_hit() {
     for placed in unsafe { placements() }.values() {
-        let Some(hit) = what_it_says(placed) else {
+        if what_it_says(placed).is_none() {
             continue;
-        };
-        bump_to(placed.arena + super::arena::PROGRESS, NOTHING_MORE);
-
-        let arena = Arena::at(placed.arena);
-        let said = arena.said();
-        if hit == super::user::SPOKE {
-            native::log(&alloc::format!("copy in {}: {}\n", pid_reported_by(placed), said));
-        } else if hit == super::user::PANICKED {
-            native::log(&alloc::format!("copy in {} gave up: {}\n", pid_reported_by(placed), said));
-        } else {
-            let kind = read_address(placed.arena + super::arena::FAULT_KIND);
-            native::log(&alloc::format!(
-                "copy in {} died on signal {} ({}) at {:#x}, pc {}, lr {}, image at {:#x}, {}\n",
-                pid_reported_by(placed),
-                kind as u32,
-                (kind >> 32) as u32,
-                read_address(placed.arena + super::arena::FAULT_ADDRESS),
-                relative_to_image(read_address(placed.arena + super::arena::FAULT_PC), placed),
-                relative_to_image(read_address(placed.arena + super::arena::FAULT_LR), placed),
-                placed.base,
-                said
-            ));
         }
+        bump_to(placed.arena + super::arena::PROGRESS, NOTHING_MORE);
     }
 }
 
@@ -897,16 +875,6 @@ fn what_it_says(placed: &Placement) -> Option<u32> {
 
 fn bump_to(address: usize, value: u32) {
     unsafe { (address as *mut u32).write_volatile(value) };
-}
-
-fn relative_to_image(address: u64, placed: &Placement) -> String {
-    let base = placed.base as u64;
-    let size = crate::own_range().1 as u64;
-    if address >= base && address - base < size {
-        alloc::format!("image+{:#x}", address - base)
-    } else {
-        alloc::format!("{:#x}", address)
-    }
 }
 
 const NOTHING_MORE: u32 = 0;
@@ -1132,10 +1100,6 @@ fn wake_the_copy(placed: &Placement) {
     if !placed.hears.is_null() {
         native::leave_a_word(placed.hears);
     }
-}
-
-fn read_address(address: usize) -> u64 {
-    unsafe { (address as *const u64).read_volatile() }
 }
 
 fn read_word(address: usize) -> u32 {

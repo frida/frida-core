@@ -25,14 +25,6 @@ impl Arena {
         }
     }
 
-    pub fn said(&self) -> &str {
-        let bytes =
-            unsafe { core::slice::from_raw_parts((self.begins + SAID) as *const u8, SAID_SIZE) };
-        let length = bytes.iter().position(|byte| *byte == 0).unwrap_or(SAID_SIZE);
-
-        core::str::from_utf8(&bytes[..length]).unwrap_or("")
-    }
-
     pub fn page_size(&self) -> u32 {
         self.word(PAGE_SIZE).load(Ordering::Acquire)
     }
