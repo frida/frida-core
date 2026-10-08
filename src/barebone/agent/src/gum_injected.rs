@@ -985,3 +985,47 @@ pub(crate) unsafe fn enumerate_exports_in_range(
 pub extern "C" fn gum_load_symbols(_path: *const gchar) -> gboolean {
     0
 }
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_thread_get_system_error() -> gint {
+    match errno_slot() {
+        Some(slot) => unsafe { *slot },
+        None => 0,
+    }
+}
+
+#[cfg(feature = "linux-injected")]
+#[unsafe(no_mangle)]
+pub extern "C" fn gum_thread_set_system_error(value: gint) {
+    if let Some(slot) = errno_slot() {
+        unsafe { *slot = value };
+    }
+}
+
+// errno is thread-local behind a function that hands back its address:
+// __errno_location on glibc and musl, __errno on Bionic.
+#[cfg(feature = "linux-injected")]
+fn errno_slot() -> Option<*mut gint> {
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    if !crate::kernel::in_copy() {
+        return None;
+    }
+
+    static LOCATE: AtomicUsize = AtomicUsize::new(0);
+    let mut locate = LOCATE.load(Ordering::Relaxed);
+    if locate == 0 {
+        locate = crate::kernel::export_named("__errno_location") as usize;
+        if locate == 0 {
+            locate = crate::kernel::export_named("__errno") as usize;
+        }
+        if locate == 0 {
+            return None;
+        }
+        LOCATE.store(locate, Ordering::Relaxed);
+    }
+
+    let locate: unsafe extern "C" fn() -> *mut gint = unsafe { core::mem::transmute(locate) };
+    Some(unsafe { locate() })
+}
