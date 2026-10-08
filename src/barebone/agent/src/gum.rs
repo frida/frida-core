@@ -505,6 +505,11 @@ mod symbolication {
             return crate::xnu_mapped::export_named(name);
         }
 
+        #[cfg(feature = "linux-injected")]
+        if crate::kernel::in_copy() {
+            return crate::kernel::export_named(name);
+        }
+
         let table = unsafe { &*ptr::addr_of!(crate::SYMBOL_TABLE) };
 
         match table.find_symbol_by_name(name) {

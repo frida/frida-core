@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use core::ffi::c_void;
+use core::ffi::{CStr, c_void};
 use core::ptr;
 
 use crate::bindings::{
@@ -110,6 +110,22 @@ pub fn enumerate_exports_in_range(from: u64, to: u64, found: &mut FoundExportCal
         );
         g_object_unref(module as gpointer);
     }
+}
+
+pub fn export_named(wanted: &str) -> u64 {
+    let mut found: u64 = 0;
+    for image in mapped_images() {
+        enumerate_exports_in_range(image.base, image.base + image.size, &mut |name, address| {
+            if !name.is_null() && unsafe { CStr::from_ptr(name as *const _) }.to_bytes() == wanted.as_bytes() {
+                found = address;
+            }
+            found == 0
+        });
+        if found != 0 {
+            break;
+        }
+    }
+    found
 }
 
 pub fn enumerate_symbols_in_range(from: u64, to: u64, found: &mut FoundSymbolCallback<'_>) {
