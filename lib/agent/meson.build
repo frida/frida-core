@@ -93,8 +93,6 @@ if build_agent
     install: assets_mode == 'installed' and not need_universal_agent,
     install_dir: asset_dir,
   )
-
-  agent_dep = declare_dependency(link_with: agent)
 endif
 
 if need_universal_agent
