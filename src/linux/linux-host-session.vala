@@ -1568,7 +1568,7 @@ namespace Frida {
 
 			if (server_name == null) {
 				string name = "/frida-zymbiote-" + Uuid.string_random ().replace ("-", "");
-				var address = new UnixSocketAddress.with_type (name, -1, UnixSocketAddressType.ABSTRACT);
+				var address = new UnixSocketAddress.with_type (name.to_utf8 (), UnixSocketAddressType.ABSTRACT);
 
 				try {
 					var socket = new Socket (SocketFamily.UNIX, SocketType.STREAM, SocketProtocol.DEFAULT);

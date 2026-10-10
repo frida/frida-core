@@ -174,7 +174,7 @@ namespace Frida.SuperSU {
 		private async string? establish (string address, Cancellable? cancellable) throws Error, IOError {
 			try {
 				var client = new SocketClient ();
-				connection = yield client.connect_async (new UnixSocketAddress.with_type (address, -1, ABSTRACT),
+				connection = yield client.connect_async (new UnixSocketAddress.with_type (address.to_utf8 (), ABSTRACT),
 					cancellable);
 
 				input = new DataInputStream (connection.get_input_stream ());

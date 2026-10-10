@@ -57,7 +57,7 @@ namespace Frida.Barebone {
 			{
 				SocketConnectable connectable;
 				if (address.has_prefix ("unix:")) {
-					connectable = new UnixSocketAddress.with_type (address.substring (5), -1,
+					connectable = new UnixSocketAddress.with_type (address.substring (5).to_utf8 (),
 						UnixSocketAddressType.PATH);
 				} else {
 					string endpoint = address.has_prefix ("tcp:") ? address.substring (4) : address;

@@ -322,7 +322,7 @@ namespace Frida {
 				Cancellable? cancellable) throws Error {
 			var promise = new Promise<RemoteAgent> ();
 
-			var server_address = new UnixSocketAddress.with_type (fallback_address, -1, UnixSocketAddressType.ABSTRACT);
+			var server_address = new UnixSocketAddress.with_type (fallback_address.to_utf8 (), UnixSocketAddressType.ABSTRACT);
 			Socket server_socket;
 			try {
 				var socket = new Socket (SocketFamily.UNIX, SocketType.STREAM, SocketProtocol.DEFAULT);

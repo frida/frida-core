@@ -343,7 +343,7 @@ namespace Frida {
 
 				service = new SocketService ();
 				SocketAddress effective_address;
-				service.add_address (new UnixSocketAddress.with_type (socket_path, -1, ABSTRACT),
+				service.add_address (new UnixSocketAddress.with_type (socket_path.to_utf8 (), ABSTRACT),
 					SocketType.STREAM, SocketProtocol.DEFAULT, null, out effective_address);
 				service.start ();
 
