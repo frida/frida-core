@@ -25,7 +25,7 @@ namespace Frida {
 				? UnixSocketAddressType.ABSTRACT
 				: UnixSocketAddressType.PATH;
 
-			return new UnixSocketAddress.with_type (path, -1, type);
+			return new UnixSocketAddress.with_type (path.to_utf8 (), type);
 		}
 #endif
 

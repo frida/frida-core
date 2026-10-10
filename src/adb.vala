@@ -813,7 +813,7 @@ namespace Frida {
 					else if (socket_type == "local" || socket_type == "localfilesystem") {
 						connectable = new UnixSocketAddress (socket_address);
 					} else if (socket_type == "localabstract" && UnixSocketAddress.abstract_names_supported ()) {
-						connectable = new UnixSocketAddress.with_type (socket_address, socket_address.length,
+						connectable = new UnixSocketAddress.with_type (socket_address.to_utf8 (),
 							ABSTRACT_PADDED);
 					}
 #endif

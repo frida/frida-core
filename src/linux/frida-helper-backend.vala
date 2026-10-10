@@ -1288,7 +1288,7 @@ namespace Frida {
 
 				do_establish_connection.begin (connection, launch, spec, bres, agent_ctrl, promise, cancellable);
 			} else {
-				var server_address = new UnixSocketAddress.with_type (fallback_address, -1, UnixSocketAddressType.ABSTRACT);
+				var server_address = new UnixSocketAddress.with_type (fallback_address.to_utf8 (), UnixSocketAddressType.ABSTRACT);
 
 				Socket server_socket;
 				try {
