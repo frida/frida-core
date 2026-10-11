@@ -767,8 +767,10 @@ namespace Frida.Gadget {
 			 * Keep the parent running. Joining gum-js-loop or the Gadget
 			 * worker around fork() wedges the host's main thread (input
 			 * timeout, then the system kills the process because it cannot
-			 * deliver broadcasts). Child-only recover reinitializes copied
-			 * locks.
+			 * deliver broadcasts). GLib prepare/recover is also unsafe:
+			 * pause_all copies held pool mutexes into the child, and
+			 * resume_all then blocks forever in g_mutex_lock. Child-only
+			 * recover reinitializes copied Gum locks so helpers can _exit.
 			 */
 		}
 
