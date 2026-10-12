@@ -1,5 +1,15 @@
 namespace Frida.CompilerTest {
 	public static void add_tests () {
+		GLib.Test.add_func ("/Compiler/Lifecycle/release-watch", () => {
+			var h = new Harness ((h) => LifecycleTests.release_immediately.begin (h as Harness, false));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Compiler/Lifecycle/release-library-watch", () => {
+			var h = new Harness ((h) => LifecycleTests.release_immediately.begin (h as Harness, true));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Compiler/Performance/build-simple-agent", () => {
 			var h = new Harness ((h) => Performance.build_simple_agent.begin (h as Harness));
 			h.run ();
@@ -39,6 +49,45 @@ namespace Frida.CompilerTest {
 			var h = new Harness ((h) => PatternTests.compile_and_decode.begin (h as Harness));
 			h.run ();
 		});
+	}
+
+	namespace LifecycleTests {
+		private async void release_immediately (Harness h, bool library) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				string project_dir = DirUtils.make_tmp ("compiler-lifetime-test.XXXXXX");
+				string entrypoint = Path.build_filename (project_dir, "index.ts");
+				FileUtils.set_contents (entrypoint, "export const answer = 42;\n");
+				var library_options = new LibraryOptions () {
+					project_root = project_dir,
+					source_maps = OMITTED,
+				};
+
+				for (uint i = 0; i != 3; i++) {
+					var compiler = new Compiler ();
+					if (library) {
+						yield compiler.build_library (entrypoint, "dist", library_options);
+						yield compiler.watch_library (entrypoint, "dist", library_options);
+					} else {
+						yield compiler.build (entrypoint);
+						yield compiler.watch (entrypoint);
+					}
+					compiler = null;
+				}
+
+				remove_tree (project_dir);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
 	}
 
 	namespace PatternTests {
@@ -478,19 +527,6 @@ console.log(describePlayer(findPlayer(Process.mainModule.base)));
 
 			h.done ();
 		}
-
-		private static void remove_tree (string path) throws GLib.Error {
-			var dir = Dir.open (path);
-			string? name;
-			while ((name = dir.read_name ()) != null) {
-				string child = Path.build_filename (path, name);
-				if (FileUtils.test (child, IS_DIR))
-					remove_tree (child);
-				else
-					FileUtils.unlink (child);
-			}
-			DirUtils.remove (path);
-		}
 	}
 
 	namespace LanguageServerTests {
@@ -806,6 +842,19 @@ export function log(...items: any[]) {
 		}
 
 		return false;
+	}
+
+	private void remove_tree (string path) throws GLib.Error {
+		var dir = Dir.open (path);
+		string? name;
+		while ((name = dir.read_name ()) != null) {
+			string child = Path.build_filename (path, name);
+			if (FileUtils.test (child, IS_DIR))
+				remove_tree (child);
+			else
+				FileUtils.unlink (child);
+		}
+		DirUtils.remove (path);
 	}
 
 	private sealed class Harness : Frida.Test.AsyncHarness {
