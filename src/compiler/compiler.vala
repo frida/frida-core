@@ -48,8 +48,10 @@ namespace Frida {
 			main_context = Frida.get_main_context ();
 		}
 
-		~Compiler () {
+		public override void dispose () {
 			cancel_watch ();
+
+			base.dispose ();
 		}
 
 		/**
@@ -149,8 +151,9 @@ namespace Frida {
 
 		private void cancel_watch () {
 			if (watch_session_handle != 0) {
-				CompilerBackend.WatchSession.dispose (watch_session_handle);
+				size_t handle = watch_session_handle;
 				watch_session_handle = 0;
+				CompilerBackend.WatchSession.dispose (handle);
 			}
 		}
 

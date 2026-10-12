@@ -74,6 +74,7 @@ type WatchSession struct {
 	callbacks     BuildEventCallbacks
 	ctx           *buildContext
 	onDispose     SessionDisposeHandler
+	closed        bool
 }
 
 type ContextFactory func(callbacks BuildEventCallbacks) (*buildContext, error)
@@ -86,8 +87,12 @@ func NewWatchSession(opts BuildOptions, onDispose SessionDisposeHandler, callbac
 	}, onDispose, callbacks)
 }
 
-func newWatchSession(createContext ContextFactory, onDispose SessionDisposeHandler, callbacks BuildEventCallbacks) (session *WatchSession, err error) {
-	cbs := BuildEventCallbacks{
+func newWatchSession(createContext ContextFactory, onDispose SessionDisposeHandler, callbacks BuildEventCallbacks) (*WatchSession, error) {
+	session := &WatchSession{
+		createContext: createContext,
+		onDispose:     onDispose,
+	}
+	session.callbacks = BuildEventCallbacks{
 		OnStart:      callbacks.OnStart,
 		OnEnd:        callbacks.OnEnd,
 		OnOutput:     callbacks.OnOutput,
@@ -100,25 +105,35 @@ func newWatchSession(createContext ContextFactory, onDispose SessionDisposeHandl
 		},
 	}
 
-	ctx, err := createContext(cbs)
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	ctx, err := createContext(session.callbacks)
 	if err != nil {
-		return
+		session.dispose()
+		return nil, err
 	}
+	session.ctx = ctx
 
-	ctx.Watch(esbuild.WatchOptions{})
-
-	session = &WatchSession{
-		createContext: createContext,
-		callbacks:     cbs,
-		ctx:           ctx,
-		onDispose:     onDispose,
+	if err := ctx.Watch(esbuild.WatchOptions{}); err != nil {
+		session.dispose()
+		return nil, err
 	}
-	return
+	return session, nil
 }
 
 func (s *WatchSession) Dispose() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.dispose()
+}
+
+func (s *WatchSession) dispose() {
+	if s.closed {
+		return
+	}
+	s.closed = true
 
 	if s.ctx != nil {
 		s.ctx.Dispose()
@@ -129,23 +144,29 @@ func (s *WatchSession) Dispose() {
 }
 
 func (s *WatchSession) onConfigChange() {
-	go func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
+	go s.rebuild()
+}
 
-		if s.ctx != nil {
-			s.ctx.Dispose()
-			s.ctx = nil
-		}
+func (s *WatchSession) rebuild() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-		ctx, err := s.createContext(s.callbacks)
-		if err != nil {
-			return
-		}
-		s.ctx = ctx
+	if s.closed {
+		return
+	}
 
-		ctx.Watch(esbuild.WatchOptions{})
-	}()
+	if s.ctx != nil {
+		s.ctx.Dispose()
+		s.ctx = nil
+	}
+
+	ctx, err := s.createContext(s.callbacks)
+	if err != nil {
+		return
+	}
+	s.ctx = ctx
+
+	ctx.Watch(esbuild.WatchOptions{})
 }
 
 func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx *buildContext, err error) {
