@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
 	"github.com/frida/TypeScript/tsc/pkg/ast"
@@ -37,6 +38,7 @@ type libraryBuild struct {
 	*libraryBuilder
 	onDiagnostic BuildDiagnosticCallback
 	failed       bool
+	outputsMutex sync.Mutex
 	outputs      map[string]string
 }
 
@@ -293,7 +295,9 @@ func (b *libraryBuild) display(path string) string {
 }
 
 func (b *libraryBuild) captureOutput(fileName string, text string, data *compiler.WriteFileData) error {
+	b.outputsMutex.Lock()
 	b.outputs[fileName] = text
+	b.outputsMutex.Unlock()
 	return nil
 }
 
