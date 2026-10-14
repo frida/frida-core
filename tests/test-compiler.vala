@@ -731,7 +731,7 @@ struct Image { u8 magic[2]; u8 width; };
 					assert ("unknown type Nope" in e.message);
 				}
 
-				remove_directory (project_dir);
+				remove_tree (project_dir);
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
@@ -752,14 +752,6 @@ struct Image { u8 magic[2]; u8 width; };
 			options.platform = "darwin";
 			options.arch = "arm64";
 			return options;
-		}
-
-		private void remove_directory (string path) throws GLib.Error {
-			var dir = Dir.open (path);
-			string? name;
-			while ((name = dir.read_name ()) != null)
-				FileUtils.unlink (Path.build_filename (path, name));
-			DirUtils.remove (path);
 		}
 
 		private async void complete_pattern_fields (Harness h) {
