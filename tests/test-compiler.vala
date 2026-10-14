@@ -1,15 +1,5 @@
 namespace Frida.CompilerTest {
 	public void add_tests () {
-		GLib.Test.add_func ("/Compiler/Lifecycle/release-watch", () => {
-			var h = new Harness ((h) => LifecycleTests.release_immediately.begin (h as Harness, false));
-			h.run ();
-		});
-
-		GLib.Test.add_func ("/Compiler/Lifecycle/release-library-watch", () => {
-			var h = new Harness ((h) => LifecycleTests.release_immediately.begin (h as Harness, true));
-			h.run ();
-		});
-
 		GLib.Test.add_func ("/Compiler/Performance/build-simple-agent", () => {
 			var h = new Harness ((h) => Performance.build_simple_agent.begin (h as Harness));
 			h.run ();
@@ -30,6 +20,16 @@ namespace Frida.CompilerTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Compiler/Lifecycle/release-watch", () => {
+			var h = new Harness ((h) => LifecycleTests.release_immediately.begin (h as Harness, false));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Compiler/Lifecycle/release-library-watch", () => {
+			var h = new Harness ((h) => LifecycleTests.release_immediately.begin (h as Harness, true));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Compiler/LanguageServer/complete-simple-agent", () => {
 			var h = new Harness ((h) => LanguageServerTests.complete_simple_agent.begin (h as Harness));
 			h.run ();
@@ -40,15 +40,301 @@ namespace Frida.CompilerTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Compiler/Patterns/complete-pattern-fields", () => {
-			var h = new Harness ((h) => PatternTests.complete_pattern_fields.begin (h as Harness));
-			h.run ();
-		});
-
 		GLib.Test.add_func ("/Compiler/Patterns/compile-and-decode", () => {
 			var h = new Harness ((h) => PatternTests.compile_and_decode.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/Compiler/Patterns/complete-pattern-fields", () => {
+			var h = new Harness ((h) => PatternTests.complete_pattern_fields.begin (h as Harness));
+			h.run ();
+		});
+	}
+
+	namespace Performance {
+		private async void build_simple_agent (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				var device_manager = new DeviceManager ();
+				var compiler = new Compiler (device_manager);
+
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
+				FileUtils.set_contents (agent_ts_path, """
+import { log } from "./logger.js";
+
+const woot = Buffer.from("w00t").toString("base64");
+
+log("Hello World: " + woot);
+log(hexdump(Process.mainModule.base, { ansi: true }));
+""");
+
+				string logger_ts_path = Path.build_filename (project_dir, "logger.ts");
+				FileUtils.set_contents (logger_ts_path, """
+export function log(...items: any[]) {
+    const message = items.join("\n");
+    console.log(`[LOG] ${message}`);
+}
+""");
+
+				compiler.diagnostics.connect (d => printerr ("DIAGNOSTICS: %s\n", d.print (false)));
+				var timer = new Timer ();
+				var code = yield compiler.build (agent_ts_path);
+				uint elapsed_msec = (uint) (timer.elapsed () * 1000.0);
+
+				if (GLib.Test.verbose ()) {
+					print ("Output:\nvvv\n%s^^^\n", code);
+					print ("Built in %u ms\n", elapsed_msec);
+				}
+
+				unowned string? test_log_path = Environment.get_variable ("FRIDA_TEST_LOG");
+				if (test_log_path != null) {
+					var test_log = FileStream.open (test_log_path, "w");
+					assert (test_log != null);
+
+					test_log.printf ("build-time,%u\n", elapsed_msec);
+
+					Gum.Process.enumerate_modules (m => {
+						if ("frida-agent" in m.path) {
+							var r = m.range;
+							test_log.printf (("agent-range,0x%" + uint64.FORMAT_MODIFIER + "x,0x%" +
+									uint64.FORMAT_MODIFIER + "x\n"),
+								r.base_address, r.base_address + r.size);
+							return false;
+						}
+
+						return true;
+					});
+
+					test_log = null;
+				}
+
+				FileUtils.unlink (agent_ts_path);
+				DirUtils.remove (project_dir);
+
+				compiler = null;
+				yield device_manager.close ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private async void watch_simple_agent (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				var device_manager = new DeviceManager ();
+				var compiler = new Compiler (device_manager);
+
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
+				FileUtils.set_contents (agent_ts_path, "console.log(\"Hello World\");");
+
+				string? bundle = null;
+				bool waiting = false;
+				compiler.output.connect (b => {
+					bundle = b;
+					if (waiting)
+						watch_simple_agent.callback ();
+				});
+
+				var timer = new Timer ();
+				yield compiler.watch (agent_ts_path);
+				while (bundle == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				uint elapsed_msec = (uint) (timer.elapsed () * 1000.0);
+
+				if (GLib.Test.verbose ())
+					print ("Watch built first bundle in %u ms\n", elapsed_msec);
+
+				unowned string? test_log_path = Environment.get_variable ("FRIDA_TEST_LOG");
+				if (test_log_path != null) {
+					var test_log = FileStream.open (test_log_path, "w");
+					assert (test_log != null);
+
+					test_log.printf ("build-time,%u\n", elapsed_msec);
+
+					Gum.Process.enumerate_modules (m => {
+						if ("frida-agent" in m.path) {
+							var r = m.range;
+							test_log.printf (("agent-range,0x%" + uint64.FORMAT_MODIFIER + "x,0x%" +
+									uint64.FORMAT_MODIFIER + "x\n"),
+								r.base_address, r.base_address + r.size);
+							return false;
+						}
+
+						return true;
+					});
+
+					test_log = null;
+				}
+
+				FileUtils.unlink (agent_ts_path);
+				DirUtils.remove (project_dir);
+
+				compiler = null;
+				yield device_manager.close ();
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+	}
+
+	namespace LibraryTests {
+		private async void build_library (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string lib_dir = Path.build_filename (project_dir, "lib");
+				DirUtils.create_with_parents (Path.build_filename (lib_dir, "patterns"), 0755);
+				FileUtils.set_contents (Path.build_filename (lib_dir, "index.ts"), """
+import { Player } from "./patterns/player.pat";
+import { describe } from "./describe.js";
+
+export function findPlayer(address: NativePointer): Player {
+    return Player.at(address);
+}
+
+export function describePlayer(player: Player): string {
+    return describe(player.hitpoints);
+}
+""");
+				FileUtils.set_contents (Path.build_filename (lib_dir, "describe.ts"), """
+export function describe(hitpoints: number): string {
+    return hitpoints + " hp";
+}
+""");
+				FileUtils.set_contents (Path.build_filename (lib_dir, "patterns", "player.pat"), """
+import geometry;
+
+#pragma abi native
+
+struct Player {
+	u32 hitpoints;
+	u16 armor;
+	Vec3 position;
+	Player *next;
+};
+""");
+				FileUtils.set_contents (Path.build_filename (lib_dir, "patterns", "geometry.pat"), """
+struct Vec3 {
+	float x;
+	float y;
+	float z;
+};
+""");
+
+				var compiler = new Compiler ();
+				compiler.diagnostics.connect (d => printerr ("DIAGNOSTICS: %s\n", d.print (false)));
+				yield compiler.build_library (Path.build_filename (lib_dir, "index.ts"), "dist",
+					new LibraryOptions () { project_root = project_dir });
+
+				string dist_dir = Path.build_filename (project_dir, "dist");
+				string declarations;
+				FileUtils.get_contents (Path.build_filename (dist_dir, "index.d.ts"), out declarations);
+				assert ("import { Player } from \"./patterns/player.pat\";" in declarations);
+				assert ("export declare function findPlayer(address: NativePointer): Player;" in declarations);
+				string code;
+				FileUtils.get_contents (Path.build_filename (dist_dir, "index.js"), out code);
+				assert ("from \"./patterns/player.pat\"" in code);
+				assert (FileUtils.test (Path.build_filename (dist_dir, "index.js.map"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "describe.js"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "describe.d.ts"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "player.pat"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "player.pat.d.ts"), EXISTS));
+				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "geometry.pat"), EXISTS));
+				assert (!FileUtils.test (Path.build_filename (dist_dir, "patterns", "geometry.pat.d.ts"), EXISTS));
+
+				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
+				FileUtils.set_contents (agent_ts_path, """
+import { findPlayer, describePlayer } from "./dist/index.js";
+
+console.log(describePlayer(findPlayer(Process.mainModule.base)));
+""");
+				var bundle = yield compiler.build (agent_ts_path);
+				assert ("describePlayer" in bundle);
+				assert ("readU32()" in bundle);
+
+				remove_tree (project_dir);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private async void watch_library (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string lib_dir = Path.build_filename (project_dir, "lib");
+				DirUtils.create_with_parents (lib_dir, 0755);
+				string index_ts_path = Path.build_filename (lib_dir, "index.ts");
+				FileUtils.set_contents (index_ts_path, "export const answer = 42;\n");
+
+				var compiler = new Compiler ();
+				uint builds = 0;
+				bool waiting = false;
+				compiler.finished.connect (() => {
+					builds++;
+					if (waiting)
+						watch_library.callback ();
+				});
+
+				var options = new LibraryOptions () {
+					project_root = project_dir,
+					source_maps = OMITTED,
+				};
+				yield compiler.watch_library (index_ts_path, "dist", options);
+				while (builds == 0) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+
+				string dist_dir = Path.build_filename (project_dir, "dist");
+				string declarations;
+				FileUtils.get_contents (Path.build_filename (dist_dir, "index.d.ts"), out declarations);
+				assert ("export declare const answer = 42;" in declarations);
+				assert (!FileUtils.test (Path.build_filename (dist_dir, "index.js.map"), EXISTS));
+
+				compiler = null;
+				remove_tree (project_dir);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
 	}
 
 	namespace LifecycleTests {
@@ -87,6 +373,152 @@ namespace Frida.CompilerTest {
 			}
 
 			h.done ();
+		}
+	}
+
+	namespace LanguageServerTests {
+		private async void complete_simple_agent (Harness h) {
+			if (skip_slow_test ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
+			try {
+				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
+				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
+				string agent_ts_source = "const m = Process.mainModule;\nm.\n";
+				FileUtils.set_contents (agent_ts_path, agent_ts_source);
+
+				var server = new LanguageServer (project_dir);
+
+				var client = new Client (server);
+				yield server.start ();
+
+				yield client.request ("initialize", """{
+					"processId": null,
+					"rootUri": "%s",
+					"capabilities": {}
+				}""".printf (file_uri (project_dir)));
+				client.send_notification ("initialized", "{}");
+
+				client.send_notification ("textDocument/didOpen", """{
+					"textDocument": {
+						"uri": "%s",
+						"languageId": "typescript",
+						"version": 1,
+						"text": "%s"
+					}
+				}""".printf (file_uri (agent_ts_path), agent_ts_source.escape ()));
+
+				var completion = yield client.request ("textDocument/completion", """{
+					"textDocument": { "uri": "%s" },
+					"position": { "line": 1, "character": 2 }
+				}""".printf (file_uri (agent_ts_path)));
+				assert ("\"enumerateExports\"" in completion);
+
+				yield client.request ("shutdown", null);
+				client.send_notification ("exit", null);
+				server.stop ();
+
+				FileUtils.unlink (agent_ts_path);
+				DirUtils.remove (project_dir);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		internal string file_uri (string path) throws ConvertError {
+			return Filename.to_uri (path);
+		}
+
+		internal class Client : Object {
+			private LanguageServer server;
+			private int next_id = 1;
+			private Gee.Map<int, PendingRequest> pending = new Gee.HashMap<int, PendingRequest> ();
+
+			public Client (LanguageServer server) {
+				this.server = server;
+				server.message.connect (on_message);
+			}
+
+			public async string request (string method, string? params) throws Error {
+				int id = next_id++;
+				var pending_request = new PendingRequest (request.callback);
+				pending[id] = pending_request;
+
+				server.post ("""{"jsonrpc": "2.0", "id": %d, "method": "%s"%s}""".printf (id, method, params_member (params)));
+				yield;
+
+				return pending_request.result;
+			}
+
+			public void send_notification (string method, string? params) throws Error {
+				server.post ("""{"jsonrpc": "2.0", "method": "%s"%s}""".printf (method, params_member (params)));
+			}
+
+			private static string params_member (string? params) {
+				return (params != null) ? ", \"params\": " + params : "";
+			}
+
+			private void on_message (string json) {
+				if (GLib.Test.verbose ())
+					print ("<<< %s\n", json);
+
+				Json.Reader reader;
+				try {
+					reader = make_json_reader (json);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+
+				bool is_response = !reader.read_member ("method");
+				reader.end_member ();
+
+				if (is_response)
+					handle_response (reader, json);
+				else
+					handle_call (reader);
+			}
+
+			private void handle_response (Json.Reader reader, string json) {
+				reader.read_member ("id");
+				int id = (int) reader.get_int_value ();
+				reader.end_member ();
+
+				PendingRequest pending_request;
+				pending.unset (id, out pending_request);
+
+				pending_request.result = json;
+				pending_request.callback ();
+			}
+
+			private void handle_call (Json.Reader reader) {
+				bool is_request = reader.read_member ("id");
+				if (is_request)
+					reply_to_server_request (reader.get_string_value ());
+				reader.end_member ();
+			}
+
+			private void reply_to_server_request (string id) {
+				try {
+					server.post ("""{"jsonrpc": "2.0", "id": "%s", "result": null}""".printf (id));
+				} catch (Error e) {
+					assert_not_reached ();
+				}
+			}
+
+			private class PendingRequest {
+				public SourceFunc callback;
+				public string? result;
+
+				public PendingRequest (owned SourceFunc callback) {
+					this.callback = (owned) callback;
+				}
+			}
 		}
 	}
 
@@ -387,439 +819,6 @@ struct Image { u8 magic[2]; u8 width; };
 
 			h.done ();
 		}
-	}
-
-	namespace LibraryTests {
-		private async void build_library (Harness h) {
-			if (skip_slow_test ()) {
-				stdout.printf ("<skipping, run in slow mode> ");
-				h.done ();
-				return;
-			}
-
-			try {
-				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
-				string lib_dir = Path.build_filename (project_dir, "lib");
-				DirUtils.create_with_parents (Path.build_filename (lib_dir, "patterns"), 0755);
-				FileUtils.set_contents (Path.build_filename (lib_dir, "index.ts"), """
-import { Player } from "./patterns/player.pat";
-import { describe } from "./describe.js";
-
-export function findPlayer(address: NativePointer): Player {
-    return Player.at(address);
-}
-
-export function describePlayer(player: Player): string {
-    return describe(player.hitpoints);
-}
-""");
-				FileUtils.set_contents (Path.build_filename (lib_dir, "describe.ts"), """
-export function describe(hitpoints: number): string {
-    return hitpoints + " hp";
-}
-""");
-				FileUtils.set_contents (Path.build_filename (lib_dir, "patterns", "player.pat"), """
-import geometry;
-
-#pragma abi native
-
-struct Player {
-	u32 hitpoints;
-	u16 armor;
-	Vec3 position;
-	Player *next;
-};
-""");
-				FileUtils.set_contents (Path.build_filename (lib_dir, "patterns", "geometry.pat"), """
-struct Vec3 {
-	float x;
-	float y;
-	float z;
-};
-""");
-
-				var compiler = new Compiler ();
-				compiler.diagnostics.connect (d => printerr ("DIAGNOSTICS: %s\n", d.print (false)));
-				yield compiler.build_library (Path.build_filename (lib_dir, "index.ts"), "dist",
-					new LibraryOptions () { project_root = project_dir });
-
-				string dist_dir = Path.build_filename (project_dir, "dist");
-				string declarations;
-				FileUtils.get_contents (Path.build_filename (dist_dir, "index.d.ts"), out declarations);
-				assert ("import { Player } from \"./patterns/player.pat\";" in declarations);
-				assert ("export declare function findPlayer(address: NativePointer): Player;" in declarations);
-				string code;
-				FileUtils.get_contents (Path.build_filename (dist_dir, "index.js"), out code);
-				assert ("from \"./patterns/player.pat\"" in code);
-				assert (FileUtils.test (Path.build_filename (dist_dir, "index.js.map"), EXISTS));
-				assert (FileUtils.test (Path.build_filename (dist_dir, "describe.js"), EXISTS));
-				assert (FileUtils.test (Path.build_filename (dist_dir, "describe.d.ts"), EXISTS));
-				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "player.pat"), EXISTS));
-				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "player.pat.d.ts"), EXISTS));
-				assert (FileUtils.test (Path.build_filename (dist_dir, "patterns", "geometry.pat"), EXISTS));
-				assert (!FileUtils.test (Path.build_filename (dist_dir, "patterns", "geometry.pat.d.ts"), EXISTS));
-
-				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
-				FileUtils.set_contents (agent_ts_path, """
-import { findPlayer, describePlayer } from "./dist/index.js";
-
-console.log(describePlayer(findPlayer(Process.mainModule.base)));
-""");
-				var bundle = yield compiler.build (agent_ts_path);
-				assert ("describePlayer" in bundle);
-				assert ("readU32()" in bundle);
-
-				remove_tree (project_dir);
-			} catch (GLib.Error e) {
-				printerr ("\nFAIL: %s\n\n", e.message);
-				assert_not_reached ();
-			}
-
-			h.done ();
-		}
-
-		private async void watch_library (Harness h) {
-			if (skip_slow_test ()) {
-				stdout.printf ("<skipping, run in slow mode> ");
-				h.done ();
-				return;
-			}
-
-			try {
-				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
-				string lib_dir = Path.build_filename (project_dir, "lib");
-				DirUtils.create_with_parents (lib_dir, 0755);
-				string index_ts_path = Path.build_filename (lib_dir, "index.ts");
-				FileUtils.set_contents (index_ts_path, "export const answer = 42;\n");
-
-				var compiler = new Compiler ();
-				uint builds = 0;
-				bool waiting = false;
-				compiler.finished.connect (() => {
-					builds++;
-					if (waiting)
-						watch_library.callback ();
-				});
-
-				var options = new LibraryOptions () {
-					project_root = project_dir,
-					source_maps = OMITTED,
-				};
-				yield compiler.watch_library (index_ts_path, "dist", options);
-				while (builds == 0) {
-					waiting = true;
-					yield;
-					waiting = false;
-				}
-
-				string dist_dir = Path.build_filename (project_dir, "dist");
-				string declarations;
-				FileUtils.get_contents (Path.build_filename (dist_dir, "index.d.ts"), out declarations);
-				assert ("export declare const answer = 42;" in declarations);
-				assert (!FileUtils.test (Path.build_filename (dist_dir, "index.js.map"), EXISTS));
-
-				compiler = null;
-				remove_tree (project_dir);
-			} catch (GLib.Error e) {
-				printerr ("\nFAIL: %s\n\n", e.message);
-				assert_not_reached ();
-			}
-
-			h.done ();
-		}
-	}
-
-	namespace LanguageServerTests {
-		private async void complete_simple_agent (Harness h) {
-			if (skip_slow_test ()) {
-				stdout.printf ("<skipping, run in slow mode> ");
-				h.done ();
-				return;
-			}
-
-			try {
-				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
-				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
-				string agent_ts_source = "const m = Process.mainModule;\nm.\n";
-				FileUtils.set_contents (agent_ts_path, agent_ts_source);
-
-				var server = new LanguageServer (project_dir);
-
-				var client = new Client (server);
-				yield server.start ();
-
-				yield client.request ("initialize", """{
-					"processId": null,
-					"rootUri": "%s",
-					"capabilities": {}
-				}""".printf (file_uri (project_dir)));
-				client.send_notification ("initialized", "{}");
-
-				client.send_notification ("textDocument/didOpen", """{
-					"textDocument": {
-						"uri": "%s",
-						"languageId": "typescript",
-						"version": 1,
-						"text": "%s"
-					}
-				}""".printf (file_uri (agent_ts_path), agent_ts_source.escape ()));
-
-				var completion = yield client.request ("textDocument/completion", """{
-					"textDocument": { "uri": "%s" },
-					"position": { "line": 1, "character": 2 }
-				}""".printf (file_uri (agent_ts_path)));
-				assert ("\"enumerateExports\"" in completion);
-
-				yield client.request ("shutdown", null);
-				client.send_notification ("exit", null);
-				server.stop ();
-
-				FileUtils.unlink (agent_ts_path);
-				DirUtils.remove (project_dir);
-			} catch (GLib.Error e) {
-				printerr ("\nFAIL: %s\n\n", e.message);
-				assert_not_reached ();
-			}
-
-			h.done ();
-		}
-
-		internal string file_uri (string path) throws ConvertError {
-			return Filename.to_uri (path);
-		}
-
-		internal class Client : Object {
-			private LanguageServer server;
-			private int next_id = 1;
-			private Gee.Map<int, PendingRequest> pending = new Gee.HashMap<int, PendingRequest> ();
-
-			public Client (LanguageServer server) {
-				this.server = server;
-				server.message.connect (on_message);
-			}
-
-			public async string request (string method, string? params) throws Error {
-				int id = next_id++;
-				var pending_request = new PendingRequest (request.callback);
-				pending[id] = pending_request;
-
-				server.post ("""{"jsonrpc": "2.0", "id": %d, "method": "%s"%s}""".printf (id, method, params_member (params)));
-				yield;
-
-				return pending_request.result;
-			}
-
-			public void send_notification (string method, string? params) throws Error {
-				server.post ("""{"jsonrpc": "2.0", "method": "%s"%s}""".printf (method, params_member (params)));
-			}
-
-			private static string params_member (string? params) {
-				return (params != null) ? ", \"params\": " + params : "";
-			}
-
-			private void on_message (string json) {
-				if (GLib.Test.verbose ())
-					print ("<<< %s\n", json);
-
-				Json.Reader reader;
-				try {
-					reader = make_json_reader (json);
-				} catch (GLib.Error e) {
-					assert_not_reached ();
-				}
-
-				bool is_response = !reader.read_member ("method");
-				reader.end_member ();
-
-				if (is_response)
-					handle_response (reader, json);
-				else
-					handle_call (reader);
-			}
-
-			private void handle_response (Json.Reader reader, string json) {
-				reader.read_member ("id");
-				int id = (int) reader.get_int_value ();
-				reader.end_member ();
-
-				PendingRequest pending_request;
-				pending.unset (id, out pending_request);
-
-				pending_request.result = json;
-				pending_request.callback ();
-			}
-
-			private void handle_call (Json.Reader reader) {
-				bool is_request = reader.read_member ("id");
-				if (is_request)
-					reply_to_server_request (reader.get_string_value ());
-				reader.end_member ();
-			}
-
-			private void reply_to_server_request (string id) {
-				try {
-					server.post ("""{"jsonrpc": "2.0", "id": "%s", "result": null}""".printf (id));
-				} catch (Error e) {
-					assert_not_reached ();
-				}
-			}
-
-			private class PendingRequest {
-				public SourceFunc callback;
-				public string? result;
-
-				public PendingRequest (owned SourceFunc callback) {
-					this.callback = (owned) callback;
-				}
-			}
-		}
-	}
-
-	namespace Performance {
-		private async void build_simple_agent (Harness h) {
-			if (skip_slow_test ()) {
-				stdout.printf ("<skipping, run in slow mode> ");
-				h.done ();
-				return;
-			}
-
-			try {
-				var device_manager = new DeviceManager ();
-				var compiler = new Compiler (device_manager);
-
-				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
-				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
-				FileUtils.set_contents (agent_ts_path, """
-import { log } from "./logger.js";
-
-const woot = Buffer.from("w00t").toString("base64");
-
-log("Hello World: " + woot);
-log(hexdump(Process.mainModule.base, { ansi: true }));
-""");
-
-				string logger_ts_path = Path.build_filename (project_dir, "logger.ts");
-				FileUtils.set_contents (logger_ts_path, """
-export function log(...items: any[]) {
-    const message = items.join("\n");
-    console.log(`[LOG] ${message}`);
-}
-""");
-
-				compiler.diagnostics.connect (d => printerr ("DIAGNOSTICS: %s\n", d.print (false)));
-				var timer = new Timer ();
-				var code = yield compiler.build (agent_ts_path);
-				uint elapsed_msec = (uint) (timer.elapsed () * 1000.0);
-
-				if (GLib.Test.verbose ()) {
-					print ("Output:\nvvv\n%s^^^\n", code);
-					print ("Built in %u ms\n", elapsed_msec);
-				}
-
-				unowned string? test_log_path = Environment.get_variable ("FRIDA_TEST_LOG");
-				if (test_log_path != null) {
-					var test_log = FileStream.open (test_log_path, "w");
-					assert (test_log != null);
-
-					test_log.printf ("build-time,%u\n", elapsed_msec);
-
-					Gum.Process.enumerate_modules (m => {
-						if ("frida-agent" in m.path) {
-							var r = m.range;
-							test_log.printf (("agent-range,0x%" + uint64.FORMAT_MODIFIER + "x,0x%" +
-									uint64.FORMAT_MODIFIER + "x\n"),
-								r.base_address, r.base_address + r.size);
-							return false;
-						}
-
-						return true;
-					});
-
-					test_log = null;
-				}
-
-				FileUtils.unlink (agent_ts_path);
-				DirUtils.remove (project_dir);
-
-				compiler = null;
-				yield device_manager.close ();
-			} catch (GLib.Error e) {
-				printerr ("\nFAIL: %s\n\n", e.message);
-				assert_not_reached ();
-			}
-
-			h.done ();
-		}
-
-		private async void watch_simple_agent (Harness h) {
-			if (skip_slow_test ()) {
-				stdout.printf ("<skipping, run in slow mode> ");
-				h.done ();
-				return;
-			}
-
-			try {
-				var device_manager = new DeviceManager ();
-				var compiler = new Compiler (device_manager);
-
-				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
-				string agent_ts_path = Path.build_filename (project_dir, "agent.ts");
-				FileUtils.set_contents (agent_ts_path, "console.log(\"Hello World\");");
-
-				string? bundle = null;
-				bool waiting = false;
-				compiler.output.connect (b => {
-					bundle = b;
-					if (waiting)
-						watch_simple_agent.callback ();
-				});
-
-				var timer = new Timer ();
-				yield compiler.watch (agent_ts_path);
-				while (bundle == null) {
-					waiting = true;
-					yield;
-					waiting = false;
-				}
-				uint elapsed_msec = (uint) (timer.elapsed () * 1000.0);
-
-				if (GLib.Test.verbose ())
-					print ("Watch built first bundle in %u ms\n", elapsed_msec);
-
-				unowned string? test_log_path = Environment.get_variable ("FRIDA_TEST_LOG");
-				if (test_log_path != null) {
-					var test_log = FileStream.open (test_log_path, "w");
-					assert (test_log != null);
-
-					test_log.printf ("build-time,%u\n", elapsed_msec);
-
-					Gum.Process.enumerate_modules (m => {
-						if ("frida-agent" in m.path) {
-							var r = m.range;
-							test_log.printf (("agent-range,0x%" + uint64.FORMAT_MODIFIER + "x,0x%" +
-									uint64.FORMAT_MODIFIER + "x\n"),
-								r.base_address, r.base_address + r.size);
-							return false;
-						}
-
-						return true;
-					});
-
-					test_log = null;
-				}
-
-				FileUtils.unlink (agent_ts_path);
-				DirUtils.remove (project_dir);
-
-				compiler = null;
-				yield device_manager.close ();
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-
-			h.done ();
-		}
-
 	}
 
 	private bool skip_slow_test () {
