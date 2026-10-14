@@ -253,7 +253,13 @@ static ssize_t frida_write_nointr (int fd, const void * buf, size_t count);
 static int frida_close_nointr (int fd);
 static off_t frida_lseek_nointr (int fd, off_t offset, int whence);
 
-#ifndef FRIDA_STDIO_OPAQUE_FILE
+#if defined (HAVE_QNX)
+G_GNUC_INTERNAL FILE _Stdin, _Stdout, _Stderr;
+
+G_GNUC_INTERNAL FILE * stdin = &_Stdin;
+G_GNUC_INTERNAL FILE * stdout = &_Stdout;
+G_GNUC_INTERNAL FILE * stderr = &_Stderr;
+#elif !defined (FRIDA_STDIO_OPAQUE_FILE)
 G_GNUC_INTERNAL FILE __sF[3];
 
 G_GNUC_INTERNAL FILE * stdin = &__sF[0];
@@ -308,25 +314,13 @@ frida_libc_shim_init (void)
   G_UNLOCK (frida_stdio);
 
   f0 = frida_file_new (0, FALSE, _IOFBF);
-#ifndef FRIDA_STDIO_OPAQUE_FILE
-  frida_file_bind_slot (&__sF[0], f0);
-#else
-  frida_file_bind_slot ((FILE *) &frida_stdio[0], f0);
-#endif
+  frida_file_bind_slot (stdin, f0);
 
   f1 = frida_file_new (1, FALSE, _IOLBF);
-#ifndef FRIDA_STDIO_OPAQUE_FILE
-  frida_file_bind_slot (&__sF[1], f1);
-#else
-  frida_file_bind_slot ((FILE *) &frida_stdio[1], f1);
-#endif
+  frida_file_bind_slot (stdout, f1);
 
   f2 = frida_file_new (2, FALSE, _IONBF);
-#ifndef FRIDA_STDIO_OPAQUE_FILE
-  frida_file_bind_slot (&__sF[2], f2);
-#else
-  frida_file_bind_slot ((FILE *) &frida_stdio[2], f2);
-#endif
+  frida_file_bind_slot (stderr, f2);
 
   frida_libc_shim_initialized = TRUE;
 }
