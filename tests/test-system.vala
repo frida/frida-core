@@ -1,5 +1,5 @@
 namespace Frida.SystemTest {
-	public static void add_tests () {
+	public void add_tests () {
 		GLib.Test.add_func ("/System/enumerate-processes-returns-processes-with-icons", () => {
 			var options = new ProcessQueryOptions ();
 			options.scope = FULL;

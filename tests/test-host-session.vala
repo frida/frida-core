@@ -1,5 +1,5 @@
 namespace Frida.HostSessionTest {
-	public static void add_tests () {
+	public void add_tests () {
 		GLib.Test.add_func ("/HostSession/Service/provider-available", () => {
 			var h = new Harness ((h) => Service.provider_available.begin (h as Harness));
 			h.run ();
@@ -420,7 +420,7 @@ namespace Frida.HostSessionTest {
 
 	namespace Service {
 
-		private static async void provider_available (Harness h) {
+		private async void provider_available (Harness h) {
 			try {
 				h.assert_no_providers_available ();
 				var backend = new StubBackend ();
@@ -441,7 +441,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void provider_unavailable (Harness h) {
+		private async void provider_unavailable (Harness h) {
 			try {
 				var backend = new StubBackend ();
 				h.service.add_backend (backend);
@@ -537,7 +537,7 @@ namespace Frida.HostSessionTest {
 #if HAVE_LOCAL_BACKEND
 		namespace Manual {
 
-			private static async void full_cycle (Harness h) {
+			private async void full_cycle (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode with target application running> ");
 					h.done ();
@@ -654,7 +654,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async Script? add_script (Gee.ArrayList<Script> container, Session session) {
+			private async Script? add_script (Gee.ArrayList<Script> container, Session session) {
 				Script script;
 
 				try {
@@ -679,7 +679,7 @@ namespace Frida.HostSessionTest {
 				return script;
 			}
 
-			private static async void load_script (int index, Gee.ArrayList<Script> container) {
+			private async void load_script (int index, Gee.ArrayList<Script> container) {
 				Script script;
 				if (!get_script (index, container, out script))
 					return;
@@ -691,7 +691,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void remove_script (int index, Gee.ArrayList<Script> container) {
+			private async void remove_script (int index, Gee.ArrayList<Script> container) {
 				Script script;
 				if (!get_script (index, container, out script))
 					return;
@@ -705,7 +705,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void enable_debugger (int index, Gee.ArrayList<Script> container) {
+			private async void enable_debugger (int index, Gee.ArrayList<Script> container) {
 				Script script;
 				if (!get_script (index, container, out script))
 					return;
@@ -717,7 +717,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void disable_debugger (int index, Gee.ArrayList<Script> container) {
+			private async void disable_debugger (int index, Gee.ArrayList<Script> container) {
 				Script script;
 				if (!get_script (index, container, out script))
 					return;
@@ -729,7 +729,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static bool get_script (int index, Gee.ArrayList<Script> container, out Script? script) {
+			private bool get_script (int index, Gee.ArrayList<Script> container, out Script? script) {
 				if (index < 0 || index >= container.size) {
 					printerr ("Invalid script index\n");
 					script = null;
@@ -740,13 +740,13 @@ namespace Frida.HostSessionTest {
 				return true;
 			}
 
-			private static string prompt (string message) {
+			private string prompt (string message) {
 				stdout.printf ("%s ", message);
 				stdout.flush ();
 				return stdin.read_line ();
 			}
 
-			private static async void spawn_gating (Harness h) {
+			private async void spawn_gating (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode on an iOS or Android system> ");
 					h.done ();
@@ -790,7 +790,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void perform_resume (Device device, uint pid) {
+			private async void perform_resume (Device device, uint pid) {
 				try {
 					yield device.resume (pid);
 				} catch (GLib.Error e) {
@@ -799,18 +799,18 @@ namespace Frida.HostSessionTest {
 			}
 
 #if WINDOWS
-			private static void install_signal_handlers (MainLoop loop) {
+			private void install_signal_handlers (MainLoop loop) {
 			}
 #else
 			private static MainLoop current_main_loop = null;
 
-			private static void install_signal_handlers (MainLoop loop) {
+			private void install_signal_handlers (MainLoop loop) {
 				current_main_loop = loop;
 				Posix.signal (Posix.Signal.INT, on_stop_signal);
 				Posix.signal (Posix.Signal.TERM, on_stop_signal);
 			}
 
-			private static void on_stop_signal (int sig) {
+			private void on_stop_signal (int sig) {
 				stdout.flush ();
 				Idle.add (() => {
 					current_main_loop.quit ();
@@ -819,7 +819,7 @@ namespace Frida.HostSessionTest {
 			}
 #endif
 
-			private static async void error_feedback (Harness h) {
+			private async void error_feedback (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode> ");
 					h.done ();
@@ -907,7 +907,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void performance (Harness h) {
+			private async void performance (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode with target application running> ");
 					h.done ();
@@ -950,7 +950,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void torture (Harness h) {
+			private async void torture (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode with target application running> ");
 					h.done ();
@@ -999,7 +999,7 @@ namespace Frida.HostSessionTest {
 	}
 
 #if HAVE_LOCAL_BACKEND
-	private static async void resource_leaks (Harness h) {
+	private async void resource_leaks (Harness h) {
 		try {
 			var device_manager = new DeviceManager ();
 			var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -1044,7 +1044,7 @@ namespace Frida.HostSessionTest {
 		}
 	}
 
-	private static async void detach_and_wait_for_cleanup (Session session) throws Error, IOError {
+	private async void detach_and_wait_for_cleanup (Session session) throws Error, IOError {
 		yield session.detach ();
 
 		/* The Darwin injector does cleanup 50ms after detecting that the remote thread is dead */
@@ -1055,7 +1055,7 @@ namespace Frida.HostSessionTest {
 	namespace Local {
 
 #if !QNX
-		private static async void process_argv_should_be_available (Harness h) {
+		private async void process_argv_should_be_available (Harness h) {
 			try {
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -1098,7 +1098,7 @@ namespace Frida.HostSessionTest {
 		}
 #endif
 
-		private static async void connected_should_be_emitted_once (Harness h) {
+		private async void connected_should_be_emitted_once (Harness h) {
 			try {
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -1119,7 +1119,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void latency_should_be_nominal (Harness h) {
+		private async void latency_should_be_nominal (Harness h) {
 			h.disable_timeout ();
 
 			try {
@@ -1140,7 +1140,7 @@ namespace Frida.HostSessionTest {
 	}
 #endif // HAVE_LOCAL_BACKEND
 
-	private static async void start_stop_fast (Harness h) {
+	private async void start_stop_fast (Harness h) {
 		var device_manager = new DeviceManager ();
 		device_manager.enumerate_devices.begin ();
 
@@ -1165,13 +1165,13 @@ namespace Frida.HostSessionTest {
 		}
 
 #if HAVE_SOCKET_BACKEND && !ANDROID
-		private static async void flawless (Harness h, Strategy strategy) {
+		private async void flawless (Harness h, Strategy strategy) {
 			uint seen_disruptions;
 			yield run_reliability_scenario (h, strategy, (message, direction) => FORWARD, out seen_disruptions);
 			assert (seen_disruptions == 0);
 		}
 
-		private static async void rx_without_ack (Harness h, Strategy strategy) {
+		private async void rx_without_ack (Harness h, Strategy strategy) {
 			bool disrupted = false;
 			uint seen_disruptions;
 			yield run_reliability_scenario (h, strategy, (message, direction) => {
@@ -1185,7 +1185,7 @@ namespace Frida.HostSessionTest {
 			assert (seen_disruptions == 1);
 		}
 
-		private static async void tx_not_sent (Harness h, Strategy strategy) {
+		private async void tx_not_sent (Harness h, Strategy strategy) {
 			bool disrupted = false;
 			uint seen_disruptions;
 			yield run_reliability_scenario (h, strategy, (message, direction) => {
@@ -1199,7 +1199,7 @@ namespace Frida.HostSessionTest {
 			assert (seen_disruptions == 1);
 		}
 
-		private static async void tx_without_ack (Harness h, Strategy strategy) {
+		private async void tx_without_ack (Harness h, Strategy strategy) {
 			bool disrupted = false;
 			uint seen_disruptions;
 			yield run_reliability_scenario (h, strategy, (message, direction) => {
@@ -1213,7 +1213,7 @@ namespace Frida.HostSessionTest {
 			assert (seen_disruptions == 1);
 		}
 
-		private static async void run_reliability_scenario (Harness h, Strategy strategy, owned ChaosProxy.Inducer on_message,
+		private async void run_reliability_scenario (Harness h, Strategy strategy, owned ChaosProxy.Inducer on_message,
 				out uint seen_disruptions) {
 			try {
 				uint seen_detaches = 0;
@@ -1513,7 +1513,7 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
-		private static async void latency_should_be_nominal (Harness h, Strategy strategy) {
+		private async void latency_should_be_nominal (Harness h, Strategy strategy) {
 			h.disable_timeout ();
 
 			try {
@@ -1616,7 +1616,7 @@ namespace Frida.HostSessionTest {
 #if LINUX
 	namespace Linux {
 
-		private static async void backend (Harness h) {
+		private async void backend (Harness h) {
 			var backend = new LinuxHostSessionBackend ();
 
 			var prov = yield h.setup_local_backend (backend);
@@ -1649,7 +1649,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void spawn (Harness h) {
+		private async void spawn (Harness h) {
 			if (!GLib.Test.slow () && (
 						Frida.Test.os () == Frida.Test.OS.ANDROID ||
 						Frida.Test.os_arch_suffix () == "-linux-armbe8" ||
@@ -1747,25 +1747,25 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void fork (Harness h) {
+		private async void fork (Harness h) {
 			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_executable ("forker"));
 		}
 
-		private static async void fork_plus_exec (Harness h, string method) {
+		private async void fork_plus_exec (Harness h, string method) {
 			yield Unix.run_fork_plus_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), method);
 		}
 
-		private static async void bad_exec (Harness h) {
+		private async void bad_exec (Harness h) {
 			yield Unix.run_bad_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "execv");
 		}
 
-		private static async void bad_then_good_exec (Harness h) {
+		private async void bad_then_good_exec (Harness h) {
 			yield Unix.run_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "spawn-bad-then-good-path", "execv");
 		}
 
 		namespace Manual {
 
-			private static async void spawn_android_app (Harness h) {
+			private async void spawn_android_app (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode on Android device> ");
 					h.done ();
@@ -1842,7 +1842,7 @@ namespace Frida.HostSessionTest {
 #if DARWIN
 	namespace Darwin {
 
-		private static async void backend (Harness h) {
+		private async void backend (Harness h) {
 			var backend = new DarwinHostSessionBackend ();
 
 			var prov = yield h.setup_local_backend (backend);
@@ -1888,11 +1888,11 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void spawn_native (Harness h) {
+		private async void spawn_native (Harness h) {
 			yield run_spawn_scenario (h, target_name_of_native ("sleeper"));
 		}
 
-		private static async void spawn_application (Harness h) {
+		private async void spawn_application (Harness h) {
 			if (Frida.Test.os () != Frida.Test.OS.MACOS) {
 				stdout.printf ("<skipping, only on macOS> ");
 				h.done ();
@@ -1918,11 +1918,11 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void spawn_other (Harness h) {
+		private async void spawn_other (Harness h) {
 			yield run_spawn_scenario (h, target_name_of_other ("sleeper"));
 		}
 
-		private static async void run_spawn_scenario (Harness h, string target_name) {
+		private async void run_spawn_scenario (Harness h, string target_name) {
 			var backend = new DarwinHostSessionBackend ();
 
 			var prov = yield h.setup_local_backend (backend);
@@ -2019,15 +2019,15 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void spawn_without_attach_native (Harness h) {
+		private async void spawn_without_attach_native (Harness h) {
 			yield run_spawn_scenario_with_stdio (h, target_name_of_native ("stdio-writer"));
 		}
 
-		private static async void spawn_without_attach_other (Harness h) {
+		private async void spawn_without_attach_other (Harness h) {
 			yield run_spawn_scenario_with_stdio (h, target_name_of_other ("stdio-writer"));
 		}
 
-		private static async void run_spawn_scenario_with_stdio (Harness h, string target_name) {
+		private async void run_spawn_scenario_with_stdio (Harness h, string target_name) {
 			var backend = new DarwinHostSessionBackend ();
 
 			var prov = yield h.setup_local_backend (backend);
@@ -2097,7 +2097,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void own_memory_ranges_should_be_cloaked (Harness h) {
+		private async void own_memory_ranges_should_be_cloaked (Harness h) {
 			if (Frida.Test.os () != Frida.Test.OS.MACOS || Frida.Test.cpu () != Frida.Test.CPU.X86_64) {
 				stdout.printf ("<skipping, test only available on macOS/x86_64 for now> ");
 				h.done ();
@@ -2234,7 +2234,7 @@ namespace Frida.HostSessionTest {
 		}
 
 		namespace ExitMonitor {
-			private static async void abort_from_js_thread_should_not_deadlock (Harness h) {
+			private async void abort_from_js_thread_should_not_deadlock (Harness h) {
 				try {
 					var device_manager = new DeviceManager ();
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -2292,7 +2292,7 @@ namespace Frida.HostSessionTest {
 		}
 
 		namespace UnwindSitter {
-			private static async void exceptions_on_swizzled_objc_methods_should_be_caught (Harness h) {
+			private async void exceptions_on_swizzled_objc_methods_should_be_caught (Harness h) {
 				try {
 					var device_manager = new DeviceManager ();
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -2368,7 +2368,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void exceptions_on_intercepted_objc_methods_should_be_caught (Harness h) {
+			private async void exceptions_on_intercepted_objc_methods_should_be_caught (Harness h) {
 				try {
 					var device_manager = new DeviceManager ();
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -2450,35 +2450,35 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
-		private static async void fork_native (Harness h) {
+		private async void fork_native (Harness h) {
 			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_file (target_name_of_native ("forker")));
 		}
 
-		private static async void fork_other (Harness h) {
+		private async void fork_other (Harness h) {
 			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_file (target_name_of_other ("forker")));
 		}
 
-		private static async void fork_plus_exec (Harness h, string method) {
+		private async void fork_plus_exec (Harness h, string method) {
 			yield Unix.run_fork_plus_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), method);
 		}
 
-		private static async void bad_exec (Harness h) {
+		private async void bad_exec (Harness h) {
 			yield Unix.run_bad_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "execv");
 		}
 
-		private static async void bad_then_good_exec (Harness h) {
+		private async void bad_then_good_exec (Harness h) {
 			yield Unix.run_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "spawn-bad-then-good-path", "execv");
 		}
 
-		private static async void posix_spawn (Harness h) {
+		private async void posix_spawn (Harness h) {
 			yield Unix.run_posix_spawn_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"));
 		}
 
-		private static async void posix_spawn_plus_setexec (Harness h) {
+		private async void posix_spawn_plus_setexec (Harness h) {
 			yield Unix.run_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "spawn", "posix_spawn+setexec");
 		}
 
-		private static string target_name_of_native (string name) {
+		private string target_name_of_native (string name) {
 			string suffix;
 			switch (Frida.Test.os ())
 			{
@@ -2499,7 +2499,7 @@ namespace Frida.HostSessionTest {
 			return name + "-" + suffix;
 		}
 
-		private static string target_name_of_other (string name) {
+		private string target_name_of_other (string name) {
 			string suffix;
 			if (Frida.Test.os () == Frida.Test.OS.MACOS) {
 				if (Frida.Test.cpu () == ARM_64)
@@ -2515,7 +2515,7 @@ namespace Frida.HostSessionTest {
 
 		namespace Manual {
 
-			private static async void cross_arch (Harness h) {
+			private async void cross_arch (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode with target application running> ");
 					h.done ();
@@ -2577,7 +2577,7 @@ namespace Frida.HostSessionTest {
 				h.done ();
 			}
 
-			private static async void spawn_ios_app (Harness h) {
+			private async void spawn_ios_app (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode on iOS device> ");
 					h.done ();
@@ -2682,7 +2682,7 @@ namespace Frida.HostSessionTest {
 #if FREEBSD
 	namespace FreeBSD {
 
-		private static async void backend (Harness h) {
+		private async void backend (Harness h) {
 			var backend = new FreebsdHostSessionBackend ();
 
 			var prov = yield h.setup_local_backend (backend);
@@ -2711,7 +2711,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void spawn (Harness h) {
+		private async void spawn (Harness h) {
 			var backend = new FreebsdHostSessionBackend ();
 
 			var prov = yield h.setup_local_backend (backend);
@@ -2799,19 +2799,19 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void fork (Harness h) {
+		private async void fork (Harness h) {
 			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_executable ("forker"));
 		}
 
-		private static async void fork_plus_exec (Harness h, string method) {
+		private async void fork_plus_exec (Harness h, string method) {
 			yield Unix.run_fork_plus_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), method);
 		}
 
-		private static async void bad_exec (Harness h) {
+		private async void bad_exec (Harness h) {
 			yield Unix.run_bad_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "execv");
 		}
 
-		private static async void bad_then_good_exec (Harness h) {
+		private async void bad_then_good_exec (Harness h) {
 			yield Unix.run_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "spawn-bad-then-good-path", "execv");
 		}
 
@@ -2821,7 +2821,7 @@ namespace Frida.HostSessionTest {
 #if !WINDOWS
 	namespace Unix {
 
-		public static async void run_fork_scenario (Harness h, string target_path) {
+		public async void run_fork_scenario (Harness h, string target_path) {
 			try {
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -2961,7 +2961,7 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
-		public static async void run_fork_plus_exec_scenario (Harness h, string target_path, string method) {
+		public async void run_fork_plus_exec_scenario (Harness h, string target_path, string method) {
 			try {
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -3115,7 +3115,7 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
-		public static async void run_exec_scenario (Harness h, string target_path, string operation, string method) {
+		public async void run_exec_scenario (Harness h, string target_path, string operation, string method) {
 			try {
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -3237,7 +3237,7 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
-		public static async void run_bad_exec_scenario (Harness h, string target_path, string method) {
+		public async void run_bad_exec_scenario (Harness h, string target_path, string method) {
 			try {
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -3296,7 +3296,7 @@ namespace Frida.HostSessionTest {
 			}
 		}
 
-		public static async void run_posix_spawn_scenario (Harness h, string target_path) {
+		public async void run_posix_spawn_scenario (Harness h, string target_path) {
 			var method = "posix_spawn";
 
 			try {
@@ -3428,7 +3428,7 @@ namespace Frida.HostSessionTest {
 #if WINDOWS
 	namespace Windows {
 
-		private static async void backend (Harness h) {
+		private async void backend (Harness h) {
 			var backend = new WindowsHostSessionBackend ();
 
 			var prov = yield h.setup_local_backend (backend);
@@ -3468,7 +3468,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void spawn (Harness h) {
+		private async void spawn (Harness h) {
 			var backend = new WindowsHostSessionBackend ();
 
 			var prov = yield h.setup_local_backend (backend);
@@ -3556,7 +3556,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void create_process (Harness h) {
+		private async void create_process (Harness h) {
 			if (sizeof (void *) == 8 && !GLib.Test.slow ()) {
 				stdout.printf ("<skipping due to pending 64-bit issue, run in slow mode> ");
 				h.done ();
@@ -3696,7 +3696,7 @@ namespace Frida.HostSessionTest {
 #if HAVE_FRUITY_BACKEND
 	namespace Fruity {
 
-		private static async void backend (Harness h) {
+		private async void backend (Harness h) {
 			if (!GLib.Test.slow ()) {
 				stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
 				h.done ();
@@ -3745,7 +3745,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void large_messages (Harness h) {
+		private async void large_messages (Harness h) {
 			if (!GLib.Test.slow ()) {
 				stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
 				h.done ();
@@ -3825,7 +3825,7 @@ namespace Frida.HostSessionTest {
 			private const string DEVICE_ID = "<device-id>";
 			private const string APP_ID = "<app-id>";
 
-			private static async void lockdown (Harness h) {
+			private async void lockdown (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
 					h.done ();
@@ -3961,7 +3961,7 @@ namespace Frida.HostSessionTest {
 				h.done ();
 			}
 
-			private static async void speedtest (Harness h) {
+			private async void speedtest (Harness h) {
 				/*
 				 * Configured like this:
 				 *
@@ -4034,7 +4034,7 @@ namespace Frida.HostSessionTest {
 
 			namespace Xpc {
 
-				private static async void list (Harness h) {
+				private async void list (Harness h) {
 					if (!GLib.Test.slow ()) {
 						stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
 						h.done ();
@@ -4068,7 +4068,7 @@ namespace Frida.HostSessionTest {
 					h.done ();
 				}
 
-				private static async void launch (Harness h) {
+				private async void launch (Harness h) {
 					if (!GLib.Test.slow ()) {
 						stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
 						h.done ();
@@ -4168,7 +4168,7 @@ namespace Frida.HostSessionTest {
 
 		namespace Plist {
 
-			private static void can_construct_from_xml_document () {
+			private void can_construct_from_xml_document () {
 				var xml = """
 					<?xml version="1.0" encoding="UTF-8"?>
 					<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -4239,7 +4239,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static void to_xml_yields_complete_document () {
+			private void to_xml_yields_complete_document () {
 				var plist = new Frida.Fruity.Plist ();
 				plist.set_string ("MessageType", "Detached");
 				plist.set_integer ("DeviceID", 2);
@@ -4290,7 +4290,7 @@ namespace Frida.HostSessionTest {
 			}
 
 #if DARWIN
-			private static void output_matches_apple_implementation () {
+			private void output_matches_apple_implementation () {
 				var request = new Frida.Fruity.Plist ();
 				request.set_string ("Command", "Lookup");
 
@@ -4357,7 +4357,7 @@ namespace Frida.HostSessionTest {
 #if HAVE_DROIDY_BACKEND
 	namespace Droidy {
 
-		private static async void backend (Harness h) {
+		private async void backend (Harness h) {
 			if (!GLib.Test.slow ()) {
 				stdout.printf ("<skipping, run in slow mode with Android device connected> ");
 				h.done ();
@@ -4403,7 +4403,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void injector (Harness h) {
+		private async void injector (Harness h) {
 			if (!GLib.Test.slow ()) {
 				stdout.printf ("<skipping, run in slow mode with Android device connected> ");
 				h.done ();
@@ -4436,7 +4436,7 @@ namespace Frida.HostSessionTest {
 
 		namespace Manual {
 
-			private static async void vz_stub (Harness h) {
+			private async void vz_stub (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode against a running vphone VM> ");
 					h.done ();
@@ -4502,7 +4502,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void instrument_the_spawn (Harness h, HostSessionProvider prov,
+			private async void instrument_the_spawn (Harness h, HostSessionProvider prov,
 					HostSession host_session, HostSpawnInfo info, Cancellable? cancellable) {
 				try {
 					var id = yield host_session.attach (info.pid, make_parameters_dict (), cancellable);
@@ -4539,7 +4539,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static string read_script (string path) {
+			private string read_script (string path) {
 				try {
 					uint8[] contents;
 					FileUtils.get_data (path, out contents);
@@ -4549,7 +4549,7 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void inject (Harness h) {
+			private async void inject (Harness h) {
 				if (!GLib.Test.slow ()) {
 					stdout.printf ("<skipping, run in slow mode with FRIDA_BAREBONE_CONFIG set> ");
 					h.done ();
@@ -4752,7 +4752,7 @@ namespace Frida.HostSessionTest {
 #endif // HAVE_BAREBONE_BACKEND
 
 #if HAVE_LOCAL_BACKEND
-	private static string parse_string_message_payload (string json) {
+	private string parse_string_message_payload (string json) {
 		Json.Object message;
 		try {
 			message = Json.from_string (json).get_object ();
