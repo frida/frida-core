@@ -1,5 +1,5 @@
 namespace Frida.CompilerTest {
-	public static void add_tests () {
+	public void add_tests () {
 		GLib.Test.add_func ("/Compiler/Lifecycle/release-watch", () => {
 			var h = new Harness ((h) => LifecycleTests.release_immediately.begin (h as Harness, false));
 			h.run ();
@@ -108,7 +108,7 @@ struct Player {
 };
 """;
 
-		private static async void build_agent_with_patterns (Harness h) {
+		private async void build_agent_with_patterns (Harness h) {
 			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -151,7 +151,7 @@ console.log(hitpoints, player.position.x, player.next);
 			h.done ();
 		}
 
-		private static async void compile_and_decode (Harness h) {
+		private async void compile_and_decode (Harness h) {
 			try {
 				string project_dir = DirUtils.make_tmp ("compiler-test.XXXXXX");
 				string player_pat_path = write_pattern (project_dir, "player.pat", PLAYER_PATTERN);
@@ -308,13 +308,13 @@ struct Image { u8 magic[2]; u8 width; };
 			h.done ();
 		}
 
-		private static string write_pattern (string project_dir, string name, string contents) throws GLib.Error {
+		private string write_pattern (string project_dir, string name, string contents) throws GLib.Error {
 			string path = Path.build_filename (project_dir, name);
 			FileUtils.set_contents (path, contents);
 			return path;
 		}
 
-		private static PatternCompileOptions make_pattern_options (string? project_root = null) {
+		private PatternCompileOptions make_pattern_options (string? project_root = null) {
 			var options = new PatternCompileOptions ();
 			options.project_root = project_root;
 			options.platform = "darwin";
@@ -322,7 +322,7 @@ struct Image { u8 magic[2]; u8 width; };
 			return options;
 		}
 
-		private static void remove_directory (string path) throws GLib.Error {
+		private void remove_directory (string path) throws GLib.Error {
 			var dir = Dir.open (path);
 			string? name;
 			while ((name = dir.read_name ()) != null)
@@ -330,7 +330,7 @@ struct Image { u8 magic[2]; u8 width; };
 			DirUtils.remove (path);
 		}
 
-		private static async void complete_pattern_fields (Harness h) {
+		private async void complete_pattern_fields (Harness h) {
 			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -390,7 +390,7 @@ struct Image { u8 magic[2]; u8 width; };
 	}
 
 	namespace LibraryTests {
-		private static async void build_library (Harness h) {
+		private async void build_library (Harness h) {
 			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -478,7 +478,7 @@ console.log(describePlayer(findPlayer(Process.mainModule.base)));
 			h.done ();
 		}
 
-		private static async void watch_library (Harness h) {
+		private async void watch_library (Harness h) {
 			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -530,7 +530,7 @@ console.log(describePlayer(findPlayer(Process.mainModule.base)));
 	}
 
 	namespace LanguageServerTests {
-		private static async void complete_simple_agent (Harness h) {
+		private async void complete_simple_agent (Harness h) {
 			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -584,7 +584,7 @@ console.log(describePlayer(findPlayer(Process.mainModule.base)));
 			h.done ();
 		}
 
-		internal static string file_uri (string path) throws ConvertError {
+		internal string file_uri (string path) throws ConvertError {
 			return Filename.to_uri (path);
 		}
 
@@ -676,7 +676,7 @@ console.log(describePlayer(findPlayer(Process.mainModule.base)));
 	}
 
 	namespace Performance {
-		private static async void build_simple_agent (Harness h) {
+		private async void build_simple_agent (Harness h) {
 			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -751,7 +751,7 @@ export function log(...items: any[]) {
 			h.done ();
 		}
 
-		private static async void watch_simple_agent (Harness h) {
+		private async void watch_simple_agent (Harness h) {
 			if (skip_slow_test ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -822,7 +822,7 @@ export function log(...items: any[]) {
 
 	}
 
-	private static bool skip_slow_test () {
+	private bool skip_slow_test () {
 		if (GLib.Test.slow ())
 			return false;
 

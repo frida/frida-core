@@ -1,10 +1,10 @@
 namespace Frida.GadgetTest {
-	public static void add_tests () {
+	public void add_tests () {
 		GLib.Test.add_func ("/Gadget/Standalone/load-script", Standalone.load_script);
 	}
 
 	namespace Standalone {
-		private static void load_script () {
+		private void load_script () {
 			string gadget_dir;
 			string data_dir;
 			switch (Frida.Test.os ()) {

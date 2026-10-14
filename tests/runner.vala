@@ -9,7 +9,7 @@ namespace Frida {
 }
 
 namespace Frida.Test {
-	public static void run (string[] args) {
+	public void run (string[] args) {
 		Environment.init (ref args);
 
 		if (can_test_cross_arch_injection) {
@@ -100,7 +100,7 @@ namespace Frida.Test {
 		public extern void deinit ();
 	}
 
-	public static string path_to_temporary_file (string name) {
+	public string path_to_temporary_file (string name) {
 		var prefix = "frida-tests-%u-".printf (Gum.Process.get_id ());
 #if QNX
 		return Path.build_filename (GLib.Environment.get_tmp_dir (), prefix + name);

@@ -3606,7 +3606,7 @@ FAIL: %s
 		h.done ();
 	}
 
-	private static async uint find_program (Device device, string file_name) throws GLib.Error {
+	private async uint find_program (Device device, string file_name) throws GLib.Error {
 		var options = new ProcessQueryOptions ();
 		options.scope = METADATA;
 

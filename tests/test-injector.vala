@@ -1,5 +1,5 @@
 namespace Frida.InjectorTest {
-	public static void add_tests () {
+	public void add_tests () {
 		GLib.Test.add_func ("/Injector/inject-dynamic-current-arch", () => {
 			test_dynamic_injection (Frida.Test.Arch.CURRENT);
 		});
@@ -35,7 +35,7 @@ namespace Frida.InjectorTest {
 #endif
 	}
 
-	private static void test_dynamic_injection (Frida.Test.Arch arch) {
+	private void test_dynamic_injection (Frida.Test.Arch arch) {
 		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("dynamic-injection.log"));
 		try {
 			logfile.delete ();
@@ -86,7 +86,7 @@ namespace Frida.InjectorTest {
 		rat.close ();
 	}
 
-	private static void test_resident_injection (Frida.Test.Arch arch) {
+	private void test_resident_injection (Frida.Test.Arch arch) {
 		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("resident-injection.log"));
 		try {
 			logfile.delete ();
@@ -113,7 +113,7 @@ namespace Frida.InjectorTest {
 		rat.close ();
 	}
 
-	private static void test_resource_leaks () {
+	private void test_resource_leaks () {
 		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("leaks.log"));
 		var envp = new string[] {
 			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
@@ -146,7 +146,7 @@ namespace Frida.InjectorTest {
 	}
 
 #if DARWIN
-	private static void test_suspended_injection (Frida.Test.Arch arch) {
+	private void test_suspended_injection (Frida.Test.Arch arch) {
 		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("suspended-injection.log"));
 		try {
 			logfile.delete ();
@@ -166,7 +166,7 @@ namespace Frida.InjectorTest {
 	}
 #endif
 
-	private static string content_of (File file) {
+	private string content_of (File file) {
 		try {
 			uint8[] contents;
 			file.load_contents (null, out contents, null);

@@ -1,12 +1,12 @@
 namespace Frida.GDBTest {
-	public static void add_tests () {
+	public void add_tests () {
 		GLib.Test.add_func ("/GDB/register-access-uses-thread-suffix", () => {
 			var h = new Harness ((h) => register_access_uses_thread_suffix.begin (h as Harness));
 			h.run ();
 		});
 	}
 
-	private static async void register_access_uses_thread_suffix (Harness h) {
+	private async void register_access_uses_thread_suffix (Harness h) {
 		FakeStub? stub = null;
 		try {
 			stub = yield FakeStub.open ();

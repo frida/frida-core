@@ -1,5 +1,5 @@
 namespace Frida.AgentTest {
-	public static void add_tests () {
+	public void add_tests () {
 		GLib.Test.add_func ("/Agent/Script/load-and-receive-messages", () => {
 			var h = new Harness ((h) => Script.load_and_receive_messages.begin (h as Harness));
 			h.run ();
@@ -24,7 +24,7 @@ namespace Frida.AgentTest {
 	}
 
 	namespace Script {
-		private static async void load_and_receive_messages (Harness h) {
+		private async void load_and_receive_messages (Harness h) {
 			var session = yield h.load_agent ();
 
 			unowned TargetFunc func = (TargetFunc) target_function;
@@ -54,7 +54,7 @@ namespace Frida.AgentTest {
 			h.done ();
 		}
 
-		private static async void performance (Harness h) {
+		private async void performance (Harness h) {
 			var session = yield h.load_agent ();
 
 			var size = 4096;
@@ -104,7 +104,7 @@ namespace Frida.AgentTest {
 		}
 
 #if DARWIN
-		private static async void launch_scenario (Harness h) {
+		private async void launch_scenario (Harness h) {
 			if (!GLib.Test.slow ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -328,7 +328,7 @@ Interceptor.attach(Process.getModuleByName('/usr/lib/system/libsystem_kernel.dyl
 			h.done ();
 		}
 
-		private static async void thread_suspend_awareness (Harness h) {
+		private async void thread_suspend_awareness (Harness h) {
 			if (!GLib.Test.slow ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
@@ -379,13 +379,13 @@ Interceptor.attach(Process.getModuleByName('libsystem_kernel.dylib').getExportBy
 			h.done ();
 		}
 
-		private static void call_hooked_function () {
+		private void call_hooked_function () {
 			var fd = Posix.open ("/etc/hosts", Posix.O_RDONLY);
 			assert_true (fd != -1);
 			Posix.close (fd);
 		}
 
-		private static void sleep_for_a_random_duration () {
+		private void sleep_for_a_random_duration () {
 			Thread.usleep (Random.int_range (0, 300));
 		}
 
