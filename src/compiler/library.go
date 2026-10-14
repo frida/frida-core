@@ -309,6 +309,9 @@ func (b *libraryBuild) commonRoot(sources []*ast.SourceFile) string {
 }
 
 func commonDirectory(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
 	common := strings.Split(tspath.GetDirectoryPath(paths[0]), "/")
 	for _, path := range paths[1:] {
 		parts := strings.Split(tspath.GetDirectoryPath(path), "/")
