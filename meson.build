@@ -415,6 +415,7 @@ libsoup_dep = dependency('libsoup-3.0', default_options: [
   'gssapi=disabled',
   'ntlm=disabled',
   'brotli=disabled',
+  'zstd=disabled',
   'tls_check=false',
   'introspection=disabled',
   'vapi=disabled',
