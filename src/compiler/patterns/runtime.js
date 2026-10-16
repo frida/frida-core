@@ -177,6 +177,18 @@ export function $deref(pointer, type) { return pointer.isNull() ? null : new typ
 
 export function $pointerOf(value) { return (value === null) ? NULL : (value.$address !== undefined) ? value.$address : value; }
 
+export function $rebase(env, base, at, raw, pointerBase) {
+    if (raw === 0)
+        return NULL;
+    const saved = env.cursor;
+    env.cursor = at;
+    try {
+        return base.add(raw + Number(pointerBase(raw)));
+    } finally {
+        env.cursor = saved;
+    }
+}
+
 export function $std_mem_create_section(env, name) {
     const section = new $Section(env.sections.length, String(name));
     env.sections.push(section);

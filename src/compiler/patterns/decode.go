@@ -567,7 +567,7 @@ func (d *decoder) decodeBare(name string, t Type, offset int, scope *frame) *Dec
 		}
 	case *Pointer:
 		d.decodePointer(value, t, offset)
-		d.dereference(value, t, nil, scope)
+		d.dereference(value, t, nil, scope, offset)
 	case *Bitfield:
 		d.decodeBitfield(value, t, offset, scope)
 	case *Struct:
@@ -764,18 +764,27 @@ func (d *decoder) decodePointer(value *DecodedValue, t *Pointer, offset int) {
 	default:
 		target = order.Uint64(bytes)
 	}
+	if t.Width != nil && t.Width.Kind.IsSigned() {
+		shift := 64 - uint(size*8)
+		target = uint64(int64(target<<shift) >> shift)
+	}
 	value.Value = fmt.Sprintf("0x%x", target)
 	value.ValueKind = "pointer"
 	value.raw = target
 }
 
-func (d *decoder) dereference(node *DecodedValue, t *Pointer, base *Function, scope *frame) {
+func (d *decoder) dereference(node *DecodedValue, t *Pointer, base *Function, scope *frame, at int) {
 	if node.Truncated || node.Section != 0 || scope == nil {
 		return
 	}
-	target := node.raw.(uint64)
+	raw := int64(node.raw.(uint64))
+	var offset int64
 	if base != nil {
-		result, err := scope.invoke(base, []runtimeValue{target})
+		owner := scope.cursorOwner()
+		saved := owner.cursor
+		owner.cursor = at
+		result, err := scope.invoke(base, []runtimeValue{raw})
+		owner.cursor = saved
 		if err != nil {
 			node.fail(err)
 			return
@@ -785,13 +794,18 @@ func (d *decoder) dereference(node *DecodedValue, t *Pointer, base *Function, sc
 			node.fail(err)
 			return
 		}
-		target += uint64(rebased)
-		node.raw = target
-		node.Value = fmt.Sprintf("0x%x", target)
+		offset = raw + rebased + int64(owner.base)
+	} else {
+		offset = raw - int64(d.base)
 	}
 	node.pointee, node.Fields, node.frame = nil, nil, nil
-	offset := int64(target) - int64(d.base)
-	if target == 0 || d.pointers >= maxPointerDepth || offset < 0 || offset >= int64(len(d.sections[0].data)) {
+	if raw == 0 || d.pointers >= maxPointerDepth {
+		return
+	}
+	target := uint64(int64(d.base) + offset)
+	node.raw = target
+	node.Value = fmt.Sprintf("0x%x", target)
+	if offset < 0 || offset >= int64(len(d.sections[0].data)) {
 		return
 	}
 	d.pointers++
@@ -1430,7 +1444,7 @@ func (f *frame) place(field *Field) error {
 	}
 	node.Name = field.Name
 	if pointer, isPointer := Unalias(field.Type).(*Pointer); isPointer && field.PointerBase != nil {
-		d.dereference(node, pointer, field.PointerBase, f)
+		d.dereference(node, pointer, field.PointerBase, f, offset)
 	}
 	if field.Hidden {
 		node.Hidden = true

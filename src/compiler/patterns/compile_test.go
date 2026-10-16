@@ -677,3 +677,19 @@ struct Scaled { u8 bytes[SCALE * 2]; };
 		t.Fatal("the cache should keep one compilation per set of defines")
 	}
 }
+
+func TestPointerAttributesReportMisuse(t *testing.T) {
+	cases := map[string]string{
+		"fn f(u128 v) { return v; }; struct A { u32 a [[pointer_base(\"f\")]]; };": "pointer_base can only be applied to pointer fields",
+	}
+	for source, expected := range cases {
+		_, diagnostics := Compile(source)
+		if len(diagnostics) == 0 {
+			t.Errorf("%q: expected a diagnostic", source)
+			continue
+		}
+		if !strings.Contains(diagnostics[0].Message, expected) {
+			t.Errorf("%q: got %q, expected %q", source, diagnostics[0].Message, expected)
+		}
+	}
+}
