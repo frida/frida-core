@@ -1146,6 +1146,7 @@ func (r *resolver) applyFieldAttributes(field *Field, attributes []Attribute, sc
 				if text, isString := attribute.Arguments[0].(*StringLiteral); isString {
 					if function, isFunction := r.lookupFunction(text.Value); isFunction {
 						field.PointerBase = function
+						r.warn(attribute.Position, fmt.Sprintf("%s is only resolved when parsing", field.Name))
 						continue
 					}
 				}

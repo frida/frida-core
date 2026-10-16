@@ -117,7 +117,7 @@ func (d *declarationEmitter) emitComposite(out *strings.Builder, qualifiedName s
 		fmt.Fprintf(out, "    readonly $address: NativePointer;\n")
 		fmt.Fprintf(out, "    readonly $size: number;\n")
 		for _, field := range fields {
-			if field.Name == "" {
+			if field.Name == "" || field.PointerBase != nil {
 				continue
 			}
 			writeDoc(out, "    ", field.Doc)
@@ -131,7 +131,7 @@ func (d *declarationEmitter) emitComposite(out *strings.Builder, qualifiedName s
 	if !dynamic {
 		out.WriteString("    interface Fields {\n")
 		for _, field := range fields {
-			if field.Name != "" {
+			if field.Name != "" && field.PointerBase == nil {
 				fmt.Fprintf(out, "        %s?: %s;\n", field.Name, d.fieldsType(field.Type))
 			}
 		}
@@ -140,7 +140,7 @@ func (d *declarationEmitter) emitComposite(out *strings.Builder, qualifiedName s
 	if view {
 		out.WriteString("    interface Values {\n")
 		for _, field := range fields {
-			if field.Name == "" || field.Hidden {
+			if field.Name == "" || field.Hidden || field.PointerBase != nil {
 				continue
 			}
 			optional := ""
