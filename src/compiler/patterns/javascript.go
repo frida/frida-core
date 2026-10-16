@@ -637,7 +637,7 @@ func (c *compositeEmitter) emitAccessors(out *strings.Builder, entry *fieldEntry
 				entry.offset, entry.size(), c.endOf(c.previousEntry(entry)))
 		}
 	}
-	if _, isPadding := entry.field.Type.(*Padding); isPadding || entry.field.Name == "" {
+	if _, isPadding := entry.field.Type.(*Padding); isPadding || entry.field.Name == "" || entry.field.PointerBase != nil {
 		return
 	}
 	address := c.address(entry.offset)
@@ -877,7 +877,7 @@ func (c *compositeEmitter) emitToJSON(out *strings.Builder) {
 	out.WriteString("    toJSON() {\n        return {")
 	first := true
 	for _, entry := range c.entries {
-		if entry.field.Name == "" || entry.field.Hidden {
+		if entry.field.Name == "" || entry.field.Hidden || entry.field.PointerBase != nil {
 			continue
 		}
 		if !first {
@@ -900,7 +900,7 @@ func (c *compositeEmitter) emitPattern(out *strings.Builder) {
 	fmt.Fprintf(out, "        return %s(bytes);\n    }\n", c.helper("$matchPattern"))
 	fmt.Fprintf(out, "    static $encode(bytes, base, fields) {\n")
 	for _, entry := range c.entries {
-		if entry.field.Name == "" {
+		if entry.field.Name == "" || entry.field.PointerBase != nil {
 			continue
 		}
 		fmt.Fprintf(out, "        if (fields.%s !== undefined) %s;\n", entry.accessor, c.encoder(entry.field.Type, "base + "+entry.offset, "fields."+entry.accessor, entry))

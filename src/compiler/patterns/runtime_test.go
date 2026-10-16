@@ -444,12 +444,15 @@ lines.push("a=" + a.next + "," + a.prev + "," + a.label);
 const b = Node.parse(mem.add(0x40), 0x40);
 lines.push("b=" + b.next + "," + b.prev + "," + b.label);
 lines.push("custom=" + Custom.parse(mem.add(0xa0), 16).p);
+const view = Node.at(mem);
+lines.push("view=" + JSON.stringify(view) + " size=" + Node.size + " next=" + ("next" in view) + " pattern=" + Node.pattern({ value: 1 }));
 console.log(lines.join("\n"));
 `
 
 const expectedRelativeOutput = `a=0x20040,0x20040,0x20090
 b=0x20000,0x0,0x0
-custom=0x200a9`
+custom=0x200a9
+view={"value":1} size=16 next=false pattern=01 00 00 00 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ??`
 
 func TestRelativePointersUnderNode(t *testing.T) {
 	node, err := exec.LookPath("node")
@@ -459,6 +462,9 @@ func TestRelativePointersUnderNode(t *testing.T) {
 	module, diagnostics := CompileSource(Source{Path: "node.hexpat", Text: relativeSource}, nil)
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
+	}
+	if len(module.Warnings) != 4 || !strings.Contains(module.Warnings[0].Message, "next is only resolved when parsing") {
+		t.Errorf("expected a warning per pointer_base field, got %v", module.Warnings)
 	}
 	dir := t.TempDir()
 	shim, err := os.ReadFile("testdata/gum-shim.mjs")
@@ -483,5 +489,27 @@ func TestRelativePointersUnderNode(t *testing.T) {
 	}
 	if actual := strings.TrimSpace(string(output)); actual != expectedRelativeOutput {
 		t.Errorf("unexpected output:\n%s\nexpected:\n%s\n%s", actual, expectedRelativeOutput, files["node.js"])
+	}
+}
+
+func TestDeclarationsLeaveOutPointerBaseFields(t *testing.T) {
+	module, diagnostics := CompileSource(Source{Path: "node.hexpat", Text: relativeSource}, nil)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	declarations := EmitDeclarations(module, "node.hexpat")
+	for _, expected := range []string{
+		"    value: number;",
+		"    static pattern(fields: Node.Fields): string;",
+		"    interface Fields {\n        value?: number;\n    }",
+		"    interface Values {\n        value: number;\n    }",
+		"        next: NativePointer;",
+	} {
+		if !strings.Contains(declarations, expected) {
+			t.Errorf("missing %q in:\n%s", expected, declarations)
+		}
+	}
+	if strings.Contains(declarations, "get next()") || strings.Contains(declarations, "\n    next:") {
+		t.Errorf("a pointer_base field should not be part of the view:\n%s", declarations)
 	}
 }
