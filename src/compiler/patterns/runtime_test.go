@@ -513,3 +513,47 @@ func TestDeclarationsLeaveOutPointerBaseFields(t *testing.T) {
 		t.Errorf("a pointer_base field should not be part of the view:\n%s", declarations)
 	}
 }
+
+const baseAddressScript = `
+import { install, allocate } from "./gum-shim.mjs";
+install();
+const { Probe } = await import("./probe.js");
+const mem = allocate(64, 0x30000);
+const probe = Probe.parse(mem, 64);
+console.log("base=0x" + probe.base.toString(16) + " section=" + probe.inner.section_base);
+`
+
+func TestBaseAddressUnderNode(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available")
+	}
+	module, diagnostics := CompileSource(Source{Path: "probe.hexpat", Text: baseAddressSource}, nil)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	dir := t.TempDir()
+	shim, err := os.ReadFile("testdata/gum-shim.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"gum-shim.mjs": string(shim),
+		"probe.js":     nodeModule(module, "probe.hexpat"),
+		"run.mjs":      baseAddressScript,
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
+	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node failed: %v\n%s\n%s", err, output, files["probe.js"])
+	}
+	if actual := strings.TrimSpace(string(output)); actual != "base=0x30000 section=0" {
+		t.Errorf("unexpected output: %s\n%s", actual, files["probe.js"])
+	}
+}

@@ -144,7 +144,10 @@ func defineMemoryBuiltins() {
 		return int64(len(f.decoder.active.data)), nil
 	})
 	defineBuiltin("std::mem::base_address", 0, "$std_mem_base_address", func(f *frame, args []runtimeValue) (runtimeValue, error) {
-		return int64(0), nil
+		if f.decoder.active != f.decoder.sections[0] {
+			return int64(0), nil
+		}
+		return int64(f.decoder.base), nil
 	})
 	defineBuiltin("std::mem::reached", 1, "$std_mem_reached", func(f *frame, args []runtimeValue) (runtimeValue, error) {
 		address, err := toInt(args[0])

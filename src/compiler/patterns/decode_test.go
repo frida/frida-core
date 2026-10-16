@@ -567,3 +567,36 @@ func TestDecodeRelativePointers(t *testing.T) {
 		t.Errorf("a custom base should rebase the offset: %s", custom["p"].String())
 	}
 }
+
+const baseAddressSource = `
+import std.mem;
+struct Inner {
+    u8 byte;
+    u64 section_base = std::mem::base_address() [[export]];
+};
+struct Probe {
+    u32 value;
+    u64 base = std::mem::base_address() [[export]];
+    std::mem::Section sec = std::mem::create_section("scratch");
+    std::mem::set_section_size(sec, 8);
+    Inner inner @ 0 in sec;
+};
+`
+
+func TestDecodeBaseAddress(t *testing.T) {
+	module, diagnostics := Compile(baseAddressSource)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	probe := Decode(module, Targets[0], findType(module, "Probe"), make([]byte, 16), 0x1000)
+	fields := map[string]*DecodedValue{}
+	for _, field := range probe.Fields {
+		fields[field.Name] = field
+	}
+	if fields["base"].Value != integerJSON(0x1000, false) {
+		t.Errorf("base_address should be the decode address: %s", fields["base"])
+	}
+	if inner := fields["inner"]; inner.Fields[1].Value != integerJSON(0, false) {
+		t.Errorf("a section should keep its own address space: %s", inner)
+	}
+}
