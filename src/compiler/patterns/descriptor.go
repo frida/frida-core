@@ -71,6 +71,7 @@ type FieldDescription struct {
 	Hidden          bool                `json:"hidden,omitempty"`
 	Conditional     bool                `json:"conditional,omitempty"`
 	NoUniqueAddress bool                `json:"no_unique_address,omitempty"`
+	PointerBase     string              `json:"pointer_base,omitempty"`
 	Type            *TypeRefDescription `json:"type"`
 	Offset          *int                `json:"offset"`
 	Size            *int                `json:"size"`
@@ -220,6 +221,7 @@ func describeComposite(kind string, name string, doc string, t Type, layout *Mod
 				Hidden:          field.Hidden,
 				Conditional:     field.Guard != nil,
 				NoUniqueAddress: field.NoUniqueAddress,
+				PointerBase:     pointerBaseName(field),
 				Type:            describeTypeRef(field.Type),
 			})
 		}
@@ -232,6 +234,7 @@ func describeComposite(kind string, name string, doc string, t Type, layout *Mod
 			Hidden:          f.Field.Hidden,
 			Conditional:     f.Field.Guard != nil,
 			NoUniqueAddress: f.Field.NoUniqueAddress,
+			PointerBase:     pointerBaseName(f.Field),
 			Type:            describeTypeRef(f.Field.Type),
 		}
 		if !f.Dynamic {
@@ -293,6 +296,13 @@ func describeTypeRef(t Type) *TypeRefDescription {
 		}
 	}
 	return d
+}
+
+func pointerBaseName(field *Field) string {
+	if field.PointerBase == nil {
+		return ""
+	}
+	return field.PointerBase.Name
 }
 
 func orderName(order ByteOrder) string {

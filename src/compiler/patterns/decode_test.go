@@ -511,3 +511,59 @@ struct Root {
 		t.Errorf("ref parameters should receive the pattern: %s", decoded)
 	}
 }
+
+func TestDecodeRelativePointers(t *testing.T) {
+	data := make([]byte, 0x100)
+	put := func(offset int, value int32) { binary.LittleEndian.PutUint32(data[offset:], uint32(value)) }
+	put(0, 1)
+	put(4, 0x3c)
+	put(8, 0x40)
+	put(12, 0x84)
+	put(0x40, 2)
+	put(0x44, -68)
+	copy(data[0x90:], "Swift\x00")
+	data[0xa0] = 3
+
+	decode := func(typeName string, data []byte, address uint64) map[string]*DecodedValue {
+		encoded, err := DecodeSource(relativeSource, typeName, data, address, Targets[0], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value DecodedValue
+		if err := json.Unmarshal([]byte(encoded), &value); err != nil {
+			t.Fatal(err)
+		}
+		fields := map[string]*DecodedValue{}
+		for _, field := range value.Fields {
+			fields[field.Name] = field
+		}
+		return fields
+	}
+
+	a := decode("Node", data, 0x20000)
+	for name, expected := range map[string]string{"next": "0x20040", "prev": "0x20040", "label": "0x20090"} {
+		if a[name].Value != expected {
+			t.Errorf("%s = %v, expected %s", name, a[name].Value, expected)
+		}
+		if len(a[name].Fields) != 1 {
+			t.Errorf("%s should carry its pointee: %s", name, a[name].String())
+		}
+	}
+	if a["next"].Fields[0].Fields[0].Value != float64(2) || a["label"].Fields[0].Value != "S" {
+		t.Errorf("unexpected pointees:\nnext: %s\nlabel: %s", a["next"].String(), a["label"].String())
+	}
+
+	b := decode("Node", data[0x40:], 0x20040)
+	if b["next"].Value != "0x20000" || len(b["next"].Fields) != 0 {
+		t.Errorf("a negative offset should resolve without a pointee outside the data: %s", b["next"].String())
+	}
+	for _, name := range []string{"prev", "label"} {
+		if b[name].Value != "0x0" || len(b[name].Fields) != 0 {
+			t.Errorf("%s should stay null: %s", name, b[name].String())
+		}
+	}
+
+	if custom := decode("Custom", data[0xa0:], 0x200a0); custom["p"].Value != "0x200a9" {
+		t.Errorf("a custom base should rebase the offset: %s", custom["p"].String())
+	}
+}

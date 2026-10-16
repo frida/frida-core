@@ -597,7 +597,8 @@ func (p *parserEmitter) emitField(field *Field, indent string, sequential bool) 
 		fmt.Fprintf(p.out, "%s    %s(%s, $at, $n);\n", indent, p.helper("$check"), env)
 	}
 	if field.PointerBase != nil {
-		fmt.Fprintf(p.out, "%s    $value = $value.add(%s($env, $this, $value));\n", indent, p.functionRef(field.PointerBase))
+		raw := p.pointerOffsetReader(Unalias(field.Type).(*Pointer), location{base: p.envBase(env), offset: "$at"})
+		fmt.Fprintf(p.out, "%s    $value = %s(%s, %s, $at, %s, (raw) => %s($env, $this, raw));\n", indent, p.helper("$rebase"), env, p.envBase(env), raw, p.functionRef(field.PointerBase))
 	}
 	fmt.Fprintf(p.out, "%s    $this.%s = $value;\n", indent, field.Name)
 	fmt.Fprintf(p.out, "%s    %s.%s = new %s(%s, $at, $n);\n", indent, p.fields(), field.Name, p.helper("$Span"), p.envBase(env))
@@ -719,7 +720,7 @@ func (p *parserEmitter) emitStaticField(field *Field, indent string, size int, a
 
 func (p *parserEmitter) emitFieldMetadata(field *Field, indent string, value string) {
 	if pointer, isPointer := Unalias(field.Type).(*Pointer); isPointer {
-		fmt.Fprintf(p.out, "%s%s.%s.target = () => %s;\n", indent, p.fields(), field.Name, p.reader(pointer.Target, fmt.Sprintf("%s(%s, %s)", p.helper("$offset"), p.base(), value)))
+		fmt.Fprintf(p.out, "%s%s.%s.target = () => %s.isNull() ? [null, 0] : %s;\n", indent, p.fields(), field.Name, value, p.reader(pointer.Target, fmt.Sprintf("%s(%s, %s)", p.helper("$offset"), p.base(), value)))
 	}
 	if field.Hidden {
 		fmt.Fprintf(p.out, "%s%s.%s.hidden = true;\n", indent, p.fields(), field.Name)

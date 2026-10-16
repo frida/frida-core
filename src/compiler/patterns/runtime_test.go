@@ -403,3 +403,85 @@ console.log(JSON.stringify([defaults.scaled, defaults.name, given.scaled, given.
 		t.Errorf("unexpected output:\n%s", output)
 	}
 }
+
+const relativeSource = `
+import std.ptr;
+
+struct Node {
+	u32 value;
+	Node *next : s32 [[pointer_base("std::ptr::relative_to_pointer")]];
+	Node *prev : s32 [[pointer_base("std::ptr::relative_to_parent")]];
+	char *label : s32 [[pointer_base("std::ptr::relative_to_pointer")]];
+};
+
+fn twice(u128 offset) {
+	return offset * 2;
+};
+
+struct Custom {
+	u8 *p : u8 [[pointer_base("twice")]];
+};
+`
+
+const relativeScript = `
+import { install, allocate } from "./gum-shim.mjs";
+install();
+const { Node, Custom } = await import("./node.js");
+
+const mem = allocate(256, 0x20000);
+mem.writeU32(1);
+mem.add(4).writeS32(0x3c);
+mem.add(8).writeS32(0x40);
+mem.add(12).writeS32(0x84);
+mem.add(0x40).writeU32(2);
+mem.add(0x44).writeS32(-68);
+mem.add(0x90).writeByteArray([83, 119, 105, 102, 116, 0]);
+mem.add(0xa0).writeU8(3);
+
+const lines = [];
+const a = Node.parse(mem, 0x100);
+lines.push("a=" + a.next + "," + a.prev + "," + a.label);
+const b = Node.parse(mem.add(0x40), 0x40);
+lines.push("b=" + b.next + "," + b.prev + "," + b.label);
+lines.push("custom=" + Custom.parse(mem.add(0xa0), 16).p);
+console.log(lines.join("\n"));
+`
+
+const expectedRelativeOutput = `a=0x20040,0x20040,0x20090
+b=0x20000,0x0,0x0
+custom=0x200a9`
+
+func TestRelativePointersUnderNode(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available")
+	}
+	module, diagnostics := CompileSource(Source{Path: "node.hexpat", Text: relativeSource}, nil)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	dir := t.TempDir()
+	shim, err := os.ReadFile("testdata/gum-shim.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"gum-shim.mjs": string(shim),
+		"node.js":      nodeModule(module, "node.hexpat"),
+		"run.mjs":      relativeScript,
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRuntimeModules(t, dir)
+	writeUnitModules(t, dir, module)
+	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node failed: %v\n%s\n%s", err, output, files["node.js"])
+	}
+	if actual := strings.TrimSpace(string(output)); actual != expectedRelativeOutput {
+		t.Errorf("unexpected output:\n%s\nexpected:\n%s\n%s", actual, expectedRelativeOutput, files["node.js"])
+	}
+}

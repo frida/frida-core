@@ -1138,6 +1138,10 @@ func (r *resolver) applyFieldAttributes(field *Field, attributes []Attribute, sc
 				}
 			}
 		case "pointer_base":
+			if _, isPointer := Unalias(field.Type).(*Pointer); !isPointer {
+				r.report(attribute.Position, "pointer_base can only be applied to pointer fields")
+				continue
+			}
 			if len(attribute.Arguments) == 1 {
 				if text, isString := attribute.Arguments[0].(*StringLiteral); isString {
 					if function, isFunction := r.lookupFunction(text.Value); isFunction {

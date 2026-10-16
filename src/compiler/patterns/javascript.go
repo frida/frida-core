@@ -789,6 +789,17 @@ func (e *jsEmitter) pointerReader(t *Pointer, address location) string {
 	return fmt.Sprintf("ptr(%s)", e.scalarReader(t.Width, address))
 }
 
+func (e *jsEmitter) pointerOffsetReader(t *Pointer, address location) string {
+	if t.Width == nil {
+		return fmt.Sprintf("%s(NULL, %s)", e.helper("$offset"), address.call("readPointer"))
+	}
+	raw := e.scalarReader(t.Width, address)
+	if t.Width.Kind.Size() == 8 {
+		return raw + ".toNumber()"
+	}
+	return raw
+}
+
 func (c *compositeEmitter) arrayReader(t *Array, address location, entry *fieldEntry) string {
 	kind := characterKind(t.Element)
 	if t.Length == nil {
