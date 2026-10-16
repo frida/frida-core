@@ -214,7 +214,7 @@ export function $std_mem_eof(env) { return env.cursor >= env.limit; }
 
 export function $std_mem_size(env) { return env.limit; }
 
-export function $std_mem_base_address(env) { return 0; }
+export function $std_mem_base_address(env) { return (env.base instanceof $SectionPointer) ? 0 : $offset(NULL, env.base); }
 
 export function $std_mem_reached(env, address) { return env.cursor >= Number(address); }
 
