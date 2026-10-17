@@ -15,6 +15,21 @@ export { Buffer } from 'node:buffer';
 export { default as process } from 'node:process';
 `
 
+const requireWrapper = `
+import * as ns from %q;
+
+const exported = ns.default;
+if (exported === undefined) {
+  module.exports = ns;
+} else {
+  for (const key of Object.keys(ns)) {
+    if (key !== 'default' && !(key in exported))
+      exported[key] = ns[key];
+  }
+  module.exports = exported;
+}
+`
+
 //go:embed node_modules/@frida/*/package.json
 //go:embed node_modules/@frida/*/*.js
 //go:embed node_modules/@frida/*/*/*.js
@@ -28,6 +43,7 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 		nsBuiltins = "frida-builtins"
 		nsShim     = "frida-shim"
 		nsStub     = "frida-stub"
+		nsRequire  = "frida-shim-require"
 	)
 
 	const (
@@ -65,6 +81,9 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 			registerShimResolve := func(pattern string) {
 				build.OnResolve(esbuild.OnResolveOptions{Filter: pattern},
 					func(args esbuild.OnResolveArgs) (esbuild.OnResolveResult, error) {
+						if args.Kind == esbuild.ResolveJSRequireCall {
+							return makeResolveResult(nsRequire, args.Path)
+						}
 						return makeResolveResult(nsShim, args.Path)
 					})
 			}
@@ -100,6 +119,24 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 						}, nil
 					}
 					return makeResolveResult(nsShim, args.Path)
+				})
+
+			build.OnResolve(esbuild.OnResolveOptions{Filter: ".*", Namespace: nsRequire},
+				func(args esbuild.OnResolveArgs) (esbuild.OnResolveResult, error) {
+					return esbuild.OnResolveResult{
+						Path:        args.Path,
+						Namespace:   nsShim,
+						SideEffects: esbuild.SideEffectsFalse,
+					}, nil
+				})
+
+			build.OnLoad(esbuild.OnLoadOptions{Filter: ".*", Namespace: nsRequire},
+				func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
+					contents := fmt.Sprintf(requireWrapper, args.Path)
+					return esbuild.OnLoadResult{
+						Contents: &contents,
+						Loader:   esbuild.LoaderJS,
+					}, nil
 				})
 
 			build.OnLoad(esbuild.OnLoadOptions{Filter: ".*", Namespace: nsShim},
