@@ -48,7 +48,7 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 
 	const (
 		builtinFilter        = `^frida-builtins://(.+)$`
-		shimFilter           = `^(assert|base64-js|buffer|crypto|diagnostics_channel|events|fs|http|https|http-parser-js|ieee754|net|os|path|process|punycode|querystring|readable-stream|stream|string_decoder|timers|tty|url|util|vm)$`
+		shimFilter           = `^(assert|base64-js|buffer|crypto|depd|diagnostics_channel|events|fs|http|https|http-parser-js|ieee754|net|os|path|process|punycode|querystring|readable-stream|stream|string_decoder|timers|tty|url|util|vm)$`
 		stubFilter           = `^(node:)?(async_hooks|child_process|cluster|constants|dgram|dns|domain|http2|inspector|module|perf_hooks|readline|repl|tls|v8|worker_threads|zlib)$`
 		shimNodePrefixFilter = `^node:(assert|buffer|crypto|diagnostics_channel|events|fs|http|https|net|os|path|process|punycode|querystring|stream|string_decoder|timers|tty|url|util|vm)$`
 	)
@@ -188,6 +188,7 @@ var shimMap = map[string]string{
 	"base64-js":           "@frida/base64-js",
 	"buffer":              "@frida/buffer",
 	"crypto":              "@frida/crypto",
+	"depd":                "@frida/depd",
 	"diagnostics_channel": "@frida/diagnostics_channel",
 	"events":              "@frida/events",
 	"fs":                  "frida-fs",
