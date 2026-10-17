@@ -7,7 +7,7 @@
     "@frida/assert": "^3.0.2",
     "@frida/base64-js": "^2.0.3",
     "@frida/buffer": "^7.0.4",
-    "@frida/crypto": "^1.0.1",
+    "@frida/crypto": "^1.1.0",
     "@frida/diagnostics_channel": "^1.0.0",
     "@frida/events": "^4.0.4",
     "@frida/http": "^4.0.2",
