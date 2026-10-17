@@ -13,6 +13,7 @@ import (
 var nodeGlobals = `
 export { Blob, Buffer } from 'node:buffer';
 export { default as process } from 'node:process';
+export const global = globalThis;
 export { ReadableStream } from 'node:stream/web';
 export { Response } from '@frida/fetch';
 `
