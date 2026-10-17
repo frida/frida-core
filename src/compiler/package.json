@@ -6,7 +6,7 @@
   "dependencies": {
     "@frida/assert": "^3.0.2",
     "@frida/base64-js": "^2.0.3",
-    "@frida/buffer": "^7.0.4",
+    "@frida/buffer": "^7.1.0",
     "@frida/crypto": "^1.1.0",
     "@frida/depd": "^1.0.0",
     "@frida/diagnostics_channel": "^1.0.0",

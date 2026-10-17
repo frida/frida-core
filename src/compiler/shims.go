@@ -11,7 +11,7 @@ import (
 )
 
 var nodeGlobals = `
-export { Buffer } from 'node:buffer';
+export { Blob, Buffer } from 'node:buffer';
 export { default as process } from 'node:process';
 export { ReadableStream } from 'node:stream/web';
 export { Response } from '@frida/fetch';
