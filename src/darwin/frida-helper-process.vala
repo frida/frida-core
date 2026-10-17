@@ -331,6 +331,7 @@ namespace Frida {
 				int sv[2];
 				if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, sv) != 0)
 					throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair: %s", strerror (errno));
+				Posix.fcntl (sv[0], Posix.F_SETFD, Posix.FD_CLOEXEC);
 				var parent_fd = new FileDescriptor (sv[0]);
 				var peer_fd = new FileDescriptor (sv[1]);
 
