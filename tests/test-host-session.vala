@@ -187,6 +187,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Darwin/helper-should-not-inherit-parent-end-of-control-socket", () => {
+			var h = new Harness ((h) => Darwin.helper_should_not_inherit_parent_end_of_control_socket.begin (h as Harness));
+			h.run ();
+		});
+
 		if (can_test_cross_arch_injection) {
 			GLib.Test.add_func ("/HostSession/Darwin/spawn-other", () => {
 				var h = new Harness ((h) => Darwin.spawn_other.begin (h as Harness));
@@ -1917,6 +1922,30 @@ namespace Frida.HostSessionTest {
 
 			h.done ();
 		}
+
+		private async void helper_should_not_inherit_parent_end_of_control_socket (Harness h) {
+			try {
+				var device_manager = new DeviceManager ();
+
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				var pid = yield device.spawn (Frida.Test.Labrats.path_to_file (target_name_of_native ("sleeper")));
+				var helper_pid = parent_pid_of (pid);
+				assert_false (holds_both_ends_of_a_socketpair (helper_pid));
+
+				yield device.kill (pid);
+
+				yield device_manager.close ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private extern uint parent_pid_of (uint pid);
+		private extern bool holds_both_ends_of_a_socketpair (uint pid);
 
 		private async void spawn_other (Harness h) {
 			yield run_spawn_scenario (h, target_name_of_other ("sleeper"));
