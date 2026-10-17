@@ -11,6 +11,7 @@
     "@frida/depd": "^1.0.0",
     "@frida/diagnostics_channel": "^1.0.0",
     "@frida/events": "^4.0.4",
+    "@frida/fetch": "^1.0.0",
     "@frida/http": "^4.0.2",
     "@frida/http-parser-js": "^1.1.0",
     "@frida/https": "^1.0.0",

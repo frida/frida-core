@@ -14,6 +14,7 @@ var nodeGlobals = `
 export { Buffer } from 'node:buffer';
 export { default as process } from 'node:process';
 export { ReadableStream } from 'node:stream/web';
+export { Response } from '@frida/fetch';
 `
 
 const requireWrapper = `
@@ -49,7 +50,7 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 
 	const (
 		builtinFilter        = `^frida-builtins://(.+)$`
-		shimFilter           = `^(assert|base64-js|buffer|crypto|depd|diagnostics_channel|events|fs|http|https|http-parser-js|ieee754|net|os|path|process|punycode|querystring|readable-stream|stream|stream/web|string_decoder|timers|tty|url|util|vm)$`
+		shimFilter           = `^(assert|base64-js|buffer|crypto|depd|diagnostics_channel|events|fs|http|https|http-parser-js|ieee754|net|os|path|process|punycode|querystring|readable-stream|stream|stream/web|string_decoder|timers|tty|url|util|vm|@frida/fetch)$`
 		stubFilter           = `^(node:)?(async_hooks|child_process|cluster|constants|dgram|dns|domain|http2|inspector|module|perf_hooks|readline|repl|tls|v8|worker_threads|zlib)$`
 		shimNodePrefixFilter = `^node:(assert|buffer|crypto|diagnostics_channel|events|fs|http|https|net|os|path|process|punycode|querystring|stream|stream/web|string_decoder|timers|tty|url|util|vm)$`
 	)
