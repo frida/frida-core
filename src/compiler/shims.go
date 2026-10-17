@@ -27,11 +27,13 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 	const (
 		nsBuiltins = "frida-builtins"
 		nsShim     = "frida-shim"
+		nsStub     = "frida-stub"
 	)
 
 	const (
 		builtinFilter        = `^frida-builtins://(.+)$`
 		shimFilter           = `^(assert|base64-js|buffer|crypto|diagnostics_channel|events|fs|http|https|http-parser-js|ieee754|net|os|path|process|punycode|querystring|readable-stream|stream|string_decoder|timers|tty|url|util|vm)$`
+		stubFilter           = `^(node:)?(async_hooks|child_process|cluster|constants|dgram|dns|domain|http2|inspector|module|perf_hooks|readline|repl|tls|v8|worker_threads|zlib)$`
 		shimNodePrefixFilter = `^node:(assert|buffer|crypto|diagnostics_channel|events|fs|http|https|net|os|path|process|punycode|querystring|stream|string_decoder|timers|tty|url|util|vm)$`
 	)
 
@@ -68,6 +70,24 @@ func makeFridaShimsPlugin() esbuild.Plugin {
 			}
 			registerShimResolve(shimFilter)
 			registerShimResolve(shimNodePrefixFilter)
+
+			build.OnResolve(esbuild.OnResolveOptions{Filter: stubFilter},
+				func(args esbuild.OnResolveArgs) (esbuild.OnResolveResult, error) {
+					return esbuild.OnResolveResult{
+						Path:        strings.TrimPrefix(args.Path, "node:"),
+						Namespace:   nsStub,
+						SideEffects: esbuild.SideEffectsFalse,
+					}, nil
+				})
+
+			build.OnLoad(esbuild.OnLoadOptions{Filter: ".*", Namespace: nsStub},
+				func(args esbuild.OnLoadArgs) (esbuild.OnLoadResult, error) {
+					contents := "module.exports = {};"
+					return esbuild.OnLoadResult{
+						Contents: &contents,
+						Loader:   esbuild.LoaderJS,
+					}, nil
+				})
 
 			build.OnResolve(esbuild.OnResolveOptions{Filter: ".*", Namespace: nsShim},
 				func(args esbuild.OnResolveArgs) (esbuild.OnResolveResult, error) {
