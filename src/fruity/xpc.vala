@@ -682,7 +682,7 @@ namespace Frida.Fruity {
 					if (result < 0)
 						throw new Error.PROTOCOL ("%s", NGHttp2.strerror (result));
 
-					session.consume_connection (n);
+					maybe_send_pending ();
 				} catch (GLib.Error e) {
 					if (e is Error && pending_error == null)
 						pending_error = (Error) e;
@@ -756,7 +756,9 @@ namespace Frida.Fruity {
 		}
 
 		private int on_data_chunk_recv (uint8 flags, int32 stream_id, uint8[] data) {
-			return find_stream_by_id (stream_id).on_data_frame_recv_chunk (data);
+			int result = find_stream_by_id (stream_id).on_data_frame_recv_chunk (data);
+			session.consume (stream_id, data.length);
+			return result;
 		}
 
 		private int on_frame_recv (NGHttp2.Frame frame) {

@@ -31,6 +31,7 @@ namespace NGHttp2 {
 
 		public bool want_write ();
 
+		public int consume (int32 stream_id, size_t size);
 		public int consume_connection (size_t size);
 	}
 
