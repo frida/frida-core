@@ -1321,6 +1321,8 @@ namespace Frida.Fruity {
 		BOOL		= 0x2000,
 		INT64		= 0x3000,
 		UINT64		= 0x4000,
+		DOUBLE		= 0x5000,
+		DATE		= 0x7000,
 		DATA		= 0x8000,
 		STRING		= 0x9000,
 		UUID		= 0xa000,
@@ -1374,6 +1376,10 @@ namespace Frida.Fruity {
 					return new Variant.int64 (read_raw_int64 ());
 				case UINT64:
 					return new Variant.uint64 (read_raw_uint64 ());
+				case DOUBLE:
+					return new Variant.double (read_raw_double ());
+				case DATE:
+					return new Variant.int64 (read_raw_int64 ());
 				case DATA:
 					return read_data ();
 				case STRING:
@@ -1475,6 +1481,15 @@ namespace Frida.Fruity {
 			check_available (sizeof (uint64));
 			var result = buf.read_uint64 (cursor);
 			cursor += sizeof (uint64);
+			return result;
+		}
+
+		private double read_raw_double () throws Error {
+			check_available (sizeof (uint64));
+			uint64 bits = buf.read_uint64 (cursor);
+			cursor += sizeof (uint64);
+			double result = 0;
+			Memory.copy (&result, &bits, sizeof (double));
 			return result;
 		}
 
