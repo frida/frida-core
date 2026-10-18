@@ -35,12 +35,63 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class LinuxPairingBrowser : Object, PairingBrowser {
+		private PairingBrowser backend;
+
+		public async void start (Cancellable? cancellable) throws IOError {
+			backend = yield make_backend (cancellable);
+			backend.service_discovered.connect (service => service_discovered (service));
+			yield backend.start (cancellable);
+		}
+
+		public async void stop (Cancellable? cancellable) throws IOError {
+			yield backend.stop (cancellable);
+		}
+
+		private async PairingBrowser make_backend (Cancellable? cancellable) throws IOError {
+			try {
+				var connection = yield GLib.Bus.get (BusType.SYSTEM, cancellable);
+				if (yield resolved_has_multicast_dns (connection, cancellable))
+					return new ResolvedPairingBrowser ();
+				if (yield name_has_owner (connection, Avahi.SERVICE_NAME, cancellable))
+					return new AvahiPairingBrowser (connection);
+			} catch (GLib.Error e) {
+			}
+			return new ResolvedPairingBrowser ();
+		}
+
+		private async bool resolved_has_multicast_dns (DBusConnection connection, Cancellable? cancellable) throws GLib.Error {
+			if (!(yield name_has_owner (connection, Resolved.SERVICE_NAME, cancellable)))
+				return false;
+			var reply = yield connection.call (
+				Resolved.SERVICE_NAME, Resolved.SERVICE_PATH, "org.freedesktop.DBus.Properties",
+				"Get",
+				new Variant ("(ss)", "org.freedesktop.resolve1.Manager", "MulticastDNS"),
+				new VariantType ("(v)"),
+				DBusCallFlags.NONE, -1, cancellable);
+			Variant mode;
+			reply.get ("(v)", out mode);
+			unowned string level = mode.get_string ();
+			return level == "yes" || level == "resolve";
+		}
+
+		private async bool name_has_owner (DBusConnection connection, string name, Cancellable? cancellable) throws GLib.Error {
+			var reply = yield connection.call (
+				"org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+				"NameHasOwner",
+				new Variant.tuple ({ name }),
+				new VariantType.tuple ({ VariantType.BOOLEAN }),
+				DBusCallFlags.NONE, -1, cancellable);
+			bool has_owner;
+			reply.get ("(b)", out has_owner);
+			return has_owner;
+		}
+	}
+
+	private sealed class ResolvedPairingBrowser : Object, PairingBrowser {
 		private Resolved.Manager? resolved;
 		private Source? timer;
 
 		private Cancellable io_cancellable = new Cancellable ();
-
-		private const size_t IF_NAMESIZE = 16;
 
 		public async void start (Cancellable? cancellable) throws IOError {
 			try {
@@ -168,32 +219,161 @@ namespace Frida.Fruity {
 			return service;
 		}
 
-		private static InetSocketAddress resolve_interface_address (int32 ifindex) throws Error {
-			char ifname_buf[IF_NAMESIZE];
-			unowned string? ifname = Linux.Network.if_indextoname (ifindex, (string) ifname_buf);
-			if (ifname == null)
-				throw new Error.INVALID_ARGUMENT ("Unable to resolve interface name");
-
-			Linux.Network.IfAddrs ifaddrs;
-			Linux.Network.getifaddrs (out ifaddrs);
-			for (unowned Linux.Network.IfAddrs candidate = ifaddrs; candidate != null; candidate = candidate.ifa_next) {
-				unowned Posix.SockAddr? address = candidate.ifa_addr;
-				if (address == null || address.sa_family != Posix.AF_INET6)
-					continue;
-
-				if (candidate.ifa_name != ifname)
-					continue;
-
-				return (InetSocketAddress) SocketAddress.from_native ((void *) address, sizeof (Posix.SockAddrIn6));
-			}
-
-			throw new Error.NOT_SUPPORTED ("Unable to resolve interface address");
-		}
-
 		private static GLib.Error parse_error (GLib.Error e) {
 			if (e is Error || e is IOError.CANCELLED)
 				return e;
 			return new Error.TRANSPORT ("%s", e.message);
+		}
+	}
+
+	private sealed class AvahiPairingBrowser : Object, PairingBrowser {
+		private DBusConnection connection;
+		private Avahi.Server server;
+		private Avahi.ServiceBrowser browser;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		public AvahiPairingBrowser (DBusConnection connection) {
+			this.connection = connection;
+		}
+
+		public async void start (Cancellable? cancellable) throws IOError {
+			try {
+				server = yield connection.get_proxy (Avahi.SERVICE_NAME, "/", DO_NOT_LOAD_PROPERTIES, cancellable);
+
+				GLib.ObjectPath browser_path = yield server.service_browser_prepare (Avahi.ANY_INTERFACE,
+					Avahi.Protocol.INET6, PAIRING_REGTYPE, PAIRING_DOMAIN, 0, cancellable);
+				browser = yield connection.get_proxy (Avahi.SERVICE_NAME, browser_path, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
+				browser.item_new.connect (on_item_new);
+				yield browser.start (cancellable);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		public async void stop (Cancellable? cancellable) throws IOError {
+			io_cancellable.cancel ();
+		}
+
+		private void on_item_new (int interface_index, Avahi.Protocol protocol, string name, string type, string domain,
+				uint flags) {
+			resolve_item.begin (interface_index, protocol, name, type, domain);
+		}
+
+		private async void resolve_item (int interface_index, Avahi.Protocol protocol, string name, string type,
+				string domain) {
+			try {
+				GLib.ObjectPath path = yield server.service_resolver_prepare (interface_index, protocol, name, type,
+					domain, Avahi.Protocol.INET6, 0, io_cancellable);
+				Avahi.ServiceResolver resolver = yield connection.get_proxy (Avahi.SERVICE_NAME, path,
+					DO_NOT_LOAD_PROPERTIES, io_cancellable);
+
+				var done = new Promise<bool> ();
+				resolver.found.connect ((iface, proto, n, t, d, host, aproto, address, port, txt, resolved_flags) => {
+					try {
+						emit_service (iface, address, port, txt);
+					} catch (Error e) {
+					}
+					if (!done.future.ready)
+						done.resolve (true);
+				});
+				resolver.failure.connect (error => {
+					if (!done.future.ready)
+						done.resolve (true);
+				});
+
+				yield resolver.start (io_cancellable);
+				yield done.future.wait_async (io_cancellable);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private void emit_service (int interface_index, string address, uint16 port, Variant txt) throws Error {
+			var txt_record = new Gee.ArrayList<string> ();
+			var iter = new VariantIter (txt);
+			Variant? cur;
+			while ((cur = iter.next_value ()) != null) {
+				unowned string raw_val = (string) cur.get_data ();
+				txt_record.add (raw_val.make_valid ((ssize_t) cur.get_size ()));
+			}
+
+			var meta = PairingServiceMetadata.from_txt_record (txt_record);
+			var ip = new InetAddress.from_string (address);
+			service_discovered (new PairingServiceDetails () {
+				identifier = meta.identifier,
+				auth_tag = meta.auth_tag,
+				endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+					address: ip,
+					port: port,
+					scope_id: ip.get_is_link_local () ? interface_index : 0
+				),
+				interface_address = resolve_interface_address (interface_index),
+			});
+		}
+	}
+
+	private const string PAIRING_REGTYPE = "_remotepairing._tcp";
+	private const string PAIRING_DOMAIN = "local";
+	private const size_t IF_NAMESIZE = 16;
+
+	private InetSocketAddress resolve_interface_address (int32 ifindex) throws Error {
+		char ifname_buf[IF_NAMESIZE];
+		unowned string? ifname = Linux.Network.if_indextoname (ifindex, (string) ifname_buf);
+		if (ifname == null)
+			throw new Error.INVALID_ARGUMENT ("Unable to resolve interface name");
+
+		Linux.Network.IfAddrs ifaddrs;
+		Linux.Network.getifaddrs (out ifaddrs);
+		for (unowned Linux.Network.IfAddrs candidate = ifaddrs; candidate != null; candidate = candidate.ifa_next) {
+			unowned Posix.SockAddr? address = candidate.ifa_addr;
+			if (address == null || address.sa_family != Posix.AF_INET6)
+				continue;
+
+			if (candidate.ifa_name != ifname)
+				continue;
+
+			return (InetSocketAddress) SocketAddress.from_native ((void *) address, sizeof (Posix.SockAddrIn6));
+		}
+
+		throw new Error.NOT_SUPPORTED ("Unable to resolve interface address");
+	}
+
+	namespace Avahi {
+		public const string SERVICE_NAME = "org.freedesktop.Avahi";
+		public const int ANY_INTERFACE = -1;
+
+		[DBus (name = "org.freedesktop.Avahi.Server2")]
+		public interface Server : Object {
+			public abstract async GLib.ObjectPath service_browser_prepare (int interface_index, Protocol protocol,
+				string type, string domain, uint flags, Cancellable? cancellable) throws GLib.Error;
+			public abstract async GLib.ObjectPath service_resolver_prepare (int interface_index, Protocol protocol,
+				string name, string type, string domain, Protocol aprotocol, uint flags, Cancellable? cancellable)
+				throws GLib.Error;
+		}
+
+		[DBus (name = "org.freedesktop.Avahi.ServiceBrowser")]
+		public interface ServiceBrowser : Object {
+			public signal void item_new (int interface_index, Protocol protocol, string name, string type, string domain,
+				uint flags);
+			public signal void failure (string error);
+
+			public abstract async void start (Cancellable? cancellable) throws GLib.Error;
+		}
+
+		[DBus (name = "org.freedesktop.Avahi.ServiceResolver")]
+		public interface ServiceResolver : Object {
+			public signal void found (int interface_index, Protocol protocol, string name, string type, string domain,
+				string host, Protocol aprotocol, string address, uint16 port, [DBus (signature = "aay")] Variant txt,
+				uint flags);
+			public signal void failure (string error);
+
+			public abstract async void start (Cancellable? cancellable) throws GLib.Error;
+		}
+
+		public enum Protocol {
+			INET,
+			INET6,
+			UNSPEC = -1,
 		}
 	}
 
