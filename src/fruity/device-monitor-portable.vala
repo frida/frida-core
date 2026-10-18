@@ -931,7 +931,7 @@ namespace Frida.Fruity {
 			cancellable.set_error_if_cancelled ();
 
 			if (successful_probe == null)
-				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for mDNS reply");
+				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for mDNS reply; a netfilter rule may be dropping it");
 
 			return new NcmPeer () {
 				netstack = successful_probe.netstack,
