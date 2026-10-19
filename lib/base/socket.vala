@@ -1117,6 +1117,9 @@ namespace Frida {
 		construct {
 			websocket.max_incoming_payload_size = (256 * 1024) + 1; // XXX: There's an off-by-one error in libsoup
 
+			if (websocket.get_class ().find_property ("max-total-message-size") != null)
+				websocket.set ("max-total-message-size", websocket.max_incoming_payload_size);
+
 			websocket.closed.connect (on_closed);
 			websocket.message.connect (on_message);
 		}
