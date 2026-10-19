@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public abstract class BaseAgentSession : Object, AgentSession {
 		public signal void closed ();

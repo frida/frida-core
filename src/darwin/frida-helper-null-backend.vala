@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class DarwinHelperBackend : Object, DarwinHelper {
 		public signal void idle ();

@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class Interceptor : Object {
@@ -46,7 +48,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void attach (uint64 target, BreakpointInvocationListener listener, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint64 address = machine.address_from_funcptr (target);
 
 			BreakpointEntry? entry = breakpoint_entries[address];
@@ -65,18 +67,18 @@ namespace Frida.Barebone {
 						machine.breakpoint_size_from_funcptr (target), cancellable);
 				} catch (GLib.Error e) {
 					breakpoint_entries.unset (address);
-					throw_api_error (e);
+					Efni.throw_api_error (e);
 				}
 			}
 		}
 
 		public async void attach_inline (uint64 target, InlineInvocationListener listener, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (listener.kind != PROBE)
-				throw new Error.NOT_SUPPORTED ("Only probe-style hooks are currently supported for inline hooks");
+				throw new Efni.Error.NOT_SUPPORTED ("Only probe-style hooks are currently supported for inline hooks");
 
 			if (inline_hooks.has_key (target))
-				throw new Error.INVALID_ARGUMENT ("Only one probe per target is currently supported for inline hooks");
+				throw new Efni.Error.INVALID_ARGUMENT ("Only one probe per target is currently supported for inline hooks");
 			var hook = yield machine.create_inline_hook (target, listener.on_enter, allocator, cancellable);
 			inline_hooks[target] = hook;
 
@@ -84,13 +86,13 @@ namespace Frida.Barebone {
 				yield hook.enable (cancellable);
 			} catch (GLib.Error e) {
 				inline_hooks.unset (target);
-				throw_api_error (e);
+				Efni.throw_api_error (e);
 			}
 
 			hook.set_data ("listener", listener);
 		}
 
-		public async void detach (InvocationListener listener, Cancellable? cancellable) throws Error, IOError {
+		public async void detach (InvocationListener listener, Cancellable? cancellable) throws Efni.Error, IOError {
 			BreakpointInvocationListener? bpl = listener as BreakpointInvocationListener;
 			if (bpl != null) {
 				foreach (var e in breakpoint_entries.entries.to_array ()) {
@@ -137,7 +139,7 @@ namespace Frida.Barebone {
 			handle_breakpoint_hit.begin (bp, exception.thread);
 		}
 
-		private async void handle_breakpoint_hit (DebuggerBreakpoint bp, DebuggerThread thread) throws Error, IOError {
+		private async void handle_breakpoint_hit (DebuggerBreakpoint bp, DebuggerThread thread) throws Efni.Error, IOError {
 			uint64 address = bp.address;
 
 			BreakpointEntry? entry = breakpoint_entries[address];
@@ -153,7 +155,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async void handle_invocation (BreakpointEntry entry, DebuggerBreakpoint bp, DebuggerThread thread) throws Error, IOError {
+		private async void handle_invocation (BreakpointEntry entry, DebuggerBreakpoint bp, DebuggerThread thread) throws Efni.Error, IOError {
 			unowned string tid = thread.id;
 			CallStack? call_stack = call_stacks[tid];
 			if (call_stack == null) {
@@ -193,7 +195,7 @@ namespace Frida.Barebone {
 			yield continue_from_breakpoint (bp, thread);
 		}
 
-		private async void handle_return (CallStack call_stack, DebuggerBreakpoint bp, DebuggerThread thread) throws Error, IOError {
+		private async void handle_return (CallStack call_stack, DebuggerBreakpoint bp, DebuggerThread thread) throws Efni.Error, IOError {
 			var frame = yield machine.load_call_frame (thread, 0, io_cancellable);
 
 			uint64 return_address = machine.address_from_funcptr (frame.return_address);
@@ -220,7 +222,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async void continue_from_breakpoint (DebuggerBreakpoint bp, DebuggerThread thread) throws Error, IOError {
+		private async void continue_from_breakpoint (DebuggerBreakpoint bp, DebuggerThread thread) throws Efni.Error, IOError {
 			yield bp.disable (io_cancellable);
 			yield thread.step (io_cancellable);
 			yield bp.enable (io_cancellable);

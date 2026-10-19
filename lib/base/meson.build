@@ -1,21 +1,16 @@
 base_sources = [
   'asset-location.vala',
+  'promise.vala',
   'session.vala',
   'session-glue.c',
   'channel.vala',
   'service.vala',
-  'stream.vala',
   'rpc.vala',
   'p2p.vala',
   'p2p-glue.c',
   'dbus.vala',
-  'promise.vala',
-  'fs.vala',
   'socket.vala',
   'socket-glue.c',
-  'buffer.vala',
-  'buffer-glue.c',
-  'value.vala',
   'xnu-syscalls' / 'xnu-syscalls.vala',
   'xnu-syscalls' / 'xnu-syscalls-glue.c',
 ]
@@ -30,10 +25,7 @@ else
 endif
 
 if host_os == 'macos'
-  base_sources += [
-    'xpc.vala',
-    'frida-darwin.c',
-  ]
+  base_sources += 'frida-darwin.c'
 endif
 
 if host_os_family == 'darwin'
@@ -114,7 +106,7 @@ base = static_library('frida-base-' + api_version, base_sources,
   vala_header: 'frida-base.h',
   vala_gir: base_gir_name,
   vala_vapi: f'frida-base-@api_version@.vapi',
-  dependencies: [glib_dep, gobject_dep, gio_dep, libsoup_dep, nice_dep, usrsctp_dep, gee_dep, json_glib_dep, gum_dep, openssl_dep] + extra_deps,
+  dependencies: [glib_dep, gobject_dep, gio_dep, libsoup_dep, nice_dep, usrsctp_dep, gee_dep, json_glib_dep, gum_dep, openssl_dep, efni_dep] + extra_deps,
   install: have_in_tree_payloads,
   install_dir: [true, header_install_dir, true, false],
 )
@@ -122,7 +114,7 @@ base = static_library('frida-base-' + api_version, base_sources,
 base_dep = declare_dependency(
   include_directories: include_directories('.'),
   link_with: base,
-  dependencies: [nice_dep, json_glib_dep, gum_dep] + extra_deps,
+  dependencies: [nice_dep, json_glib_dep, gum_dep, efni_dep] + extra_deps,
 )
 
 base_build_dir = meson.current_build_dir()

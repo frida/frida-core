@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class UnknownMachine : Object, Machine {
@@ -18,43 +20,43 @@ namespace Frida.Barebone {
 			Object (debugger: debugger);
 		}
 
-		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
+		public async size_t query_page_size (Cancellable? cancellable) throws Efni.Error, IOError {
 			return 4096;
 		}
 
-		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+		public async uint query_exception_level (Cancellable? cancellable) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 		}
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
-				throws Error, IOError {
-			throw_not_supported ();
+				throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
-				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+				Cancellable? cancellable) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern,
-				uint max_matches, Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+				uint max_matches, Cancellable? cancellable) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 
-		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error {
-			throw_not_supported ();
+		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Efni.Error {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 
-		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 
 		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
 			return new UnknownCallFrame (thread, regs);
@@ -101,7 +103,7 @@ namespace Frida.Barebone {
 			public void force_return () {
 			}
 
-			public async void commit (Cancellable? cancellable) throws Error, IOError {
+			public async void commit (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (regs.get_data<bool> ("dirty"))
 					yield thread.write_registers (regs, cancellable);
 			}
@@ -116,8 +118,8 @@ namespace Frida.Barebone {
 		}
 
 		public async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator, Cancellable? cancellable)
-				throws Error, IOError {
-			throw_not_supported ();
+				throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 	}
 }

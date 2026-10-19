@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public enum CallingConvention {
@@ -71,17 +73,17 @@ namespace Frida.Barebone {
 			page_tables = new X86PageTables (debugger);
 		}
 
-		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
+		public async size_t query_page_size (Cancellable? cancellable) throws Efni.Error, IOError {
 			return 4096;
 		}
 
 		private const uint64 CODE_SELECTOR_PRIVILEGE = 3;
 		private const uint64 USER_PRIVILEGE = 3;
 
-		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
+		public async uint query_exception_level (Cancellable? cancellable) throws Efni.Error, IOError {
 			DebuggerException? exception = debugger.exception;
 			if (exception == null)
-				throw new Error.INVALID_OPERATION ("Unable to query in current state");
+				throw new Efni.Error.INVALID_OPERATION ("Unable to query in current state");
 			DebuggerThread thread = exception.thread;
 
 			var cs = yield thread.read_register ("cs", cancellable);
@@ -90,7 +92,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			foreach (RangeDetails r in coalesce_ranges (yield page_tables.collect_ranges (cancellable))) {
 				if ((r.protection & prot) != prot)
 					continue;
@@ -100,12 +102,12 @@ namespace Frida.Barebone {
 		}
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield page_tables.map (physical_addresses, cancellable);
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			if (set_memory_x != 0) {
 				yield set_pages_protection (virtual_address, size, prot, cancellable);
 				return;
@@ -115,7 +117,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void set_pages_protection (uint64 virtual_address, size_t size, Gum.PageProtection prot,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 aligned = virtual_address & ~(uint64) 0xfff;
 			uint num_pages = (uint) (((virtual_address + size + 0xfff) & ~(uint64) 0xfff) - aligned) / 4096;
 
@@ -130,11 +132,11 @@ namespace Frida.Barebone {
 		}
 
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
-				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+				Cancellable? cancellable) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 
-		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error {
+		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Efni.Error {
 			Gum.ElfX64Relocation type = (Gum.ElfX64Relocation) r.type;
 			switch (type) {
 				case NONE:
@@ -157,8 +159,8 @@ namespace Frida.Barebone {
 					// Both ends of the displacement move by the same amount.
 					break;
 				default:
-					throw new Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
-						Marshal.enum_to_nick<Gum.ElfX64Relocation> (type));
+					throw new Efni.Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
+						Efni.Marshal.enum_to_nick<Gum.ElfX64Relocation> (type));
 			}
 		}
 
@@ -167,9 +169,9 @@ namespace Frida.Barebone {
 			return true;
 		}
 
-		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
+		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (args.length > arg_reg_names.length)
-				throw new Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
+				throw new Efni.Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
 
 			bool was_running = debugger.state != STOPPED;
 			if (was_running)
@@ -206,7 +208,7 @@ namespace Frida.Barebone {
 			int64 deadline = get_monotonic_time () + LANDING_TIMEOUT_USEC;
 			while (true) {
 				if (get_monotonic_time () >= deadline)
-					throw new Error.TIMED_OUT ("Timed out waiting for the call to return");
+					throw new Efni.Error.TIMED_OUT ("Timed out waiting for the call to return");
 
 				ex = yield debugger.continue_until_exception (cancellable);
 				if (ex.breakpoint != bp)
@@ -227,7 +229,7 @@ namespace Frida.Barebone {
 			return retval;
 		}
 
-		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
+		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Efni.Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
 			uint64 original_rsp = regs["rsp"].get_uint64 ();
@@ -353,7 +355,7 @@ namespace Frida.Barebone {
 				stack_state = MODIFIED;
 			}
 
-			public async void commit (Cancellable? cancellable) throws Error, IOError {
+			public async void commit (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (regs.get_data<bool> ("dirty"))
 					yield thread.write_registers (regs, cancellable);
 
@@ -371,11 +373,11 @@ namespace Frida.Barebone {
 		}
 
 		public async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield X86InlineHook.create (target, handler, AMD64, allocator, debugger, cancellable);
 		}
 
-		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Efni.Error, IOError {
 			return yield page_tables.translate (va, cancellable);
 		}
 	}

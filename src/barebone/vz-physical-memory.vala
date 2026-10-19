@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	/**
@@ -27,11 +29,11 @@ namespace Frida.Barebone {
 		private const uint64 MAPPING_ALIGNMENT = 0x4000;
 		private const uint MAX_DISCOVERY_ATTEMPTS = 10;
 
-		public static VzPhysicalMemory open (uint pid) throws Error {
+		public static VzPhysicalMemory open (uint pid) throws Efni.Error {
 			var memory = new VzPhysicalMemory ();
 
 			if (Gum.Darwin.task_for_pid (Gum.Darwin.mach_task_self (), (int) pid, out memory.task) != Gum.Darwin.Status.SUCCESS) {
-				throw new Error.PERMISSION_DENIED (
+				throw new Efni.Error.PERMISSION_DENIED (
 					"Unable to acquire the task port for the Virtualization daemon (pid %u); " +
 					"frida-core needs root or the com.apple.system-task-ports entitlement", pid);
 			}
@@ -40,20 +42,20 @@ namespace Frida.Barebone {
 				try {
 					memory.discover ();
 					return memory;
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 					if (attempt == MAX_DISCOVERY_ATTEMPTS - 1)
 						throw e;
 				}
 			}
 		}
 
-		private void discover () throws Error {
+		private void discover () throws Efni.Error {
 			uint64 vptr = (resolve_hv_vm_vtable () + 16) & VPTR_MASK;
 			foreach (uint64 instance in find_vptr_candidates (vptr)) {
 				if (try_load_shared_ram (instance))
 					return;
 			}
-			throw new Error.NOT_SUPPORTED ("Unable to locate a populated Hv::Vm guest-RAM map in the daemon");
+			throw new Efni.Error.NOT_SUPPORTED ("Unable to locate a populated Hv::Vm guest-RAM map in the daemon");
 		}
 
 		private bool try_load_shared_ram (uint64 instance) {
@@ -111,17 +113,17 @@ namespace Frida.Barebone {
 				entries = loaded;
 		}
 
-		private static uint64 resolve_hv_vm_vtable () throws Error {
+		private static uint64 resolve_hv_vm_vtable () throws Efni.Error {
 			Gum.Module module;
 			try {
 				module = Gum.Module.load ("/System/Library/Frameworks/Hypervisor.framework/Hypervisor");
 			} catch (GLib.Error e) {
-				throw new Error.NOT_SUPPORTED ("Unable to load Hypervisor.framework: %s", e.message);
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to load Hypervisor.framework: %s", e.message);
 			}
 
 			Gum.Address vtable = module.find_symbol_by_name ("_ZTVN2Hv2VmE");
 			if (vtable == 0)
-				throw new Error.NOT_SUPPORTED ("Unable to resolve the Hv::Vm vtable symbol");
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to resolve the Hv::Vm vtable symbol");
 			return vtable;
 		}
 
@@ -155,18 +157,18 @@ namespace Frida.Barebone {
 			}
 		}
 
-		public uint8[] read (uint64 pa, size_t size) throws Error {
+		public uint8[] read (uint64 pa, size_t size) throws Efni.Error {
 			SharedRamEntry entry = entry_for (pa, size);
 			uint8[]? data = Gum.Darwin.read (task, entry.host_va + (pa - entry.guest_pa), size);
 			if (data == null)
-				throw new Error.INVALID_ARGUMENT ("Unable to read guest physical memory at PA 0x%" + uint64.FORMAT_MODIFIER + "x", pa);
+				throw new Efni.Error.INVALID_ARGUMENT ("Unable to read guest physical memory at PA 0x%" + uint64.FORMAT_MODIFIER + "x", pa);
 			return data;
 		}
 
-		public void write (uint64 pa, uint8[] data) throws Error {
+		public void write (uint64 pa, uint8[] data) throws Efni.Error {
 			SharedRamEntry entry = entry_for (pa, data.length);
 			if (!Gum.Darwin.write (task, entry.host_va + (pa - entry.guest_pa), data))
-				throw new Error.INVALID_ARGUMENT ("Unable to write guest physical memory at PA 0x%" + uint64.FORMAT_MODIFIER + "x", pa);
+				throw new Efni.Error.INVALID_ARGUMENT ("Unable to write guest physical memory at PA 0x%" + uint64.FORMAT_MODIFIER + "x", pa);
 		}
 
 		public bool contains (uint64 pa) {
@@ -183,14 +185,14 @@ namespace Frida.Barebone {
 			return false;
 		}
 
-		private SharedRamEntry entry_for (uint64 pa, size_t length) throws Error {
+		private SharedRamEntry entry_for (uint64 pa, size_t length) throws Efni.Error {
 			SharedRamEntry? entry = covering_entry (pa, length);
 			if (entry == null) {
 				refresh ();
 				entry = covering_entry (pa, length);
 			}
 			if (entry == null)
-				throw new Error.INVALID_ARGUMENT ("Guest PA 0x%" + uint64.FORMAT_MODIFIER + "x is not backed by guest RAM", pa);
+				throw new Efni.Error.INVALID_ARGUMENT ("Guest PA 0x%" + uint64.FORMAT_MODIFIER + "x is not backed by guest RAM", pa);
 			return entry;
 		}
 

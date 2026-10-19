@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class QmpClient : Object, AsyncInitable {
@@ -22,9 +24,9 @@ namespace Frida.Barebone {
 		private OutputStream output;
 
 		private bool is_connected = false;
-		private Promise<bool> close_request = new Promise<bool> ();
+		private Efni.Promise<bool> close_request = new Efni.Promise<bool> ();
 
-		private Gee.Map<uint, Promise<Json.Node>> pending_requests = new Gee.HashMap<uint, Promise<Json.Node>> ();
+		private Gee.Map<uint, Efni.Promise<Json.Node>> pending_requests = new Gee.HashMap<uint, Efni.Promise<Json.Node>> ();
 		private uint next_request_id = 1;
 
 		private Cancellable io_cancellable = new Cancellable ();
@@ -41,19 +43,19 @@ namespace Frida.Barebone {
 		}
 
 		public static async QmpClient open (string? address = null, uint16 port = 0, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var client = new QmpClient (address, port);
 
 			try {
 				yield client.init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				Efni.throw_api_error (e);
 			}
 
 			return client;
 		}
 
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Efni.Error, IOError {
 			{
 				SocketConnectable connectable;
 				if (address.has_prefix ("unix:")) {
@@ -61,7 +63,7 @@ namespace Frida.Barebone {
 						UnixSocketAddressType.PATH);
 				} else {
 					string endpoint = address.has_prefix ("tcp:") ? address.substring (4) : address;
-					connectable = parse_socket_address (endpoint, port, "localhost", 4444);
+					connectable = Efni.parse_socket_address (endpoint, port, "localhost", 4444);
 				}
 
 				SocketConnection socket_connection;
@@ -69,7 +71,7 @@ namespace Frida.Barebone {
 					var client = new SocketClient ();
 					socket_connection = yield client.connect_async (connectable, cancellable);
 				} catch (GLib.Error e) {
-					throw new Error.TRANSPORT ("Unable to connect to QMP server: %s", e.message);
+					throw new Efni.Error.TRANSPORT ("Unable to connect to QMP server: %s", e.message);
 				}
 
 				var socket = socket_connection.socket;
@@ -89,7 +91,7 @@ namespace Frida.Barebone {
 
 				string? greeting_line = yield input.read_line_async (Priority.DEFAULT, cancellable);
 				if (greeting_line == null)
-					throw new Error.TRANSPORT ("Connection closed during QMP greeting");
+					throw new Efni.Error.TRANSPORT ("Connection closed during QMP greeting");
 
 				process_incoming_messages.begin ();
 				started_message_processing = true;
@@ -102,22 +104,22 @@ namespace Frida.Barebone {
 				if (!started_message_processing)
 					close_request.resolve (true);
 
-				if (e is Error)
-					throw_api_error (e);
+				if (e is Efni.Error)
+					Efni.throw_api_error (e);
 				else
-					throw new Error.TRANSPORT ("%s", e.message);
+					throw new Efni.Error.TRANSPORT ("%s", e.message);
 			}
 		}
 
 #if WINDOWS
-		private static uint16 pick_free_port () throws Error {
+		private static uint16 pick_free_port () throws Efni.Error {
 			try {
 				var listener = new SocketListener ();
 				uint16 port = listener.add_any_inet_port (null);
 				listener.close ();
 				return port;
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to reserve a port: %s", e.message);
+				throw new Efni.Error.TRANSPORT ("Unable to reserve a port: %s", e.message);
 			}
 		}
 #endif
@@ -127,12 +129,12 @@ namespace Frida.Barebone {
 
 			try {
 				yield close_request.future.wait_async (cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				assert_not_reached ();
 			}
 		}
 
-		public async void wait_until_hostlink_is_open (Cancellable? cancellable) throws Error, IOError {
+		public async void wait_until_hostlink_is_open (Cancellable? cancellable) throws Efni.Error, IOError {
 			while (!hostlink_is_open) {
 				hostlink_open_handler = wait_until_hostlink_is_open.callback;
 				yield;
@@ -159,7 +161,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Hostlink open_hostlink (string? preferred_bus = null, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint64 mmio = 0;
 			uint irq = 0;
 			string bus = preferred_bus;
@@ -194,7 +196,7 @@ namespace Frida.Barebone {
 			string parent;
 			try {
 				parent = yield get_qom_property_string ("/machine/peripheral/" + controller, "parent_bus", cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				return 0;
 			}
 
@@ -213,7 +215,7 @@ namespace Frida.Barebone {
 				Cancellable? cancellable) throws IOError {
 			try {
 				yield delete_device (device, cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				return;
 			}
 
@@ -221,7 +223,7 @@ namespace Frida.Barebone {
 				try {
 					yield remove_chardev (chardev, cancellable);
 					return;
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 					if (!("busy" in e.message))
 						return;
 				}
@@ -234,7 +236,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async void delete_device (string id, Cancellable? cancellable) throws Error, IOError {
+		private async void delete_device (string id, Cancellable? cancellable) throws Efni.Error, IOError {
 			var args = new Json.Builder ();
 			args
 				.begin_object ()
@@ -244,7 +246,7 @@ namespace Frida.Barebone {
 			yield execute_command ("device_del", args.get_root (), cancellable);
 		}
 
-		private async void remove_chardev (string id, Cancellable? cancellable) throws Error, IOError {
+		private async void remove_chardev (string id, Cancellable? cancellable) throws Efni.Error, IOError {
 			var args = new Json.Builder ();
 			args
 				.begin_object ()
@@ -255,7 +257,7 @@ namespace Frida.Barebone {
 		}
 
 		private async IOStream plug_hostlink (string chardev, string device, string bus,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 #if WINDOWS
 			uint16 hostlink_tcp_port = pick_free_port ();
 
@@ -268,7 +270,7 @@ namespace Frida.Barebone {
 				Tcp.enable_nodelay (conn.socket);
 				return conn;
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to connect to the hostlink: %s", e.message);
+				throw new Efni.Error.TRANSPORT ("Unable to connect to the hostlink: %s", e.message);
 			}
 #else
 			string socket_path = Path.build_filename (Environment.get_tmp_dir (),
@@ -281,7 +283,7 @@ namespace Frida.Barebone {
 			try {
 				return yield client.connect_async (new UnixSocketAddress (socket_path), cancellable);
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to connect to %s: %s", socket_path, e.message);
+				throw new Efni.Error.TRANSPORT ("Unable to connect to %s: %s", socket_path, e.message);
 			}
 #endif
 		}
@@ -292,22 +294,22 @@ namespace Frida.Barebone {
 			public uint irq;
 		}
 
-		private async int64 get_qom_property_int (string path, string property, Cancellable? cancellable) throws Error, IOError {
+		private async int64 get_qom_property_int (string path, string property, Cancellable? cancellable) throws Efni.Error, IOError {
 			var val = yield get_qom_property (path, property, cancellable);
 			if (val.get_value_type () != typeof (int64))
-				throw new Error.PROTOCOL ("Expected '%s' property on %s to be an integer", property, path);
+				throw new Efni.Error.PROTOCOL ("Expected '%s' property on %s to be an integer", property, path);
 			return val.get_int ();
 		}
 
 		private async string get_qom_property_string (string path, string property, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var val = yield get_qom_property (path, property, cancellable);
 			if (val.get_value_type () != typeof (string))
-				throw new Error.PROTOCOL ("Expected '%s' property on %s to be a string", property, path);
+				throw new Efni.Error.PROTOCOL ("Expected '%s' property on %s to be a string", property, path);
 			return val.get_string ();
 		}
 
-		private async Json.Node get_qom_property (string path, string property, Cancellable? cancellable) throws Error, IOError {
+		private async Json.Node get_qom_property (string path, string property, Cancellable? cancellable) throws Efni.Error, IOError {
 			var args = new Json.Builder ();
 			args
 				.begin_object ()
@@ -320,7 +322,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void add_listening_chardev (string id, string endpoint, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var args = new Json.Builder ();
 			args
 				.begin_object ()
@@ -365,7 +367,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void add_serial_port (string chardev, string bus, string name, string id, uint nr, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var args = new Json.Builder ();
 			args
 				.begin_object ()
@@ -386,7 +388,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Json.Node execute_command (string command, Json.Node? arguments = null, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			check_connected ();
 
 			Request request = begin_request (command, arguments);
@@ -395,7 +397,7 @@ namespace Frida.Barebone {
 				yield output.write_all_async (request.json.data, Priority.DEFAULT, cancellable, null);
 			} catch (GLib.Error e) {
 				cancel_request (request);
-				throw new Error.TRANSPORT ("%s", e.message);
+				throw new Efni.Error.TRANSPORT ("%s", e.message);
 			}
 
 			return yield join_request (request, cancellable);
@@ -404,7 +406,7 @@ namespace Frida.Barebone {
 		private Request begin_request (string command, Json.Node? arguments) {
 			uint id = next_request_id++;
 
-			var promise = new Promise<Json.Node> ();
+			var promise = new Efni.Promise<Json.Node> ();
 			pending_requests[id] = promise;
 
 			string json = build_request (command, id, arguments);
@@ -438,12 +440,12 @@ namespace Frida.Barebone {
 			return Json.to_string (message, false) + "\n";
 		}
 
-		private async Json.Node join_request (Request request, Cancellable? cancellable) throws Error, IOError {
+		private async Json.Node join_request (Request request, Cancellable? cancellable) throws Efni.Error, IOError {
 			var timeout_source = new TimeoutSource (REQUEST_TIMEOUT_MS);
 			timeout_source.set_callback (() => {
-				Promise<Json.Node>? p;
+				Efni.Promise<Json.Node>? p;
 				if (pending_requests.unset (request.id, out p))
-					p.reject (new Error.TIMED_OUT ("QMP command timed out"));
+					p.reject (new Efni.Error.TIMED_OUT ("QMP command timed out"));
 				return Source.REMOVE;
 			});
 			timeout_source.attach (MainContext.get_thread_default ());
@@ -460,14 +462,14 @@ namespace Frida.Barebone {
 		}
 
 		private class Request {
-			public Promise<Json.Node> promise;
+			public Efni.Promise<Json.Node> promise;
 			public string json;
 			public uint id;
 		}
 
-		private void check_connected () throws Error {
+		private void check_connected () throws Efni.Error {
 			if (!is_connected)
-				throw new Error.INVALID_OPERATION ("QMP client is not connected");
+				throw new Efni.Error.INVALID_OPERATION ("QMP client is not connected");
 		}
 
 		private async void process_incoming_messages () {
@@ -484,7 +486,7 @@ namespace Frida.Barebone {
 				is_connected = false;
 
 				foreach (var promise in pending_requests.values)
-					promise.reject (new Error.TRANSPORT ("QMP connection closed"));
+					promise.reject (new Efni.Error.TRANSPORT ("QMP connection closed"));
 				pending_requests.clear ();
 			}
 
@@ -503,7 +505,7 @@ namespace Frida.Barebone {
 			close_request.resolve (true);
 		}
 
-		private void handle_message (owned Json.Node message) throws Error {
+		private void handle_message (owned Json.Node message) throws Efni.Error {
 			var r = make_json_reader_taking_node ((owned) message);
 
 			bool is_response = r.read_member ("id");
@@ -512,7 +514,7 @@ namespace Frida.Barebone {
 				id = (uint) r.get_int_value ();
 				GLib.Error? e = r.get_error ();
 				if (e != null)
-					throw new Error.PROTOCOL ("Malformed message: %s", e.message);
+					throw new Efni.Error.PROTOCOL ("Malformed message: %s", e.message);
 			}
 			r.end_member ();
 
@@ -522,8 +524,8 @@ namespace Frida.Barebone {
 				handle_event (r);
 		}
 
-		private void handle_response (uint request_id, Json.Reader r) throws Error {
-			Promise<Json.Node>? promise;
+		private void handle_response (uint request_id, Json.Reader r) throws Efni.Error {
+			Efni.Promise<Json.Node>? promise;
 			if (!pending_requests.unset (request_id, out promise))
 				return;
 
@@ -531,10 +533,10 @@ namespace Frida.Barebone {
 				r.read_member ("desc");
 				string? description = r.get_string_value ();
 				if (description == null)
-					throw new Error.PROTOCOL ("Malformed message: %s", r.get_error ().message);
+					throw new Efni.Error.PROTOCOL ("Malformed message: %s", r.get_error ().message);
 				r.end_member ();
 
-				promise.reject (new Error.NOT_SUPPORTED ("%s", description));
+				promise.reject (new Efni.Error.NOT_SUPPORTED ("%s", description));
 				return;
 			}
 			r.end_member ();
@@ -543,17 +545,17 @@ namespace Frida.Barebone {
 			promise.resolve (r.get_current_node ());
 		}
 
-		private void handle_event (Json.Reader r) throws Error {
+		private void handle_event (Json.Reader r) throws Efni.Error {
 			r.read_member ("event");
 			string? name = r.get_string_value ();
 			if (name == null)
-				throw new Error.PROTOCOL ("Malformed event message: missing 'event' property");
+				throw new Efni.Error.PROTOCOL ("Malformed event message: missing 'event' property");
 			r.end_member ();
 
 			Json.Node? data = null;
 			if (r.read_member ("data")) {
 				if (!r.is_object ())
-					throw new Error.PROTOCOL ("Malformed event message: 'data' must be an object");
+					throw new Efni.Error.PROTOCOL ("Malformed event message: 'data' must be an object");
 				data = r.get_current_node ();
 			}
 			r.end_member ();

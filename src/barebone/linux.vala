@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	/**
@@ -6,7 +8,7 @@ namespace Frida.Barebone {
 	 * image in memory says where it landed, and every symbol moves by the same distance.
 	 */
 	public static async LinuxLayout collect_linux_layout (Machine machine,
-			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
+			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Efni.Error, IOError {
 
 		uint64 linked_base = base_of (symbols);
 		uint64 running_base = yield find_running_kernel (machine, linked_base, symbols, cancellable);
@@ -75,7 +77,7 @@ namespace Frida.Barebone {
 	 * address its symbols were linked for.
 	 */
 	private static async uint64 find_running_kernel (Machine machine, uint64 linked_base,
-			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
+			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Efni.Error, IOError {
 		// A guest idling in a shell is executing userspace, whose addresses say nothing about
 		// where the kernel is and cannot be walked with the kernel's tables.
 		yield machine.enter_exception_level (1, ENTER_KERNEL_TIMEOUT_MS, cancellable);
@@ -125,22 +127,22 @@ namespace Frida.Barebone {
 					IMAGE_MAGIC.length, cancellable);
 				if (Memory.cmp (header.get_data (), IMAGE_MAGIC.data, IMAGE_MAGIC.length) == 0)
 					return candidate;
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 			}
 
 			candidate -= KERNEL_ALIGNMENT;
 		}
 
-		throw new Error.NOT_SUPPORTED ("Unable to find the running kernel; is the guest in kernel mode?");
+		throw new Efni.Error.NOT_SUPPORTED ("Unable to find the running kernel; is the guest in kernel mode?");
 	}
 
 	private static async uint64 find_relocated_kernel (Machine machine, uint64 linked_base,
-			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Error, IOError {
+			Gee.List<SymbolInfo> symbols, Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		uint64 banner = address_of (symbols, KERNEL_BANNER_SYMBOL);
 		if (banner == 0)
-			throw new Error.NOT_SUPPORTED ("System.map names no %s to anchor relocation", KERNEL_BANNER_SYMBOL);
+			throw new Efni.Error.NOT_SUPPORTED ("System.map names no %s to anchor relocation", KERNEL_BANNER_SYMBOL);
 
 		uint64 banner_offset = banner - linked_base;
 		uint64 span = span_of (symbols, linked_base);
@@ -161,11 +163,11 @@ namespace Frida.Barebone {
 				return landing;
 		}
 
-		throw new Error.NOT_SUPPORTED ("Unable to find the relocated kernel; is the guest in kernel mode?");
+		throw new Efni.Error.NOT_SUPPORTED ("Unable to find the relocated kernel; is the guest in kernel mode?");
 	}
 
 	private static async uint64 read_program_counter (Debugger debugger, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		var registers = yield debugger.exception.thread.read_registers (cancellable);
 		return registers.has_key ("rip")
 			? registers["rip"].get_uint64 ()
@@ -173,11 +175,11 @@ namespace Frida.Barebone {
 	}
 
 	private static async bool banner_present_at (Debugger debugger, uint64 address, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		try {
 			var head = yield debugger.read_byte_array (address, KERNEL_BANNER.length, cancellable);
 			return Memory.cmp (head.get_data (), KERNEL_BANNER.data, KERNEL_BANNER.length) == 0;
-		} catch (Error e) {
+		} catch (Efni.Error e) {
 			return false;
 		}
 	}

@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class HostSessionService : Object {
 		private Gee.ArrayList<HostSessionBackend> backends = new Gee.ArrayList<HostSessionBackend> ();

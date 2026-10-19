@@ -2,6 +2,7 @@
 
 #include "pipe-glue.h"
 
+#include <efni.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -66,7 +67,7 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
 
     fcntl (fd, F_SETFD, FD_CLOEXEC);
     setsockopt (fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof (no_sigpipe));
-    frida_unix_socket_tune_buffer_sizes (fd);
+    efni_unix_socket_tune_buffer_sizes (fd);
   }
 
   status = fileport_makeport (sockets[0], &local_wrapper);

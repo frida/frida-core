@@ -1,6 +1,9 @@
+using Efni;
+using Idun;
+
 [CCode (gir_namespace = "FridaFruityInjector", gir_version = "1.0")]
 namespace Frida.Fruity.Injector {
-	public static async Transaction inject (owned Gum.DarwinModule module, LLDB.Client lldb, HostChannelProvider channel_provider,
+	public static async Transaction inject (owned Gum.DarwinModule module, LLDB.Client lldb, Idun.ChannelProvider channel_provider,
 			Cancellable? cancellable) throws Error, IOError {
 		var session = new Session (module, lldb, channel_provider);
 		return yield session.run (cancellable);
@@ -25,7 +28,7 @@ namespace Frida.Fruity.Injector {
 			this.lldb = lldb;
 		}
 
-		public async void commit (Cancellable? cancellable) throws Error, IOError {
+		public async void commit (Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			if (is_early_instrumentation) {
 				var gadget_threads = new Gee.ArrayList<LLDB.Thread> ();
 				yield lldb.enumerate_threads (thread => {
@@ -62,7 +65,7 @@ namespace Frida.Fruity.Injector {
 			construct;
 		}
 
-		public HostChannelProvider channel_provider {
+		public Idun.ChannelProvider channel_provider {
 			get;
 			construct;
 		}
@@ -99,7 +102,7 @@ namespace Frida.Fruity.Injector {
 
 		private size_t module_size;
 
-		public Session (Gum.DarwinModule module, LLDB.Client lldb, HostChannelProvider channel_provider) {
+		public Session (Gum.DarwinModule module, LLDB.Client lldb, Idun.ChannelProvider channel_provider) {
 			Object (
 				module: module,
 				lldb: lldb,
@@ -188,11 +191,11 @@ namespace Frida.Fruity.Injector {
 		private async void teardown (Cancellable? cancellable) throws GLib.Error {
 			try {
 				yield lldb.deallocate (scratch_page, cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 			}
 			try {
 				yield lldb.deallocate (jit_page, cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 			}
 
 			yield restore_main_thread_state (cancellable);
@@ -1386,7 +1389,7 @@ namespace Frida.Fruity.Injector {
 			if (state != scratch_page) {
 				try {
 					yield lldb.deallocate (state, cancellable);
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 				}
 			}
 

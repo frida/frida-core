@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class WindowsHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {

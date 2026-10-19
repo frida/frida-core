@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "Frida", gir_version = "1.0")]
 namespace Frida {
 	public extern void init ();

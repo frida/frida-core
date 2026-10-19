@@ -1,7 +1,7 @@
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public async Allocation inject_elf (Gum.ElfModule elf, Bytes raw_elf, size_t page_size, Machine machine, Allocator allocator,
-			owned UploadProgressFunc on_upload_progress, Cancellable? cancellable) throws Error, IOError {
+			owned UploadProgressFunc on_upload_progress, Cancellable? cancellable) throws Efni.Error, IOError {
 		size_t vm_size = (size_t) elf.mapped_size;
 
 		uint num_pages = (uint) (vm_size / page_size);
@@ -21,7 +21,7 @@ namespace Frida.Barebone {
 			return true;
 		});
 		if (text_size == 0)
-			throw new Error.NOT_SUPPORTED ("Unable to detect text segment");
+			throw new Efni.Error.NOT_SUPPORTED ("Unable to detect text segment");
 
 		var allocation = yield allocator.allocate (num_pages * page_size, page_size, cancellable);
 		try {
@@ -39,14 +39,14 @@ namespace Frida.Barebone {
 				(num_pages * page_size) - (size_t) data_base, READ | WRITE, cancellable);
 		} catch (GLib.Error e) {
 			yield allocation.deallocate (cancellable);
-			throw_api_error (e);
+			Efni.throw_api_error (e);
 		}
 
 		return allocation;
 	}
 
 	private async void upload (Machine machine, uint64 va, Bytes image, owned UploadProgressFunc on_progress,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		unowned uint8[] data = image.get_data ();
 		size_t slice_size = size_t.max (data.length / UPLOAD_PROGRESS_STEPS, MIN_UPLOAD_SLICE);
 
@@ -65,7 +65,7 @@ namespace Frida.Barebone {
 	private const size_t MIN_UPLOAD_SLICE = 256 * 1024;
 
 	private async void clear_tail_beyond_file (Machine machine, uint64 base_va, size_t written,
-			size_t mapped, Cancellable? cancellable) throws Error, IOError {
+			size_t mapped, Cancellable? cancellable) throws Efni.Error, IOError {
 		if (written >= mapped)
 			return;
 

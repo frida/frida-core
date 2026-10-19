@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class FreebsdHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {

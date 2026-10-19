@@ -1,10 +1,12 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone.Img4 {
-	public Payload parse (Bytes blob) throws Error {
+	public Payload parse (Bytes blob) throws Efni.Error {
 		BufferReader r = new BufferReader (new Buffer (blob, BIG_ENDIAN));
 
 		if (r.read_uint8 () != Der.SEQUENCE)
-			throw new Error.PROTOCOL ("IMG4/IM4P must start with DER SEQUENCE");
+			throw new Efni.Error.PROTOCOL ("IMG4/IM4P must start with DER SEQUENCE");
 		size_t seq_len = Der.read_length (r);
 		size_t seq_end = r.offset + seq_len;
 
@@ -12,13 +14,13 @@ namespace Frida.Barebone.Img4 {
 
 		if (first_magic == "IMG4") {
 			if (r.read_uint8 () != Der.SEQUENCE)
-				throw new Error.PROTOCOL ("Expected SEQUENCE for IM4P");
+				throw new Efni.Error.PROTOCOL ("Expected SEQUENCE for IM4P");
 			size_t im4p_len = Der.read_length (r);
 			seq_end = r.offset + im4p_len;
 			if (Der.read_string (r) != "IM4P")
-				throw new Error.PROTOCOL ("Missing IM4P magic");
+				throw new Efni.Error.PROTOCOL ("Missing IM4P magic");
 		} else if (first_magic != "IM4P") {
-			throw new Error.PROTOCOL ("Not an IMG4/IM4P container (magic='%s')", first_magic);
+			throw new Efni.Error.PROTOCOL ("Not an IMG4/IM4P container (magic='%s')", first_magic);
 		}
 
 		string kind = Der.read_string (r);
@@ -60,14 +62,14 @@ namespace Frida.Barebone.Img4 {
 		private const uint8 IA5_STRING		= 0x16;
 		private const uint8 SEQUENCE		= 0x30;
 
-		private size_t read_length (BufferReader r) throws Error {
+		private size_t read_length (BufferReader r) throws Efni.Error {
 			uint8 b = r.read_uint8 ();
 			if ((b & 0x80) == 0)
 				return b;
 
 			uint8 nlen = (uint8) (b & 0x7f);
 			if (nlen == 0)
-				throw new Error.NOT_SUPPORTED ("Indefinite length not supported in IMG4");
+				throw new Efni.Error.NOT_SUPPORTED ("Indefinite length not supported in IMG4");
 
 			size_t len = 0;
 			for (uint8 i = 0; i != nlen; i++)
@@ -75,24 +77,24 @@ namespace Frida.Barebone.Img4 {
 			return len;
 		}
 
-		private Bytes read_octet_string (BufferReader r) throws Error {
+		private Bytes read_octet_string (BufferReader r) throws Efni.Error {
 			uint8 tag = r.read_uint8 ();
 			if (tag != Der.OCTET_STRING)
-				throw new Error.PROTOCOL ("Expected OCTET STRING, got tag 0x%02x".printf (tag));
+				throw new Efni.Error.PROTOCOL ("Expected OCTET STRING, got tag 0x%02x".printf (tag));
 			size_t len = read_length (r);
 			return r.read_bytes (len);
 		}
 
-		private string read_string (BufferReader r) throws Error {
+		private string read_string (BufferReader r) throws Efni.Error {
 			uint8 tag = r.read_uint8 ();
 			if (tag != Der.IA5_STRING && tag != Der.UTF8_STRING)
-				throw new Error.PROTOCOL ("Unexpected string tag 0x%02x", tag);
+				throw new Efni.Error.PROTOCOL ("Unexpected string tag 0x%02x", tag);
 			size_t len = read_length (r);
 			return r.read_fixed_string (len);
 		}
 	}
 
-	private Bytes maybe_decompress_lzfse (Bytes src) throws Error {
+	private Bytes maybe_decompress_lzfse (Bytes src) throws Efni.Error {
 		if (LZFSE.is_lzfse (src))
 			return LZFSE.decode (src);
 		return src;

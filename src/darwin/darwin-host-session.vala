@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class DarwinHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {
@@ -462,6 +464,7 @@ namespace Frida {
 				try {
 					yield disable_spawn_gating (cancellable);
 				} catch (Error e) {
+				} catch (Efni.Error e) {
 				}
 			}
 

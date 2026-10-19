@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class AgentConnection : Object, AsyncInitable {
@@ -40,9 +42,9 @@ namespace Frida.Barebone {
 		private Allocation config_allocation;
 		private Allocation? agent_stack;
 
-		private Promise<bool>? listening;
+		private Efni.Promise<bool>? listening;
 
-		private Gee.Map<uint16, Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Promise<Variant>> ();
+		private Gee.Map<uint16, Efni.Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Efni.Promise<Variant>> ();
 		private uint16 next_request_id = 1;
 
 		private const size_t AGENT_STACK_SIZE = 512 * 1024;
@@ -71,11 +73,11 @@ namespace Frida.Barebone {
 			this.kernel_notes = kernel_notes;
 		}
 
-		public async void open (Cancellable? cancellable) throws Error, IOError {
+		public async void open (Cancellable? cancellable) throws Efni.Error, IOError {
 			try {
 				yield init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				Efni.throw_api_error (e);
 			}
 		}
 
@@ -84,7 +86,7 @@ namespace Frida.Barebone {
 		 * transport with it, such as the Linux kernel module exposing /dev/frida.
 		 */
 		public static async AgentConnection open_resident (IOStream stream, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var connection = new AgentConnection.resident ();
 
 			connection.adopt_hostlink_streams (stream);
@@ -105,7 +107,7 @@ namespace Frida.Barebone {
 		private const uint8 TRANSPORT_KIND_PIPE_VSOCK = 4;
 		private const uint8 TRANSPORT_KIND_PIPE_GOLDFISH = 5;
 
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Efni.Error, IOError {
 			progress ("Preparing the agent", 0.0);
 
 			var transport_tag = yield resolve_transport (cancellable);
@@ -173,11 +175,11 @@ namespace Frida.Barebone {
 			KernelFlavor flavor;
 			if (kind == XNU) {
 				if (kernel_base == 0)
-					throw new Error.NOT_SUPPORTED ("Missing kernel_base");
+					throw new Efni.Error.NOT_SUPPORTED ("Missing kernel_base");
 				flavor = new XnuKernelFlavor (machine, kernel_base, symbols);
 			} else if (kind == LINUX) {
 				if (kernel_base == 0)
-					throw new Error.NOT_SUPPORTED ("Missing kernel_base");
+					throw new Efni.Error.NOT_SUPPORTED ("Missing kernel_base");
 				flavor = new LinuxKernelFlavor (machine, kernel_base, symbols);
 			} else if (kind == WIN9X) {
 				flavor = new Win9xKernelFlavor (machine, symbols);
@@ -193,7 +195,7 @@ namespace Frida.Barebone {
 			try {
 				elf = new Gum.ElfModule.from_blob (agent_config.image);
 			} catch (Gum.Error e) {
-				throw new Error.INVALID_ARGUMENT ("%s", e.message);
+				throw new Efni.Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 
 			var raw_elf = debugger.make_buffer (new Bytes (elf.get_file_data ()));
@@ -240,7 +242,7 @@ namespace Frida.Barebone {
 				return true;
 			});
 			if (start_address == 0)
-				throw new Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
+				throw new Efni.Error.INVALID_ARGUMENT ("Invalid agent: no _start symbol found");
 
 			XnuLayout? xnu_layout = null;
 			bool xnu_reads_its_own_processes = symbols.has_key ("proc_pid")
@@ -351,14 +353,14 @@ namespace Frida.Barebone {
 			return true;
 		}
 
-		private async void wait_to_be_greeted (Cancellable? cancellable) throws Error, IOError {
+		private async void wait_to_be_greeted (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (listening == null)
 				return;
 
 			var timeout = new TimeoutSource (GREETING_TIMEOUT_MS);
 			timeout.set_callback (() => {
 				if (!listening.future.ready)
-					listening.reject (new Error.TIMED_OUT ("The agent never announced itself"));
+					listening.reject (new Efni.Error.TIMED_OUT ("The agent never announced itself"));
 				return false;
 			});
 			timeout.attach (MainContext.get_thread_default ());
@@ -370,7 +372,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async Variant resolve_transport (Cancellable? cancellable) throws Error, IOError {
+		private async Variant resolve_transport (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (agent_config.transport is BareboneHostlinkTransportConfig)
 				return yield connect_virtio_transport ((BareboneHostlinkTransportConfig) agent_config.transport, cancellable);
 			if (agent_config.transport is BareboneVsockTransportConfig) {
@@ -407,11 +409,11 @@ namespace Frida.Barebone {
 					new Variant.variant (new Variant.string (config.socket_path))
 				});
 			}
-			throw new Error.NOT_SUPPORTED ("Unsupported transport config");
+			throw new Efni.Error.NOT_SUPPORTED ("Unsupported transport config");
 		}
 
 		private async void connect_serial_transport (BareboneSerialTransportConfig config,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			try {
 #if WINDOWS
 				adopt_hostlink_streams (WindowsNamedPipe.open_client (config.path));
@@ -421,20 +423,20 @@ namespace Frida.Barebone {
 					cancellable));
 #endif
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to reach the serial port of the guest: %s", e.message);
+				throw new Efni.Error.TRANSPORT ("Unable to reach the serial port of the guest: %s", e.message);
 			}
 
-			listening = new Promise<bool> ();
+			listening = new Efni.Promise<bool> ();
 		}
 
-		private async void open_pipe_listener (string path, Cancellable? cancellable) throws Error, IOError {
+		private async void open_pipe_listener (string path, Cancellable? cancellable) throws Efni.Error, IOError {
 			FileUtils.unlink (path);
 			var service = new SocketService ();
 			try {
 				SocketAddress effective;
 				service.add_address (new UnixSocketAddress (path), STREAM, DEFAULT, null, out effective);
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to listen on %s: %s", path, e.message);
+				throw new Efni.Error.TRANSPORT ("Unable to listen on %s: %s", path, e.message);
 			}
 			service.incoming.connect ((connection) => {
 				if (pipe_stream == null) {
@@ -451,7 +453,7 @@ namespace Frida.Barebone {
 			pipe_service = service;
 		}
 
-		private async void establish_hostlink (Cancellable? cancellable) throws Error, IOError {
+		private async void establish_hostlink (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (pipe_listener_wanted) {
 				while (pipe_stream == null) {
 					pipe_accept_handler = establish_hostlink.callback;
@@ -482,7 +484,7 @@ namespace Frida.Barebone {
 		}
 
 		private async Variant connect_virtio_transport (BareboneHostlinkTransportConfig config, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var qmp = yield QmpClient.open (config.qmp, 0, cancellable);
 			var link = yield qmp.open_hostlink (config.bus, cancellable);
 			this.qmp = qmp;
@@ -520,7 +522,7 @@ namespace Frida.Barebone {
 			output = hostlink.get_output_stream ();
 		}
 
-		private void rebase_layout (Layout layout, uint64 preferred_base, KernelRelocation reloc) throws Error {
+		private void rebase_layout (Layout layout, uint64 preferred_base, KernelRelocation reloc) throws Efni.Error {
 			foreach (var s in layout.symbols)
 				s.offset = reloc.runtime_offset (preferred_base + s.offset);
 			foreach (var m in layout.modules) {
@@ -559,7 +561,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async void give_the_memory_back (Cancellable? cancellable) throws Error, IOError {
+		private async void give_the_memory_back (Cancellable? cancellable) throws Efni.Error, IOError {
 			var timeout = new TimeoutSource (LEAVE_INTERVAL_MS);
 			timeout.set_callback (give_the_memory_back.callback);
 			timeout.attach (MainContext.get_thread_default ());
@@ -583,7 +585,7 @@ namespace Frida.Barebone {
 			yield flavor.settle (cancellable);
 		}
 
-		private async void wait_for_agent_to_leave (Cancellable? cancellable) throws Error, IOError {
+		private async void wait_for_agent_to_leave (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (left_flag == 0)
 				return;
 
@@ -615,13 +617,13 @@ namespace Frida.Barebone {
 		// same data. The process receives the code as it is, thus only the writable half needs a new
 		// location, in memory that both sides can address.
 		public async void place_winnt_user_agent (uint pid, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var response = yield execute_command (Command.PLACE_AGENT_IN_PROCESS,
 				new Variant.uint32 (pid), cancellable);
 			if (!response.is_of_type (VariantType.UINT32))
-				throw new Error.PROTOCOL ("Invalid place_agent_in_process response format");
+				throw new Efni.Error.PROTOCOL ("Invalid place_agent_in_process response format");
 			if (response.get_uint32 () == 0)
-				throw new Error.NOT_SUPPORTED ("Unable to place the agent in the process");
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to place the agent in the process");
 		}
 
 		/**
@@ -629,7 +631,7 @@ namespace Frida.Barebone {
 		 * copy reports having woken up in.
 		 */
 		public async uint inject_agent_into_process (uint pid, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (kernel_kind == WINNT) {
 				yield place_winnt_user_agent (pid, cancellable);
 				return yield start_winnt_agent_in_process (pid, cancellable);
@@ -641,12 +643,12 @@ namespace Frida.Barebone {
 		// The copy cannot answer from the thread that starts it. Thus ask again until it reports its
 		// process id.
 		private async uint start_winnt_agent_in_process (uint pid, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
 				var response = yield execute_command (Command.START_AGENT_IN_PROCESS,
 					new Variant.uint32 (pid), cancellable);
 				if (!response.is_of_type (VariantType.UINT32))
-					throw new Error.PROTOCOL ("Invalid start_agent_in_process response format");
+					throw new Efni.Error.PROTOCOL ("Invalid start_agent_in_process response format");
 
 				uint reached = response.get_uint32 ();
 				if (reached != 0)
@@ -659,19 +661,19 @@ namespace Frida.Barebone {
 				timeout.destroy ();
 			}
 
-			throw new Error.TIMED_OUT ("Timed out while starting the agent in the process");
+			throw new Efni.Error.TIMED_OUT ("Timed out while starting the agent in the process");
 		}
 
 		public signal void spawn_added (uint pid, string command_line, uint holder_pid);
 
 		public async Application[] enumerate_applications (string[] identifiers, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var selected = new VariantBuilder (new VariantType ("as"));
 			foreach (unowned string identifier in identifiers)
 				selected.add ("s", identifier);
 			var response = yield execute_command (Command.ENUMERATE_APPLICATIONS, selected.end (), cancellable);
 			if (!response.check_format_string ("a(sss)", false))
-				throw new Error.PROTOCOL ("Invalid enumerate_applications response format");
+				throw new Efni.Error.PROTOCOL ("Invalid enumerate_applications response format");
 
 			var applications = new Application[response.n_children ()];
 			for (size_t i = 0; i != applications.length; i++) {
@@ -686,11 +688,11 @@ namespace Frida.Barebone {
 		}
 
 		public async Shortcut[] enumerate_shortcuts (uint helper_pid, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var response = yield execute_command (Command.ENUMERATE_SHORTCUTS,
 				new Variant.boolean (false), cancellable, helper_pid);
 			if (!response.check_format_string ("a(ssss)", false))
-				throw new Error.PROTOCOL ("Invalid enumerate_shortcuts response format");
+				throw new Efni.Error.PROTOCOL ("Invalid enumerate_shortcuts response format");
 
 			var shortcuts = new Shortcut[response.n_children ()];
 			for (size_t i = 0; i != shortcuts.length; i++) {
@@ -737,59 +739,59 @@ namespace Frida.Barebone {
 			}
 		}
 
-		public async void gate_spawns (bool on, Cancellable? cancellable) throws Error, IOError {
+		public async void gate_spawns (bool on, Cancellable? cancellable) throws Efni.Error, IOError {
 			yield execute_command (Command.GATE_SPAWNS, new Variant.boolean (on), cancellable);
 		}
 
-		public async void arm_named_spawn (string name, Cancellable? cancellable) throws Error, IOError {
+		public async void arm_named_spawn (string name, Cancellable? cancellable) throws Efni.Error, IOError {
 			yield execute_command (Command.ARM_NAMED_SPAWN, new Variant.string (name), cancellable);
 		}
 
-		public async void disarm_named_spawn (string name, Cancellable? cancellable) throws Error, IOError {
+		public async void disarm_named_spawn (string name, Cancellable? cancellable) throws Efni.Error, IOError {
 			yield execute_command (Command.DISARM_NAMED_SPAWN, new Variant.string (name), cancellable);
 		}
 
 		public async uint spawn_process (uint helper_pid, string command_line, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield ask_for_a_spawn (helper_pid, new Variant.string (command_line), cancellable);
 		}
 
 		// A kernel that starts programs itself takes the words as they are, since a line to be
 		// split again is what Windows asks for and nothing else does.
 		public async uint spawn_program (string[] words, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield ask_for_a_spawn (0, new Variant.strv (words), cancellable);
 		}
 
 		private async uint ask_for_a_spawn (uint helper_pid, Variant payload, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var response = yield execute_command (Command.SPAWN_PROCESS, payload, cancellable,
 				helper_pid);
 			if (!response.is_of_type (VariantType.UINT32))
-				throw new Error.PROTOCOL ("Invalid spawn_process response format");
+				throw new Efni.Error.PROTOCOL ("Invalid spawn_process response format");
 
 			return response.get_uint32 ();
 		}
 
 		public async void resume_process (uint helper_pid, uint pid, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			yield execute_command (Command.RESUME_PROCESS, new Variant.uint32 (pid), cancellable,
 				helper_pid);
 		}
 
-		public async void detach_from_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+		public async void detach_from_process (uint pid, Cancellable? cancellable) throws Efni.Error, IOError {
 			yield execute_command (Command.DETACH_FROM_PROCESS, new Variant.uint32 (pid), cancellable);
 		}
 
 		public async uint inject_into_process (uint pid, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			// The agent cannot answer from the context that does the work. Thus it reports the result at
 			// the next request.
 			for (uint attempt = 0; attempt != INJECT_MAX_ATTEMPTS; attempt++) {
 				var response = yield execute_command (Command.INJECT_INTO_PROCESS,
 					new Variant.uint32 (pid), cancellable);
 				if (!response.is_of_type (VariantType.UINT32))
-					throw new Error.PROTOCOL ("Invalid inject_into_process response format");
+					throw new Efni.Error.PROTOCOL ("Invalid inject_into_process response format");
 
 				uint reached = response.get_uint32 ();
 				if (reached != 0)
@@ -802,11 +804,11 @@ namespace Frida.Barebone {
 				timeout.destroy ();
 			}
 
-			throw new Error.TIMED_OUT ("Timed out while injecting into process");
+			throw new Efni.Error.TIMED_OUT ("Timed out while injecting into process");
 		}
 
 		public async HostProcessInfo[] enumerate_processes (Scope scope, uint[] pids, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			bool include_icons = scope == FULL;
 			var selected = new VariantBuilder (new VariantType ("au"));
 			foreach (uint pid in pids)
@@ -814,7 +816,7 @@ namespace Frida.Barebone {
 			var request = new Variant.tuple ({ new Variant.boolean (include_icons), selected.end () });
 			var response = yield execute_command (Command.ENUMERATE_PROCESSES, request, cancellable);
 			if (!response.check_format_string ("a(usssusuxaay)", false))
-				throw new Error.PROTOCOL ("Invalid enumerate_processes response format");
+				throw new Efni.Error.PROTOCOL ("Invalid enumerate_processes response format");
 
 			var processes = new HostProcessInfo[response.n_children ()];
 			for (size_t i = 0; i != processes.length; i++) {
@@ -1016,30 +1018,30 @@ namespace Frida.Barebone {
 		private const uint32 MAX_ICON_DIMENSION = 256;
 
 		public async AgentScriptId create_script (string source, uint destination, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var payload = new Variant ("s", source);
 			var response = yield execute_command (Command.CREATE_SCRIPT, payload, cancellable, destination);
 			if (!response.check_format_string ("u", false))
-				throw new Error.PROTOCOL ("Invalid create_script response format");
+				throw new Efni.Error.PROTOCOL ("Invalid create_script response format");
 			uint32 script_handle;
 			response.get ("u", out script_handle);
 			return AgentScriptId (script_handle);
 		}
 
 		public async void load_script (AgentScriptId script_id, uint destination, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var payload = new Variant ("u", script_id.handle);
 			yield execute_command (Command.LOAD_SCRIPT, payload, cancellable, destination);
 		}
 
 		public async void destroy_script (AgentScriptId script_id, uint destination, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var payload = new Variant ("u", script_id.handle);
 			yield execute_command (Command.DESTROY_SCRIPT, payload, cancellable, destination);
 		}
 
 		public async void post_script_message (AgentScriptId script_id, string message, Bytes? data, uint destination,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			var payload = new Variant ("(us@ay)", script_id.handle, message,
 				new Variant.from_bytes (new VariantType ("ay"), data ?? new Bytes (new uint8[0]), true));
 			yield execute_command (Command.POST_SCRIPT_MESSAGE, payload, cancellable, destination);
@@ -1047,26 +1049,26 @@ namespace Frida.Barebone {
 
 		// Zero selects the agent in the kernel. A different value selects a process that has a copy.
 		private async Variant execute_command (Command command, Variant payload, Cancellable? cancellable,
-				uint destination = 0) throws Error, IOError {
+				uint destination = 0) throws Efni.Error, IOError {
 			uint16 request_id = next_request_id++;
 
 			Bytes frame = frame_message (command, request_id, destination, payload);
 
-			var promise = new Promise<Variant> ();
+			var promise = new Efni.Promise<Variant> ();
 			pending_requests[request_id] = promise;
 
 			try {
 				yield write_frame (frame, cancellable);
 			} catch (GLib.Error e) {
 				pending_requests.unset (request_id);
-				throw new Error.TRANSPORT ("%s", e.message);
+				throw new Efni.Error.TRANSPORT ("%s", e.message);
 			}
 
 			var timeout_source = new TimeoutSource (COMMAND_TIMEOUT_MS);
 			timeout_source.set_callback (() => {
-				Promise<Variant>? p;
+				Efni.Promise<Variant>? p;
 				if (pending_requests.unset (request_id, out p))
-					p.reject (new Error.TIMED_OUT ("The %s command timed out", command.to_nick ()));
+					p.reject (new Efni.Error.TIMED_OUT ("The %s command timed out", command.to_nick ()));
 				return Source.REMOVE;
 			});
 			timeout_source.attach (MainContext.get_thread_default ());
@@ -1074,29 +1076,29 @@ namespace Frida.Barebone {
 			Variant response = null;
 			try {
 				response = yield promise.future.wait_async (cancellable);
-			} catch (Error e) {
-				if (!(e is Error.TIMED_OUT))
+			} catch (Efni.Error e) {
+				if (!(e is Efni.Error.TIMED_OUT))
 					throw e;
 				string? fault = yield describe_agent_fault (cancellable);
 				if (fault == null)
 					throw e;
-				throw new Error.TIMED_OUT ("%s; %s", e.message, fault);
+				throw new Efni.Error.TIMED_OUT ("%s; %s", e.message, fault);
 			} finally {
 				timeout_source.destroy ();
 			}
 
 			if (!response.check_format_string ("(bv)", false))
-				throw new Error.PROTOCOL ("Malformed reply from agent");
+				throw new Efni.Error.PROTOCOL ("Malformed reply from agent");
 			bool succeeded;
 			Variant detail;
 			response.get ("(bv)", out succeeded, out detail);
 			if (!succeeded)
-				throw new Error.NOT_SUPPORTED ("%s", detail.get_string ());
+				throw new Efni.Error.NOT_SUPPORTED ("%s", detail.get_string ());
 
 			return detail;
 		}
 
-		private async string? describe_agent_fault (Cancellable? cancellable) throws Error, IOError {
+		private async string? describe_agent_fault (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (fault_record == 0)
 				return null;
 
@@ -1143,7 +1145,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void process_incoming_messages () {
-			reading = new Promise<bool> ();
+			reading = new Efni.Promise<bool> ();
 			try {
 				while (true) {
 					size_t header_size = 4;
@@ -1171,7 +1173,7 @@ namespace Frida.Barebone {
 					if (byte_order != ByteOrder.HOST)
 						message = message.byteswap ();
 					if (!message.check_format_string ("(yquv)", false))
-						throw new Error.PROTOCOL ("Invalid message format");
+						throw new Efni.Error.PROTOCOL ("Invalid message format");
 
 					uint8 command_code;
 					uint16 request_id;
@@ -1184,7 +1186,7 @@ namespace Frida.Barebone {
 							listening.resolve (true);
 					} else if (command_code == Command.SPAWN_ADDED) {
 						if (!payload.check_format_string ("(us)", false))
-							throw new Error.PROTOCOL ("Invalid spawn added payload format");
+							throw new Efni.Error.PROTOCOL ("Invalid spawn added payload format");
 
 						uint32 pid;
 						unowned string command_line;
@@ -1193,7 +1195,7 @@ namespace Frida.Barebone {
 						spawn_added (pid, command_line, destination);
 					} else if (command_code == Command.SCRIPT_MESSAGE) {
 						if (!payload.check_format_string ("(usay)", false))
-							throw new Error.PROTOCOL ("Invalid script message payload format");
+							throw new Efni.Error.PROTOCOL ("Invalid script message payload format");
 
 						uint32 script_handle;
 						unowned string json;
@@ -1218,7 +1220,7 @@ namespace Frida.Barebone {
 								result = yield protect_memory (payload, io_cancellable);
 							else
 								result = yield patch_code (payload, io_cancellable);
-						} catch (Error e) {
+						} catch (Efni.Error e) {
 							result = (command_code == Command.REMAP_WRITABLE_PAGES)
 								? new Variant.uint64 (0)
 								: new Variant.boolean (false);
@@ -1228,7 +1230,7 @@ namespace Frida.Barebone {
 
 						yield send_reply (request_id, result);
 					} else if (command_code == Command.REPLY) {
-						Promise<Variant>? promise;
+						Efni.Promise<Variant>? promise;
 						if (pending_requests.unset (request_id, out promise))
 							promise.resolve (payload);
 					}
@@ -1239,9 +1241,9 @@ namespace Frida.Barebone {
 			reading.resolve (true);
 		}
 
-		private Promise<bool>? reading;
+		private Efni.Promise<bool>? reading;
 
-		private async void fill_until_n_bytes_available (size_t minimum) throws Error, IOError {
+		private async void fill_until_n_bytes_available (size_t minimum) throws Efni.Error, IOError {
 			size_t available = input.get_available ();
 			while (available < minimum) {
 				if (input.get_buffer_size () < minimum)
@@ -1252,17 +1254,17 @@ namespace Frida.Barebone {
 					n = yield input.fill_async ((ssize_t) (input.get_buffer_size () - available), Priority.DEFAULT,
 						io_cancellable);
 				} catch (GLib.Error e) {
-					throw new Error.TRANSPORT ("Connection closed");
+					throw new Efni.Error.TRANSPORT ("Connection closed");
 				}
 
 				if (n == 0)
-					throw new Error.TRANSPORT ("Connection closed");
+					throw new Efni.Error.TRANSPORT ("Connection closed");
 
 				available += n;
 			}
 		}
 
-		private async Variant remap_writable_pages (Variant payload, Cancellable? cancellable) throws Error, IOError {
+		private async Variant remap_writable_pages (Variant payload, Cancellable? cancellable) throws Efni.Error, IOError {
 			var physical_addresses = new Gee.ArrayList<uint64?> ();
 			for (size_t i = 0; i != payload.n_children (); i++) {
 				uint64 va = payload.get_child_value (i).get_uint64 ();
@@ -1274,7 +1276,7 @@ namespace Frida.Barebone {
 			return new Variant.uint64 (allocation.virtual_address);
 		}
 
-		private async Variant protect_memory (Variant payload, Cancellable? cancellable) throws Error, IOError {
+		private async Variant protect_memory (Variant payload, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 address;
 			uint64 size;
 			uint32 prot;
@@ -1289,7 +1291,7 @@ namespace Frida.Barebone {
 		// CTRR/KTRR locks kernel text read-only against the guest CPU, so the agent cannot patch it
 		// even through a writable alias. The physical-memory bridge writes the backing store directly,
 		// which the lock does not cover, letting us land hooks in kernel and kext text.
-		private async Variant patch_code (Variant payload, Cancellable? cancellable) throws Error, IOError {
+		private async Variant patch_code (Variant payload, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 va;
 			Variant bytes_value;
 			payload.get ("(t@ay)", out va, out bytes_value);
@@ -1319,7 +1321,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void write_frame (Bytes frame, Cancellable? cancellable) throws GLib.Error {
-			var ours = new Promise<bool> ();
+			var ours = new Efni.Promise<bool> ();
 			var theirs = write_turn;
 			write_turn = ours;
 
@@ -1340,7 +1342,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private Promise<bool>? write_turn;
+		private Efni.Promise<bool>? write_turn;
 
 		private Bytes frame_message (Command command, uint16 request_id, uint destination, Variant payload) {
 			var message = new Variant ("(yquv)", (uint8) command, request_id, destination, payload);
@@ -1380,7 +1382,7 @@ namespace Frida.Barebone {
 			READY = 131;
 
 			public string to_nick () {
-				return Marshal.enum_to_nick<Command> (this);
+				return Efni.Marshal.enum_to_nick<Command> (this);
 			}
 		}
 

@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	/**
@@ -20,24 +22,24 @@ namespace Frida.Barebone {
 		}
 
 		public static new async VzStubClient open (IOStream stream, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var client = new VzStubClient (stream);
 
 			try {
 				yield client.init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				Efni.throw_api_error (e);
 			}
 
 			return client;
 		}
 
-		protected override async void prepare_connection (Cancellable? cancellable) throws Error, IOError {
+		protected override async void prepare_connection (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield halt (cancellable, HALT_TIMEOUT_MSEC);
 			yield start_no_ack_mode (cancellable);
 		}
 
-		protected override async void detect_vendor_features (Cancellable? cancellable) throws Error, IOError {
+		protected override async void detect_vendor_features (Cancellable? cancellable) throws Efni.Error, IOError {
 			var vcont = yield query_simple ("vCont?", cancellable);
 			unowned string payload = vcont.payload;
 			if (payload.length > 0 && payload[0] != 'E')
@@ -48,7 +50,7 @@ namespace Frida.Barebone {
 				supported_features.add ("vf-phy-mem-mode");
 		}
 
-		protected override async void enable_extensions (Cancellable? cancellable) throws Error, IOError {
+		protected override async void enable_extensions (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield execute_simple ("QThreadSuffixSupported", cancellable);
 			supported_features.add ("thread-suffix");
 			yield execute_simple ("QListThreadsInStopReply", cancellable);
@@ -56,7 +58,7 @@ namespace Frida.Barebone {
 			yield discover_target (cancellable);
 		}
 
-		private async void discover_target (Cancellable? cancellable) throws Error, IOError {
+		private async void discover_target (Cancellable? cancellable) throws Efni.Error, IOError {
 			string info = yield query_property ("HostInfo", cancellable);
 			var host = GDB.Client.PropertyDictionary.parse (info);
 			arch = arch_from_cpu_type (GDB.Protocol.parse_uint (host.get_string ("cputype"), 10));
@@ -100,7 +102,7 @@ namespace Frida.Barebone {
 		}
 
 		public override async Bytes read_byte_array (uint64 address, size_t size, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var result = new uint8[size];
 
 			size_t offset = 0;
@@ -117,7 +119,7 @@ namespace Frida.Barebone {
 
 				Bytes chunk = response.payload_bytes;
 				if (chunk.get_size () != chunk_size) {
-					throw new Error.INVALID_ARGUMENT (
+					throw new Efni.Error.INVALID_ARGUMENT (
 						"Unable to read from 0x%" + uint64.FORMAT_MODIFIER + "x: invalid address", address);
 				}
 

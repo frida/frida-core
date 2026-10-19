@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class LinuxHelperProcess : Object, LinuxHelper {
 		public TemporaryDirectory tempdir {

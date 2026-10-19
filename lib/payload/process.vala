@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public extern void libc_shim_prepare_to_deinit ();
 #if DARWIN

@@ -414,6 +414,15 @@ json_glib_dep = dependency('json-glib-1.0', version: '>=1.8', default_options: [
   'tests=false',
   'nls=disabled',
 ])
+efni_dep = dependency('efni-1.0', default_options: ['default_library=static'])
+efni_libs = []
+if efni_dep.type_name() == 'internal'
+  efni_libs += subproject('efni').get_variable('efni')
+endif
+efni_vapidir = efni_dep.get_variable('vapidir', default_value: '')
+if efni_vapidir != ''
+  vala_flags += '--vapidir=' + efni_vapidir
+endif
 libsoup_dep = dependency('libsoup-3.0', default_options: [
   'default_library=static',
   'sqlite:default_library=static',
@@ -710,58 +719,21 @@ if host_os_family == 'windows' and cc.get_argument_syntax() != 'msvc'
   openssl_options += 'asm=disabled'
 endif
 openssl_dep = dependency('openssl',
-  required: have_fruity_backend or get_option('connectivity').enabled(),
+  required: get_option('connectivity').enabled(),
   modules: cc.get_argument_syntax() == 'msvc' ? ['OpenSSL::SSL'] : [],
   default_options: openssl_options,
 )
 
+idun_libs = []
 if have_fruity_backend
-  backend_deps_private += dependency('libnghttp2', default_options: ['default_library=static'])
-  backend_reqs_private += 'libnghttp2'
-
-  if host_os != 'macos'
-    backend_deps_private += dependency('libngtcp2', default_options: ['default_library=static'])
-    backend_reqs_private += 'libngtcp2'
-
-    ngtcp2_crypto_quictls_dep = dependency('libngtcp2_crypto_quictls', required: false, default_options: ['default_library=static'])
-    if ngtcp2_crypto_quictls_dep.found()
-      backend_deps_private += ngtcp2_crypto_quictls_dep
-      backend_reqs_private += 'libngtcp2_crypto_quictls'
-    else
-      backend_deps_private += dependency('libngtcp2_crypto_ossl', default_options: ['default_library=static'])
-      backend_reqs_private += 'libngtcp2_crypto_ossl'
-      vala_flags += '--define=HAVE_NGTCP2_CRYPTO_OSSL'
-    endif
-
-    libusb_options = [
-      'default_library=static',
-      'examples=disabled',
-      'tests=disabled',
-    ]
-    if have_frida_glib
-      libusb_dep = dependency('libusb-1.0', default_options: libusb_options)
-    else
-      subproject('libusb', default_options: libusb_options)
-      libusb_dep = dependency('libusb-1.0', default_options: libusb_options)
-    endif
-    backend_deps_private += libusb_dep
-    backend_reqs_private += 'libusb-1.0'
-
-    lwip_options = [
-      'default_library=static',
-      'ipv4=disabled',
-      'ipv6=enabled',
-      'dns=disabled',
-      'arp=disabled',
-      'ethernet=enabled',
-    ]
-    if optimize_for_prod
-      lwip_options += 'lwip_debug=disabled'
-    else
-      lwip_options += 'lwip_debug=enabled'
-    endif
-    backend_deps_private += dependency('lwip', default_options: lwip_options)
-    backend_reqs_private += 'lwip'
+  idun_dep = dependency('idun-1.0', default_options: ['default_library=static'])
+  backend_reqs_private += 'idun-1.0'
+  if idun_dep.type_name() == 'internal'
+    idun_libs += subproject('idun').get_variable('idun')
+  endif
+  idun_vapidir = idun_dep.get_variable('vapidir', default_value: '')
+  if idun_vapidir != ''
+    vala_flags += '--vapidir=' + idun_vapidir
   endif
 endif
 

@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class ChannelRegistry : Object {
 		public signal void channel_closed (ChannelId id);

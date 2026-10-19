@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	internal sealed class KernelSession : Object {
 		public uint pid {

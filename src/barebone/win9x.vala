@@ -1,13 +1,15 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public static async Win9xLayout collect_win9x_layout (Machine machine, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		var modules = new Gee.ArrayList<ModuleInfo> ();
 		var symbols = new Gee.ArrayList<SymbolInfo> ();
 
 		var blocks = yield find_descriptor_blocks (machine, cancellable);
 		if (blocks.is_empty) {
-			throw new Error.NOT_SUPPORTED (
+			throw new Efni.Error.NOT_SUPPORTED (
 				"Unable to find any VxD; the guest is probably still booting, as none of its " +
 				"memory is paged in yet");
 		}
@@ -86,7 +88,7 @@ namespace Frida.Barebone {
 	// therefore be indistinguishable from noise when sweeping. Sweep only far enough to
 	// find VMM itself, then follow it.
 	private static async Gee.List<DeviceDescriptorBlock> find_descriptor_blocks (Machine machine,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		var blocks = new Gee.ArrayList<DeviceDescriptorBlock> ();
 
 		uint64 address = yield find_kernel_descriptor_block (machine, cancellable);
@@ -97,7 +99,7 @@ namespace Frida.Barebone {
 			Bytes raw;
 			try {
 				raw = yield machine.debugger.read_byte_array (address, DDB_SIZE, cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				break;
 			}
 
@@ -115,7 +117,7 @@ namespace Frida.Barebone {
 
 	// VMM is the first VxD in the system arena, thus examine only the start of it.
 	private static async uint64 find_kernel_descriptor_block (Machine machine, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		foreach (Gum.MemoryRange run in yield find_resident_runs (machine, SYSTEM_ARENA_BASE,
 				VMM_SEARCH_SPAN, cancellable)) {
 			foreach (DeviceDescriptorBlock candidate in yield harvest_candidates (machine, run.base_address,
@@ -131,14 +133,14 @@ namespace Frida.Barebone {
 	// Windows maps the page tables into all contexts, thus one read gives the present pages. The
 	// machine would walk the full address space, which costs more than the sweep.
 	private static async Gee.List<Gum.MemoryRange?> find_resident_runs (Machine machine, uint64 base_va,
-			uint64 span, Cancellable? cancellable) throws Error, IOError {
+			uint64 span, Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		Buffer entries;
 		try {
 			entries = debugger.make_buffer (yield debugger.read_byte_array (
 				PAGE_TABLES_BASE + (base_va >> 22) * PAGE_SIZE, PAGE_SIZE, cancellable));
-		} catch (Error e) {
+		} catch (Efni.Error e) {
 			return yield collect_runs_from_machine (machine, base_va, span, cancellable);
 		}
 
@@ -165,7 +167,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async Gee.List<Gum.MemoryRange?> collect_runs_from_machine (Machine machine, uint64 base_va,
-			uint64 span, Cancellable? cancellable) throws Error, IOError {
+			uint64 span, Cancellable? cancellable) throws Efni.Error, IOError {
 		uint64 limit = base_va + span;
 
 		var runs = new Gee.ArrayList<Gum.MemoryRange?> ();
@@ -179,7 +181,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async Gee.List<DeviceDescriptorBlock> harvest_candidates (Machine machine, uint64 base_va,
-			uint64 size, Cancellable? cancellable) throws Error, IOError {
+			uint64 size, Cancellable? cancellable) throws Efni.Error, IOError {
 		var candidates = new Gee.ArrayList<DeviceDescriptorBlock> ();
 
 		Debugger debugger = machine.debugger;
@@ -192,7 +194,7 @@ namespace Frida.Barebone {
 			Bytes chunk;
 			try {
 				chunk = yield debugger.read_byte_array (chunk_start, readable_size, cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				continue;
 			}
 
@@ -211,7 +213,7 @@ namespace Frida.Barebone {
 	// the descriptor block is the VxD proper. Statically linked VxDs live inside VMM32.VXD and
 	// have no image of their own to ask about.
 	private static async Gee.List<LoaderImage> read_loader_images (Machine machine,
-			Gee.List<DeviceDescriptorBlock> blocks, Cancellable? cancellable) throws Error, IOError {
+			Gee.List<DeviceDescriptorBlock> blocks, Cancellable? cancellable) throws Efni.Error, IOError {
 		var images = new Gee.ArrayList<LoaderImage> ();
 
 		DeviceDescriptorBlock? loader = null;
@@ -283,7 +285,7 @@ namespace Frida.Barebone {
 	// Two things only KERNEL32 knows: the value it XORs process ids with, and the table its
 	// modules are named through. Read both out of its own code rather than hardcoding them.
 	private static async void add_kernel32_symbols (Machine machine, Gee.List<SymbolInfo> symbols,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		uint64 kernel32 = yield find_kernel32 (machine, cancellable);
 		if (kernel32 == 0)
 			return;
@@ -311,7 +313,7 @@ namespace Frida.Barebone {
 	// GetCurrentProcessId() pushes the process database pointer and tail-calls a helper whose
 	// first instruction loads the obfuscator.
 	private static async uint64 find_process_id_obfuscator (Machine machine, uint64 kernel32,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		uint64 getter = yield find_export (machine, kernel32, "GetCurrentProcessId", cancellable);
@@ -333,7 +335,7 @@ namespace Frida.Barebone {
 	// GetModuleFileNameA() reaches the name through the module table, indexing it by the word
 	// at MODREF+0x10, which is the one instruction pair worth recognising.
 	private static async uint64 find_module_table (Machine machine, uint64 kernel32, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		uint64 thunk = yield find_export (machine, kernel32, "GetModuleFileNameA", cancellable);
@@ -367,7 +369,7 @@ namespace Frida.Barebone {
 		return 0;
 	}
 
-	private static async uint64 find_kernel32 (Machine machine, Cancellable? cancellable) throws Error, IOError {
+	private static async uint64 find_kernel32 (Machine machine, Cancellable? cancellable) throws Efni.Error, IOError {
 		for (uint64 candidate = KERNEL32_SEARCH_BASE; candidate < KERNEL32_SEARCH_LIMIT;
 				candidate += IMAGE_ALIGNMENT) {
 			if ((yield find_export (machine, candidate, "GetCurrentProcessId", cancellable)) != 0)
@@ -378,7 +380,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async Gee.List<uint64?> read_service_table (Machine machine, DeviceDescriptorBlock ddb,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		Bytes raw = yield machine.debugger.read_byte_array (ddb.service_table, ddb.service_count * 4, cancellable);
 		Buffer buf = machine.debugger.make_buffer (raw);
 
@@ -437,11 +439,11 @@ namespace Frida.Barebone {
 			};
 		}
 
-		public async bool is_credible (Machine machine, Cancellable? cancellable) throws Error, IOError {
+		public async bool is_credible (Machine machine, Cancellable? cancellable) throws Efni.Error, IOError {
 			Bytes first_entry;
 			try {
 				first_entry = yield machine.debugger.read_byte_array (service_table, 4, cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				return false;
 			}
 			return is_arena_address (machine.debugger.make_buffer (first_entry).read_uint32 (0));

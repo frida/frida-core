@@ -97,6 +97,7 @@ namespace Frida {
 				if (DarwinHelperBackend.get_suspend_count (task) > original_count)
 					DarwinHelperBackend.resume_process_fast (task);
 			} catch (Error e) {
+			} catch (Efni.Error e) {
 			}
 		}
 

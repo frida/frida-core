@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class Callback : Object {
@@ -10,7 +12,7 @@ namespace Frida.Barebone {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		public async Callback (uint64 code, CallbackHandler handler, Machine machine, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			this.code = code;
 			this.handler = handler;
 			this.machine = machine;
@@ -26,7 +28,7 @@ namespace Frida.Barebone {
 			debugger.notify["state"].disconnect (on_gdb_state_changed);
 		}
 
-		public async void destroy (Cancellable? cancellable) throws Error, IOError {
+		public async void destroy (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield breakpoint.remove (cancellable);
 		}
 
@@ -44,7 +46,7 @@ namespace Frida.Barebone {
 			handle_invocation.begin (exception.thread);
 		}
 
-		private async void handle_invocation (DebuggerThread thread) throws Error, IOError {
+		private async void handle_invocation (DebuggerThread thread) throws Efni.Error, IOError {
 			uint arity = handler.arity;
 
 			var frame = yield machine.load_call_frame (thread, arity, io_cancellable);
@@ -69,6 +71,6 @@ namespace Frida.Barebone {
 		}
 
 		public abstract async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
-			throws Error, IOError;
+			throws Efni.Error, IOError;
 	}
 }

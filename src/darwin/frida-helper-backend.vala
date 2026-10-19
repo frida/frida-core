@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public class DarwinHelperBackend : Object, DarwinHelper {
 		public signal void idle ();
@@ -326,6 +328,7 @@ namespace Frida {
 				task = task_for_pid (pid);
 				resume_process (task);
 			} catch (Error e) {
+			} catch (Efni.Error e) {
 			} finally {
 				if (task != 0)
 					deallocate_port (task);
@@ -338,6 +341,7 @@ namespace Frida {
 				task = task_for_pid (pid);
 				resume_process_fast (task);
 			} catch (Error e) {
+			} catch (Efni.Error e) {
 			} finally {
 				if (task != 0)
 					deallocate_port (task);
@@ -603,6 +607,8 @@ namespace Frida {
 				policy_softener.retain (pid);
 			} catch (Error e) {
 				assert_not_reached ();
+			} catch (Efni.Error e) {
+				assert_not_reached ();
 			}
 
 			if (mapped_module != null)
@@ -734,6 +740,8 @@ namespace Frida {
 				try {
 					yield disable_spawn_gating (cancellable);
 				} catch (Error e) {
+					assert_not_reached ();
+				} catch (Efni.Error e) {
 					assert_not_reached ();
 				}
 			}

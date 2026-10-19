@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId script_id, string json, Bytes? data);

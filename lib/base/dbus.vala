@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	// We need to tease out GDBus' private MainContext as libnice needs to know the MainContext up front :(
 	public async MainContext get_dbus_context () {

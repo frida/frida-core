@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class PortalClient : Object, AgentSessionProvider {
 		public signal void resume ();

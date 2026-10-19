@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class SocketHostSessionBackend : Object, HostSessionBackend {
 		private SocketHostSessionProvider provider;

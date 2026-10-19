@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaAdb", gir_version = "1.0")]
 namespace Frida {
 	public sealed class AdbDeviceTracker : Object {

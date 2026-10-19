@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	/**
 	 * An XNU kernelcache, held as it arrived so a barebone session takes it apart itself.
@@ -27,7 +29,11 @@ namespace Frida {
 		 * @param path the kernelcache's location
 		 */
 		public static XnuKernelcache open (string path) throws Error {
-			return from_blob (FS.read_all_bytes_sync (File.new_for_path (path)));
+			try {
+				return from_blob (FS.read_all_bytes_sync (File.new_for_path (path)));
+			} catch (Efni.Error e) {
+				throw error_from_efni (e);
+			}
 		}
 	}
 }

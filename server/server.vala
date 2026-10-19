@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida.Server {
 	private static Application application;
 

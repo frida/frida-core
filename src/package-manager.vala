@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	/**
 	 * Searches for and installs npm packages of Frida agents, for use with the
@@ -123,56 +125,60 @@ namespace Frida {
 		 */
 		public async PackageInstallResult install (PackageInstallOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
-			install_progress (INITIALIZING, 0.0);
+			try {
+				install_progress (INITIALIZING, 0.0);
 
-			var opts = (options != null) ? options : new PackageInstallOptions ();
+				var opts = (options != null) ? options : new PackageInstallOptions ();
 
-			File project_root = compute_project_root (opts);
-			File pkg_json_file = project_root.get_child ("package.json");
-			File lock_file = project_root.get_child ("package-lock.json");
+				File project_root = compute_project_root (opts);
+				File pkg_json_file = project_root.get_child ("package.json");
+				File lock_file = project_root.get_child ("package-lock.json");
 
-			var cache = new PackageDataCache (this, cancellable);
+				var cache = new PackageDataCache (this, cancellable);
 
-			var specs = parse_mutation_specs (ADD, opts.specs, opts.role);
-			var manifest = yield read_manifest (pkg_json_file, cancellable);
-			bool dirty = yield apply_specs_to_manifest (specs, manifest, cache, cancellable);
+				var specs = parse_mutation_specs (ADD, opts.specs, opts.role);
+				var manifest = yield read_manifest (pkg_json_file, cancellable);
+				bool dirty = yield apply_specs_to_manifest (specs, manifest, cache, cancellable);
 
-			install_progress (PREPARING_DEPENDENCIES, 0.05);
+				install_progress (PREPARING_DEPENDENCIES, 0.05);
 
-			Gee.Map<string, PackageLockPackageInfo>? locked = yield read_lockfile (lock_file, cancellable);
+				Gee.Map<string, PackageLockPackageInfo>? locked = yield read_lockfile (lock_file, cancellable);
 
-			bool lock_clean = !dirty && locked != null && deps_match (manifest, locked[""].dependencies);
+				bool lock_clean = !dirty && locked != null && deps_match (manifest, locked[""].dependencies);
 
-			var installed_packages = new Gee.ArrayList<Package> ();
+				var installed_packages = new Gee.ArrayList<Package> ();
 
-			if (lock_clean) {
-				var root = lock_to_graph (manifest, locked);
-				yield reify_graph (root, project_root, opts.omits, installed_packages, 0.05, 0.98, cancellable);
-			} else {
-				PackageNode? base_graph = null;
-				if (locked != null)
-					base_graph = lock_to_graph (manifest, locked);
+				if (lock_clean) {
+					var root = lock_to_graph (manifest, locked);
+					yield reify_graph (root, project_root, opts.omits, installed_packages, 0.05, 0.98, cancellable);
+				} else {
+					PackageNode? base_graph = null;
+					if (locked != null)
+						base_graph = lock_to_graph (manifest, locked);
 
-				var tree = yield build_tree (manifest, base_graph, cache, cancellable);
+					var tree = yield build_tree (manifest, base_graph, cache, cancellable);
 
-				foreach (var orphan in tree.orphans)
-					yield FS.rmtree_async (install_dir_for_dependency (orphan, project_root), cancellable);
+					foreach (var orphan in tree.orphans)
+						yield FS.rmtree_async (install_dir_for_dependency (orphan, project_root), cancellable);
 
-				yield reify_graph (tree.root, project_root, opts.omits, installed_packages, 0.85, 0.98, cancellable);
+					yield reify_graph (tree.root, project_root, opts.omits, installed_packages, 0.85, 0.98, cancellable);
 
-				yield write_manifest (manifest, pkg_json_file, cancellable);
-				yield write_lockfile (manifest, tree.root, lock_file, cancellable);
+					yield write_manifest (manifest, pkg_json_file, cancellable);
+					yield write_lockfile (manifest, tree.root, lock_file, cancellable);
+				}
+
+				install_progress (COMPLETE, 1.0);
+
+				installed_packages.sort ((a, b) => strcmp (a.name, b.name));
+
+				return new PackageInstallResult (new PackageList (installed_packages));
+			} catch (Efni.Error e) {
+				throw_api_error (e);
 			}
-
-			install_progress (COMPLETE, 1.0);
-
-			installed_packages.sort ((a, b) => strcmp (a.name, b.name));
-
-			return new PackageInstallResult (new PackageList (installed_packages));
 		}
 
 		private async BuildTreeResult build_tree (Manifest manifest, PackageNode? base_node, PackageDataCache cache,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			if (base_node == null) {
 				var root = yield build_tree_from_scratch (manifest, cache, cancellable);
 				return new BuildTreeResult () {
@@ -207,7 +213,7 @@ namespace Frida {
 		}
 
 		private async PackageNode build_tree_from_scratch (Manifest manifest, PackageDataCache cache, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Error, Efni.Error, IOError {
 			var root = yield build_ideal_graph (manifest, cache, 0.05, 0.75, cancellable);
 
 			install_progress (RESOLVING_PACKAGE, 0.80);
@@ -218,7 +224,7 @@ namespace Frida {
 		}
 
 		private async PackageNode build_ideal_graph (Manifest manifest, PackageDataCache cache, double start_fraction,
-				double end_fraction, Cancellable? cancellable) throws Error, IOError {
+				double end_fraction, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			var root = new PackageNode (manifest.name, manifest.version, manifest.dependencies);
 
 			var q = new Gee.ArrayQueue<DepQueueItem> ();
@@ -263,7 +269,7 @@ namespace Frida {
 		}
 
 		private static async PackageNode build_ideal_subtree (string name, string spec, PackageDataCache cache,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			ResolvedPackageData pdata = yield cache.fetch (name, new PackageVersion (spec)).wait_async (cancellable);
 
 			var root = new PackageNode (pdata.name, pdata.effective_version, pdata.dependencies);
@@ -408,7 +414,7 @@ namespace Frida {
 		}
 
 		private async void patch_holes (Gee.List<PackageNode> anchors, Manifest manifest, PackageDataCache cache,
-				double start_fraction, double end_fraction, Cancellable? cancellable) throws Error, IOError {
+				double start_fraction, double end_fraction, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			var chunks = new Gee.ArrayList<HolePatchChunk> ();
 			uint total_to_patch = 0;
 			foreach (PackageNode anchor in anchors) {
@@ -748,7 +754,7 @@ namespace Frida {
 		}
 
 		private static async bool apply_specs_to_manifest (Gee.List<MutationSpec> specs, Manifest manifest, PackageDataCache cache,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			bool dirty = false;
 			PackageDependencies deps = manifest.dependencies;
 
@@ -785,7 +791,7 @@ namespace Frida {
 			return dirty;
 		}
 
-		private static async Manifest read_manifest (File location, Cancellable? cancellable) throws Error, IOError {
+		private static async Manifest read_manifest (File location, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			var m = new Manifest ();
 
 			if (location.query_exists (cancellable)) {
@@ -819,7 +825,7 @@ namespace Frida {
 		}
 
 		private static async void write_manifest (Manifest manifest, File location, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Error, Efni.Error, IOError {
 			Json.Node root = manifest.root;
 			Json.Object obj = root.get_object ();
 
@@ -870,7 +876,7 @@ namespace Frida {
 		}
 
 		private static async Gee.Map<string, PackageLockPackageInfo>? read_lockfile (File lock_file, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Error, Efni.Error, IOError {
 			if (!lock_file.query_exists (cancellable))
 				return null;
 
@@ -963,7 +969,7 @@ namespace Frida {
 		}
 
 		private async void write_lockfile (Manifest manifest, PackageNode root, File lock_file, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Error, Efni.Error, IOError {
 			var b = new Json.Builder ();
 			b.begin_object ();
 			string? name = manifest.name;
@@ -1240,7 +1246,7 @@ namespace Frida {
 		}
 
 		private static async Json.Reader? try_open_already_installed_manifest (PackageNode node, File dir, Cancellable? cancellable)
-				throws IOError {
+				throws Efni.Error, IOError {
 			try {
 				Json.Reader r = yield load_json (dir.get_child ("package.json"), cancellable);
 
@@ -2190,7 +2196,7 @@ namespace Frida {
 		}
 
 		private async void download_and_unpack (string name, string version, string tarball_url, File dest_root, string? integrity,
-				string? shasum, Cancellable? cancellable) throws Error, IOError {
+				string? shasum, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			string progress_details = "%s@%s".printf (name, version);
 			install_progress (DOWNLOADING_PACKAGE, 0.0, progress_details);
 
@@ -2707,7 +2713,7 @@ namespace Frida {
 		return string.joinv ("\n", modified_lines.to_array ()) + "\n";
 	}
 
-	private async Json.Reader load_json (File f, Cancellable? cancellable) throws Error, IOError {
+	private async Json.Reader load_json (File f, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 		Bytes b = yield FS.read_all_bytes (f, cancellable);
 		return parse_json (b);
 	}
@@ -3246,7 +3252,7 @@ namespace Frida {
 			this.root = root;
 		}
 
-		public async void feed (uint8[] data, Cancellable? cancellable) throws Error, IOError {
+		public async void feed (uint8[] data, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			int io_priority = Priority.DEFAULT;
 
 			size_t off = 0;

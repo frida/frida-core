@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	private sealed class ProcMemInjectSession : Object {
 		public uint pid {

@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class QnxHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {

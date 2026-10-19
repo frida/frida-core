@@ -2,6 +2,8 @@
 
 #include "frida-tvos.h"
 
+#include <efni.h>
+
 #include <capstone.h>
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
@@ -491,7 +493,7 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
 
     fcntl (fd, F_SETFD, FD_CLOEXEC);
     setsockopt (fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof (no_sigpipe));
-    frida_unix_socket_tune_buffer_sizes (fd);
+    efni_unix_socket_tune_buffer_sizes (fd);
   }
 
   status = fileport_makeport (sockets[0], &local_wrapper);

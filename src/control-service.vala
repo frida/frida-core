@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	/**
 	 * Hosts a Frida control endpoint that frida-server-style clients can connect

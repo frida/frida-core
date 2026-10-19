@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public int main (string[] args) {
 		Posix.setsid ();

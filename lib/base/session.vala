@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	[DBus (name = "re.frida.HostSession17")]
 	public interface HostSession : Object {
@@ -1281,6 +1283,9 @@ namespace Frida {
 		if (e is Frida.Error)
 			throw (Frida.Error) e;
 
+		if (e is Efni.Error)
+			throw error_from_efni ((Efni.Error) e);
+
 		if (e is IOError.CANCELLED)
 			throw (IOError) e;
 
@@ -1294,6 +1299,9 @@ namespace Frida {
 		if (e is Frida.Error)
 			throw (Frida.Error) e;
 
+		if (e is Efni.Error)
+			throw error_from_efni ((Efni.Error) e);
+
 		if (e is IOError.CANCELLED)
 			throw (IOError) e;
 
@@ -1304,6 +1312,41 @@ namespace Frida {
 		}
 
 		throw new Frida.Error.TRANSPORT ("%s", e.message);
+	}
+
+	namespace Marshal {
+		public T enum_from_nick<T> (string nick) throws Error {
+			try {
+				return Efni.Marshal.enum_from_nick<T> (nick);
+			} catch (Efni.Error e) {
+				throw error_from_efni (e);
+			}
+		}
+
+		public string enum_to_nick<T> (int val) {
+			return Efni.Marshal.enum_to_nick<T> (val);
+		}
+	}
+
+	public static Frida.Error error_from_efni (Efni.Error e) {
+		unowned string m = e.message;
+		if (e is Efni.Error.SERVER_NOT_RUNNING)
+			return new Frida.Error.SERVER_NOT_RUNNING ("%s", m);
+		if (e is Efni.Error.INVALID_ARGUMENT)
+			return new Frida.Error.INVALID_ARGUMENT ("%s", m);
+		if (e is Efni.Error.INVALID_OPERATION)
+			return new Frida.Error.INVALID_OPERATION ("%s", m);
+		if (e is Efni.Error.PERMISSION_DENIED)
+			return new Frida.Error.PERMISSION_DENIED ("%s", m);
+		if (e is Efni.Error.ADDRESS_IN_USE)
+			return new Frida.Error.ADDRESS_IN_USE ("%s", m);
+		if (e is Efni.Error.TIMED_OUT)
+			return new Frida.Error.TIMED_OUT ("%s", m);
+		if (e is Efni.Error.NOT_SUPPORTED)
+			return new Frida.Error.NOT_SUPPORTED ("%s", m);
+		if (e is Efni.Error.PROTOCOL)
+			return new Frida.Error.PROTOCOL ("%s", m);
+		return new Frida.Error.TRANSPORT ("%s", m);
 	}
 
 	public struct HostApplicationInfo {
@@ -2766,56 +2809,6 @@ namespace Frida {
 
 		public static string for_service_session (ServiceSessionId id) {
 			return SERVICE + "/" + id.handle;
-		}
-	}
-
-	namespace Marshal {
-		public static T enum_from_nick<T> (string nick) throws Error {
-			var klass = (EnumClass) typeof (T).class_ref ();
-			var v = klass.get_value_by_nick (nick);
-			if (v == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid %s", klass.get_type ().name ());
-			return (T) v.value;
-		}
-
-		public static string enum_to_nick<T> (int val) {
-			var klass = (EnumClass) typeof (T).class_ref ();
-			unowned EnumValue? v = klass.get_value (val);
-			if (v == null)
-				return "unknown-0x%x".printf (val);
-			return v.value_nick;
-		}
-	}
-
-	namespace Numeric {
-		public uint int64_hash (int64? val) {
-			uint64 v = (uint64) val.abs ();
-			return (uint) ((v >> 32) ^ (v & 0xffffffffU));
-		}
-
-		public bool int64_equal (int64? val_a, int64? val_b) {
-			int64 a = val_a;
-			int64 b = val_b;
-			return a == b;
-		}
-
-		public uint uint64_hash (uint64? val) {
-			uint64 v = val;
-			return (uint) ((v >> 32) ^ (v & 0xffffffffU));
-		}
-
-		public bool uint64_equal (uint64? val_a, uint64? val_b) {
-			uint64 a = val_a;
-			uint64 b = val_b;
-			return a == b;
-		}
-
-		public uint bytes_hash (Bytes b) {
-			return b.hash ();
-		}
-
-		public static bool bytes_equal (Bytes a, Bytes b) {
-			return a.compare (b) == 0;
 		}
 	}
 }

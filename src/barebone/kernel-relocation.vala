@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	/**
@@ -34,7 +36,7 @@ namespace Frida.Barebone {
 		private const uint32 LC_FILESET_ENTRY = 0x80000035U;
 
 		public static async KernelRelocation compute (Machine machine, Bytes kernelcache_blob,
-				uint64 loaded_kext_summaries, Cancellable? cancellable) throws Error, IOError {
+				uint64 loaded_kext_summaries, Cancellable? cancellable) throws Efni.Error, IOError {
 			var debugger = machine.debugger;
 			Buffer image = debugger.make_buffer (kernelcache_blob);
 			Gee.List<FilesetEntry> static_entries = parse_fileset_entries (image);
@@ -79,16 +81,16 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private static FilesetEntry find_entry (Gee.List<FilesetEntry> entries, string name) throws Error {
+		private static FilesetEntry find_entry (Gee.List<FilesetEntry> entries, string name) throws Efni.Error {
 			foreach (var entry in entries) {
 				if (entry.name == name)
 					return entry;
 			}
-			throw new Error.NOT_SUPPORTED ("Kernelcache is missing the %s fileset entry", name);
+			throw new Efni.Error.NOT_SUPPORTED ("Kernelcache is missing the %s fileset entry", name);
 		}
 
 		private static async void add_fileset_entry (KernelRelocation reloc, Debugger debugger, Buffer image,
-				FilesetEntry entry, uint64 runtime_header, Cancellable? cancellable) throws Error, IOError {
+				FilesetEntry entry, uint64 runtime_header, Cancellable? cancellable) throws Efni.Error, IOError {
 			Buffer runtime_image = yield read_mach_header (debugger, runtime_header, cancellable);
 			var static_segments = parse_segments (image, (size_t) entry.fileoff);
 			var runtime_segments = parse_segments (runtime_image, 0);
@@ -111,7 +113,7 @@ namespace Frida.Barebone {
 		 * name -> runtime-header map from which to translate that kext's independently scattered segments.
 		 */
 		private static async Gee.Map<string, uint64?> read_loaded_kext_headers (Debugger debugger,
-				KernelRelocation reloc, uint64 loaded_kext_summaries, Cancellable? cancellable) throws Error, IOError {
+				KernelRelocation reloc, uint64 loaded_kext_summaries, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 list = (yield debugger.read_buffer (reloc.translate (loaded_kext_summaries), 8, cancellable))
 				.read_uint64 (0);
 			uint32 count = (yield debugger.read_buffer (list, 16, cancellable)).read_uint32 (8);
@@ -125,21 +127,21 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		public uint64 translate (uint64 static_address) throws Error {
+		public uint64 translate (uint64 static_address) throws Efni.Error {
 			foreach (var e in entries) {
 				if (static_address >= e.static_base && static_address < e.static_base + e.size)
 					return e.runtime_base + (static_address - e.static_base);
 			}
-			throw new Error.INVALID_ARGUMENT ("Address 0x%" + uint64.FORMAT_MODIFIER + "x is outside the kernelcache",
+			throw new Efni.Error.INVALID_ARGUMENT ("Address 0x%" + uint64.FORMAT_MODIFIER + "x is outside the kernelcache",
 				static_address);
 		}
 
-		public uint32 runtime_offset (uint64 static_address) throws Error {
+		public uint32 runtime_offset (uint64 static_address) throws Efni.Error {
 			return (uint32) (translate (static_address) - reference_base);
 		}
 
 		private static async Buffer read_mach_header (Debugger debugger, uint64 address, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			Buffer head = yield debugger.read_buffer (address, 32, cancellable);
 			return yield debugger.read_buffer (address, 32 + head.read_uint32 (20), cancellable);
 		}
@@ -151,7 +153,7 @@ namespace Frida.Barebone {
 		 * only the first 16 bytes of each — every byte touched is guaranteed mapped.
 		 */
 		private static async uint64 find_collection_header (Machine machine, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var debugger = machine.debugger;
 
 			uint64 vbar = yield debugger.exception.thread.read_register ("vbar_el1", cancellable);
@@ -175,11 +177,11 @@ namespace Frida.Barebone {
 					return found;
 			}
 
-			throw new Error.NOT_SUPPORTED ("Unable to locate the runtime kernel collection header");
+			throw new Efni.Error.NOT_SUPPORTED ("Unable to locate the runtime kernel collection header");
 		}
 
 		private static async uint64 find_header_in (Machine machine, uint64 base_va, uint64 size,
-				size_t page_size, Cancellable? cancellable) throws Error, IOError {
+				size_t page_size, Cancellable? cancellable) throws Efni.Error, IOError {
 			var debugger = machine.debugger;
 
 			for (uint64 offset = 0; offset + 16 <= size; offset += CHUNK_SIZE) {
@@ -188,7 +190,7 @@ namespace Frida.Barebone {
 				Bytes taken;
 				try {
 					taken = yield machine.read_virtual (base_va + offset, chunk, cancellable);
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 					continue;
 				}
 
@@ -203,7 +205,7 @@ namespace Frida.Barebone {
 			return 0;
 		}
 
-		private static Gee.List<FilesetEntry> parse_fileset_entries (Buffer image) throws Error {
+		private static Gee.List<FilesetEntry> parse_fileset_entries (Buffer image) throws Efni.Error {
 			var result = new Gee.ArrayList<FilesetEntry> ();
 			uint32 ncmds = image.read_uint32 (16);
 			size_t off = 32;
@@ -222,7 +224,7 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		private static Gee.List<SegmentInfo> parse_segments (Buffer image, size_t header_offset) throws Error {
+		private static Gee.List<SegmentInfo> parse_segments (Buffer image, size_t header_offset) throws Efni.Error {
 			var result = new Gee.ArrayList<SegmentInfo> ();
 			uint32 ncmds = image.read_uint32 (header_offset + 16);
 			size_t off = header_offset + 32;
@@ -241,7 +243,7 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		private static string read_lc_string (Buffer image, size_t offset) throws Error {
+		private static string read_lc_string (Buffer image, size_t offset) throws Efni.Error {
 			var builder = new StringBuilder ();
 			for (size_t i = 0; ; i++) {
 				uint8 c = image.read_uint8 (offset + i);

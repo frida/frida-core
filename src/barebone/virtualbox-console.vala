@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class VirtualBoxConsole : Object {
@@ -20,13 +22,13 @@ namespace Frida.Barebone {
 		}
 
 		public static async VirtualBoxConsole open (string host, uint16 port, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			SocketConnection connection;
 			try {
 				var client = new SocketClient ();
 				connection = yield client.connect_async (NetworkAddress.parse (host, port), cancellable);
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to reach the VirtualBox debugger console: %s", e.message);
+				throw new Efni.Error.TRANSPORT ("Unable to reach the VirtualBox debugger console: %s", e.message);
 			}
 
 			Tcp.enable_nodelay (connection.socket);
@@ -37,7 +39,7 @@ namespace Frida.Barebone {
 			return console;
 		}
 
-		public async string run (string command, Cancellable? cancellable) throws Error, IOError {
+		public async string run (string command, Cancellable? cancellable) throws Efni.Error, IOError {
 			yield send (command, cancellable);
 			string reply = yield read_until (PROMPT, cancellable);
 
@@ -55,21 +57,21 @@ namespace Frida.Barebone {
 				string message = (message_end != -1)
 					? answer[message_start:message_end]
 					: answer[message_start:];
-				throw new Error.NOT_SUPPORTED ("%s", message.strip ());
+				throw new Efni.Error.NOT_SUPPORTED ("%s", message.strip ());
 			}
 
 			return answer;
 		}
 
-		private async void send (string line, Cancellable? cancellable) throws Error, IOError {
+		private async void send (string line, Cancellable? cancellable) throws Efni.Error, IOError {
 			try {
 				yield output.write_all_async ((line + "\n").data, Priority.DEFAULT, cancellable, null);
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to drive the VirtualBox debugger console: %s", e.message);
+				throw new Efni.Error.TRANSPORT ("Unable to drive the VirtualBox debugger console: %s", e.message);
 			}
 		}
 
-		private async string read_until (string needle, Cancellable? cancellable) throws Error, IOError {
+		private async string read_until (string needle, Cancellable? cancellable) throws Efni.Error, IOError {
 			var text = new StringBuilder (pending);
 			pending = "";
 
@@ -79,10 +81,10 @@ namespace Frida.Barebone {
 				try {
 					n = yield input.read_async (buffer, Priority.DEFAULT, cancellable);
 				} catch (GLib.Error e) {
-					throw new Error.TRANSPORT ("The VirtualBox debugger console went away: %s", e.message);
+					throw new Efni.Error.TRANSPORT ("The VirtualBox debugger console went away: %s", e.message);
 				}
 				if (n <= 0)
-					throw new Error.TRANSPORT ("The VirtualBox debugger console closed the connection");
+					throw new Efni.Error.TRANSPORT ("The VirtualBox debugger console closed the connection");
 
 				for (ssize_t i = 0; i != n; i++) {
 					uint8 b = buffer[i];
@@ -104,7 +106,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Bytes read_memory (uint64 address, size_t size, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint64 start = address & ~((uint64) WORD_SIZE - 1);
 			size_t span = (size_t) (address - start) + size;
 			size_t words = (span + WORD_SIZE - 1) / WORD_SIZE;
@@ -127,14 +129,14 @@ namespace Frida.Barebone {
 			}
 
 			if (raw.len < span)
-				throw new Error.INVALID_ARGUMENT ("Short read at %s", format_location (address));
+				throw new Efni.Error.INVALID_ARGUMENT ("Short read at %s", format_location (address));
 
 			size_t offset = (size_t) (address - start);
 			return new Bytes (raw.data[offset:offset + size]);
 		}
 
 		public async void write_memory (uint64 address, Bytes bytes, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (!physical_addressing && bytes.get_size () >= MIN_BYTES_PER_STAGED_WRITE)
 				yield write_memory_from_file (address, bytes, cancellable);
 			else
@@ -142,7 +144,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void write_memory_from_file (uint64 address, Bytes bytes, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			unowned uint8[] data = bytes.get_data ();
 			size_t whole = data.length - (data.length % STAGED_WRITE_CHUNK_SIZE);
 
@@ -156,13 +158,13 @@ namespace Frida.Barebone {
 		}
 
 		private async void write_memory_from_staging_file (uint64 address, uint8[] data,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			string path;
 			try {
 				FileUtils.close (FileUtils.open_tmp ("frida-barebone-XXXXXX", out path));
 				FileUtils.set_data (path, data);
 			} catch (FileError e) {
-				throw new Error.NOT_SUPPORTED ("Unable to stage a guest memory write: %s", e.message);
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to stage a guest memory write: %s", e.message);
 			}
 
 			try {
@@ -173,7 +175,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void write_memory_word_by_word (uint64 address, Bytes bytes, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			unowned uint8[] data = bytes.get_data ();
 
 			var batch = new StringBuilder ();
@@ -205,7 +207,7 @@ namespace Frida.Barebone {
 				yield run_many (batch.str, cancellable);
 		}
 
-		private async string run_many (string commands, Cancellable? cancellable) throws Error, IOError {
+		private async string run_many (string commands, Cancellable? cancellable) throws Efni.Error, IOError {
 			string marker = "frida-console-%u".printf (++sequence);
 			yield send (commands + marker, cancellable);
 			string answer = yield read_until (marker, cancellable);
@@ -215,7 +217,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Gee.List<Gee.Map<string, uint64?>> read_registers (Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var cpus = parse_registers (yield run ("r all", cancellable));
 			cpu_count = cpus.size;
 
@@ -223,7 +225,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Gee.List<Gee.Map<string, uint64?>> read_core_registers (Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (cpu_count == 0)
 				return yield read_registers (cancellable);
 
@@ -273,7 +275,7 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64? read_one_register (uint cpu, string name, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			string answer = yield run ("r cpu%u.%s".printf (cpu, name), cancellable);
 
 			string prefix = "cpu%u.%s=0x".printf (cpu, name);
@@ -290,20 +292,20 @@ namespace Frida.Barebone {
 		}
 
 		public async void write_register (uint cpu, string name, uint64 val, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			yield run ("r cpu%u.%s = %s".printf (cpu, name, format_address (val)), cancellable);
 		}
 
-		public async void resume (Cancellable? cancellable) throws Error, IOError {
+		public async void resume (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield run ("g", cancellable);
 		}
 
-		public async void halt (Cancellable? cancellable) throws Error, IOError {
+		public async void halt (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield run ("stop", cancellable);
 			yield settle (cancellable);
 		}
 
-		private async void settle (Cancellable? cancellable) throws Error, IOError {
+		private async void settle (Cancellable? cancellable) throws Efni.Error, IOError {
 			var buffer = new uint8[READ_CHUNK_SIZE];
 
 			while (true) {
@@ -339,7 +341,7 @@ namespace Frida.Barebone {
 			pending = "";
 		}
 
-		public async Gee.List<LoadedImage> read_loaded_images (Cancellable? cancellable) throws Error, IOError {
+		public async Gee.List<LoadedImage> read_loaded_images (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield run ("detect", cancellable);
 			string answer = yield run ("lm", cancellable);
 

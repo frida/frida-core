@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	internal class X86InlineHook : Object, InlineHook {
@@ -20,7 +22,7 @@ namespace Frida.Barebone {
 		private const size_t MAX_INSTRUCTION_SIZE = 15;
 
 		public static async InlineHook create (uint64 target, uint64 handler, Gum.CpuType cpu, Allocator allocator,
-				Debugger debugger, Cancellable? cancellable) throws Error, IOError {
+				Debugger debugger, Cancellable? cancellable) throws Efni.Error, IOError {
 			Allocation allocation = yield allocator.allocate (allocator.page_size, allocator.page_size, cancellable);
 			uint64 code_va = allocation.virtual_address;
 
@@ -90,7 +92,7 @@ namespace Frida.Barebone {
 			this.debugger = debugger;
 		}
 
-		public async void destroy (Cancellable? cancellable) throws Error, IOError {
+		public async void destroy (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (state == DESTROYED)
 				return;
 
@@ -106,16 +108,16 @@ namespace Frida.Barebone {
 				yield debugger.resume (cancellable);
 		}
 
-		public async void enable (Cancellable? cancellable) throws Error, IOError {
+		public async void enable (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (state == ENABLED)
 				return;
 			if (state != DISABLED)
-				throw new Error.INVALID_OPERATION ("Invalid operation");
+				throw new Efni.Error.INVALID_OPERATION ("Invalid operation");
 			yield debugger.write_byte_array (target, new_target_code, cancellable);
 			state = ENABLED;
 		}
 
-		public async void disable (Cancellable? cancellable) throws Error, IOError {
+		public async void disable (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (state != ENABLED)
 				return;
 			yield debugger.write_byte_array (target, old_target_code, cancellable);

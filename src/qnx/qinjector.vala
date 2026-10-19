@@ -13,6 +13,8 @@ namespace Frida {
 						_resource_store = new ResourceStore ();
 					} catch (Error e) {
 						assert_not_reached ();
+					} catch (Efni.Error e) {
+						assert_not_reached ();
 					}
 				}
 				return _resource_store;

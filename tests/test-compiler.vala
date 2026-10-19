@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida.CompilerTest {
 	public void add_tests () {
 		GLib.Test.add_func ("/Compiler/Performance/build-simple-agent", () => {

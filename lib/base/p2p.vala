@@ -1,3 +1,5 @@
+using Efni;
+
 #if HAVE_NICE
 namespace Frida {
 	namespace PeerConnection {

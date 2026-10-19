@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	/// Where a process keeps its number and its name. XNU ships no type information and its
@@ -10,7 +12,7 @@ namespace Frida.Barebone {
 
 	public static async XnuLayout? collect_xnu_layout (Machine machine, uint64 iterate_processes,
 			uint64 find_process, uint64 release_process, Allocator allocator,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		var processes = (iterate_processes != 0)
 			? yield each_process (machine, iterate_processes, allocator, cancellable)
 			: yield each_numbered_process (machine, find_process, release_process, cancellable);
@@ -81,7 +83,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async Gee.List<uint64?> each_process (Machine machine, uint64 iterate_processes,
-			Allocator allocator, Cancellable? cancellable) throws Error, IOError {
+			Allocator allocator, Cancellable? cancellable) throws Efni.Error, IOError {
 		var found = new Gee.ArrayList<uint64?> ();
 
 		var landing = yield allocator.allocate (LANDING_SIZE, LANDING_SIZE, cancellable);
@@ -105,7 +107,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async Gee.List<uint64?> each_numbered_process (Machine machine, uint64 find_process,
-			uint64 release_process, Cancellable? cancellable) throws Error, IOError {
+			uint64 release_process, Cancellable? cancellable) throws Efni.Error, IOError {
 		var found = new Gee.ArrayList<uint64?> ();
 		if (find_process == 0 || release_process == 0)
 			return found;
@@ -136,7 +138,7 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (found.size < ENOUGH_PROCESSES)
 				found.add (args[0]);
 

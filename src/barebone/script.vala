@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	private sealed class BareboneScript : Object {
 		public signal void message (string json, Bytes? data);
@@ -81,7 +83,7 @@ namespace Frida {
 		private const uint64 MAX_ASSET_SIZE = 100 * 1024 * 1024;
 		private const uint32 MAX_JS_BYTE_ARRAY_LENGTH = 100 * 1024 * 1024;
 
-		public static BareboneScript create (AgentScriptId id, string source, Barebone.Services services) throws Error {
+		public static BareboneScript create (AgentScriptId id, string source, Barebone.Services services) throws Efni.Error {
 			var script = new BareboneScript (id, services);
 
 			unowned string runtime_js = (string) Frida.Data.Barebone.get_script_runtime_js_blob ().data;
@@ -380,7 +382,7 @@ namespace Frida {
 			foreach (var listener in invocation_listeners.to_array ()) {
 				try {
 					yield interceptor.detach (listener, cancellable);
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 				}
 			}
 			invocation_listeners.clear ();
@@ -460,7 +462,7 @@ namespace Frida {
 			perform_pending_io ();
 		}
 
-		private void add_program (string source, string name) throws Error {
+		private void add_program (string source, string name) throws Efni.Error {
 			unowned string package_marker = "📦\n";
 			unowned string delimiter_marker = "\n✄\n";
 			unowned string alias_marker = "↻ ";
@@ -544,8 +546,8 @@ namespace Frida {
 		}
 
 		[NoReturn]
-		private static void throw_malformed_package () throws Error {
-			throw new Error.INVALID_ARGUMENT ("Malformed package");
+		private static void throw_malformed_package () throws Efni.Error {
+			throw new Efni.Error.INVALID_ARGUMENT ("Malformed package");
 		}
 
 		private string * normalize_module_name (QuickJS.Context ctx, string base_name, string name) {
@@ -600,10 +602,10 @@ namespace Frida {
 			try {
 				Asset? asset = assets[module_name];
 				if (asset == null)
-					throw new Error.INVALID_ARGUMENT ("Could not load module '%s'", module_name);
+					throw new Efni.Error.INVALID_ARGUMENT ("Could not load module '%s'", module_name);
 
 				val = compile_module (asset);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				throw_js_error (error_message_to_js (e.message));
 				return null;
 			}
@@ -614,7 +616,7 @@ namespace Frida {
 			return mod;
 		}
 
-		private QuickJS.Value compile_module (Asset asset) throws Error {
+		private QuickJS.Value compile_module (Asset asset) throws Efni.Error {
 			var val = ctx.eval (asset.data, asset.data.length, asset.name,
 				QuickJS.EvalType.MODULE |
 				QuickJS.EvalFlag.STRICT |
@@ -622,13 +624,13 @@ namespace Frida {
 
 			if (val.is_exception ()) {
 				JSError e = catch_js_error ();
-				throw new Error.INVALID_ARGUMENT ("Could not parse '%s' line %u: %s", asset.name, e.line, e.message);
+				throw new Efni.Error.INVALID_ARGUMENT ("Could not parse '%s' line %u: %s", asset.name, e.line, e.message);
 			}
 
 			return val;
 		}
 
-		private QuickJS.Value compile_script (string source, string name) throws Error {
+		private QuickJS.Value compile_script (string source, string name) throws Efni.Error {
 			var val = ctx.eval (source, source.length, name,
 				QuickJS.EvalType.GLOBAL |
 				QuickJS.EvalFlag.STRICT |
@@ -636,7 +638,7 @@ namespace Frida {
 
 			if (val.is_exception ()) {
 				JSError e = catch_js_error ();
-				throw new Error.INVALID_ARGUMENT ("Script(line %u): %s", e.line, e.message);
+				throw new Efni.Error.INVALID_ARGUMENT ("Script(line %u): %s", e.line, e.message);
 			}
 
 			return val;
@@ -673,7 +675,7 @@ namespace Frida {
 				args += v;
 			}
 
-			var promise = new Promise<uint64?> ();
+			var promise = new Efni.Promise<uint64?> ();
 			script->do_invoke.begin (impl, args, promise);
 
 			uint64? retval = script->process_events_until_ready (promise);
@@ -683,7 +685,7 @@ namespace Frida {
 			return ctx.make_biguint64 (retval);
 		}
 
-		private async void do_invoke (uint64 impl, uint64[] args, Promise<uint64?> promise) {
+		private async void do_invoke (uint64 impl, uint64[] args, Efni.Promise<uint64?> promise) {
 			try {
 				uint64 retval = yield services.machine.invoke (impl, args, io_cancellable);
 
@@ -713,7 +715,7 @@ namespace Frida {
 
 			var handler = new NativeCallbackHandler (script, wrapper, method, arity, scope);
 
-			var promise = new Promise<Barebone.Callback> ();
+			var promise = new Efni.Promise<Barebone.Callback> ();
 			script->do_install_native_callback.begin (code, handler, promise);
 
 			Barebone.Callback? callback = script->process_events_until_ready (promise);
@@ -726,7 +728,7 @@ namespace Frida {
 		}
 
 		private async void do_install_native_callback (uint64 code, Barebone.CallbackHandler handler,
-				Promise<Barebone.Callback> promise) {
+				Efni.Promise<Barebone.Callback> promise) {
 			try {
 				var callback = yield new Barebone.Callback (code, handler, services.machine, io_cancellable);
 
@@ -864,7 +866,7 @@ namespace Frida {
 			}
 
 			public async uint64 handle_invocation (uint64[] args, Barebone.CallFrame frame, Cancellable? cancellable)
-					throws Error, IOError {
+					throws Efni.Error, IOError {
 				var scope = new ValueScope (script);
 				unowned QuickJS.Context ctx = scope.ctx;
 
@@ -1103,7 +1105,7 @@ namespace Frida {
 				return QuickJS.Exception;
 			}
 
-			var promise = new Promise<Barebone.Allocation> ();
+			var promise = new Efni.Promise<Barebone.Allocation> ();
 			script->do_memory_alloc.begin (size, promise);
 
 			Barebone.Allocation? allocation = script->process_events_until_ready (promise);
@@ -1115,7 +1117,7 @@ namespace Frida {
 			return script->make_native_pointer (allocation.virtual_address);
 		}
 
-		private async void do_memory_alloc (size_t size, Promise<Barebone.Allocation> promise) {
+		private async void do_memory_alloc (size_t size, Efni.Promise<Barebone.Allocation> promise) {
 			try {
 				var allocator = services.allocator;
 				size_t page_size = allocator.page_size;
@@ -1148,7 +1150,7 @@ namespace Frida {
 			if (!script->unparse_page_protection (argv[2], out prot))
 				return QuickJS.Exception;
 
-			var promise = new Promise<bool?> ();
+			var promise = new Efni.Promise<bool?> ();
 			script->do_memory_protect.begin (address, size, prot, promise);
 
 			bool? result = script->process_events_until_ready (promise);
@@ -1158,7 +1160,7 @@ namespace Frida {
 			return ctx.make_bool (result);
 		}
 
-		private async void do_memory_protect (uint64 address, size_t size, Gum.PageProtection prot, Promise<bool?> promise) {
+		private async void do_memory_protect (uint64 address, size_t size, Gum.PageProtection prot, Efni.Promise<bool?> promise) {
 			try {
 				yield services.machine.protect_pages (address, size, prot, io_cancellable);
 
@@ -1226,7 +1228,7 @@ namespace Frida {
 			if (args == null)
 				return QuickJS.Exception;
 
-			var promise = new Promise<QuickJS.Value?> ();
+			var promise = new Efni.Promise<QuickJS.Value?> ();
 			script->do_memory_scan_sync.begin (args, promise);
 
 			QuickJS.Value? matches = script->process_events_until_ready (promise);
@@ -1236,7 +1238,7 @@ namespace Frida {
 			return matches;
 		}
 
-		private async void do_memory_scan_sync (ScanArgs args, Promise<QuickJS.Value?> promise) {
+		private async void do_memory_scan_sync (ScanArgs args, Efni.Promise<QuickJS.Value?> promise) {
 			try {
 				var raw_matches =
 					yield services.machine.scan_ranges (args.ranges, args.pattern, args.max_matches, io_cancellable);
@@ -1294,7 +1296,7 @@ namespace Frida {
 					return null;
 				try {
 					args.pattern = new Barebone.MatchPattern.from_string (raw_pattern);
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 					script.throw_js_error (error_message_to_js (e.message));
 					return null;
 				}
@@ -1337,7 +1339,7 @@ namespace Frida {
 					return QuickJS.Exception;
 			}
 
-			var promise = new Promise<QuickJS.Value?> ();
+			var promise = new Efni.Promise<QuickJS.Value?> ();
 			script->do_process_enumerate_ranges.begin (prot, promise);
 
 			QuickJS.Value? ranges = script->process_events_until_ready (promise);
@@ -1347,7 +1349,7 @@ namespace Frida {
 			return ranges;
 		}
 
-		private async void do_process_enumerate_ranges (Gum.PageProtection prot, Promise<QuickJS.Value?> promise) {
+		private async void do_process_enumerate_ranges (Gum.PageProtection prot, Efni.Promise<QuickJS.Value?> promise) {
 			try {
 				var ranges = ctx.make_array ();
 
@@ -1473,7 +1475,7 @@ namespace Frida {
 
 			try {
 				script->services.interceptor.breakpoint_kind = BreakpointKind.from_nick (kind);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				script->throw_js_error (error_message_to_js (e.message));
 				return QuickJS.Exception;
 			}
@@ -1540,7 +1542,7 @@ namespace Frida {
 				return QuickJS.Exception;
 			}
 
-			var promise = new Promise<Barebone.Interceptor> ();
+			var promise = new Efni.Promise<Barebone.Interceptor> ();
 			script->do_interceptor_attach.begin (target, listener, promise);
 
 			Barebone.Interceptor? result = script->process_events_until_ready (promise);
@@ -1551,7 +1553,7 @@ namespace Frida {
 		}
 
 		private async void do_interceptor_attach (uint64 target, Barebone.InvocationListener listener,
-				Promise<Barebone.Interceptor> promise) {
+				Efni.Promise<Barebone.Interceptor> promise) {
 			try {
 				var interceptor = services.interceptor;
 
@@ -1676,7 +1678,7 @@ namespace Frida {
 			if (listener == null)
 				return QuickJS.Undefined;
 
-			var promise = new Promise<Barebone.Interceptor> ();
+			var promise = new Efni.Promise<Barebone.Interceptor> ();
 			script->do_invocation_listener_detach.begin (listener, promise);
 
 			Barebone.Interceptor? result = script->process_events_until_ready (promise);
@@ -1690,7 +1692,7 @@ namespace Frida {
 		}
 
 		private async void do_invocation_listener_detach (Barebone.InvocationListener listener,
-				Promise<Barebone.Interceptor> promise) {
+				Efni.Promise<Barebone.Interceptor> promise) {
 			try {
 				var interceptor = services.interceptor;
 
@@ -1843,7 +1845,7 @@ namespace Frida {
 			if (!script->unparse_bytes (argv[0], out blob))
 				return QuickJS.Exception;
 
-			var promise = new Promise<Barebone.CModule> ();
+			var promise = new Efni.Promise<Barebone.CModule> ();
 			script->load_c_module.begin (blob, promise);
 
 			Barebone.CModule? mod = script->process_events_until_ready (promise);
@@ -1865,7 +1867,7 @@ namespace Frida {
 			return wrapper;
 		}
 
-		private async void load_c_module (Bytes blob, Promise<Barebone.CModule> promise) {
+		private async void load_c_module (Bytes blob, Efni.Promise<Barebone.CModule> promise) {
 			try {
 				var mod = yield new Barebone.CModule.from_blob (blob, services.machine, services.allocator, io_cancellable);
 
@@ -1945,7 +1947,7 @@ namespace Frida {
 					return QuickJS.Exception;
 			}
 
-			var promise = new Promise<Barebone.RustModule> ();
+			var promise = new Efni.Promise<Barebone.RustModule> ();
 			script->load_rust_module.begin (source, symbols, dependencies, promise);
 
 			Barebone.RustModule? mod = script->process_events_until_ready (promise);
@@ -1971,7 +1973,7 @@ namespace Frida {
 		}
 
 		private async void load_rust_module (string source, Gee.Map<string, uint64?> symbols, Gee.List<string> dependencies,
-				Promise<Barebone.RustModule> promise) {
+				Efni.Promise<Barebone.RustModule> promise) {
 			try {
 				var mod = yield new Barebone.RustModule.from_string (source, symbols, dependencies, services.machine,
 					services.allocator, io_cancellable);
@@ -2040,7 +2042,7 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_continue (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
 
-			var promise = new Promise<Debugger> ();
+			var promise = new Efni.Promise<Debugger> ();
 			script->do_gdb_continue.begin (promise);
 
 			Debugger? client = script->process_events_until_ready (promise);
@@ -2050,7 +2052,7 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_continue (Promise<Debugger> promise) {
+		private async void do_gdb_continue (Efni.Promise<Debugger> promise) {
 			try {
 				yield debugger.resume (io_cancellable);
 
@@ -2063,7 +2065,7 @@ namespace Frida {
 		private static QuickJS.Value on_gdb_stop (QuickJS.Context ctx, QuickJS.Value this_val, QuickJS.Value[] argv) {
 			BareboneScript * script = ctx.get_opaque ();
 
-			var promise = new Promise<Debugger> ();
+			var promise = new Efni.Promise<Debugger> ();
 			script->do_gdb_stop.begin (promise);
 
 			Debugger? client = script->process_events_until_ready (promise);
@@ -2073,7 +2075,7 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_stop (Promise<Debugger> promise) {
+		private async void do_gdb_stop (Efni.Promise<Debugger> promise) {
 			try {
 				yield debugger.stop (io_cancellable);
 
@@ -2088,7 +2090,7 @@ namespace Frida {
 
 			try {
 				script->debugger.restart ();
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				script->throw_js_error (error_message_to_js (e.message));
 				return QuickJS.Exception;
 			}
@@ -2476,12 +2478,12 @@ namespace Frida {
 		private delegate BufferBuilder? GdbWriteUnparseFunc (QuickJS.Value val, BufferBuilder builder);
 
 		private Bytes? read_memory (uint64 address, uint size) {
-			var promise = new Promise<Bytes> ();
+			var promise = new Efni.Promise<Bytes> ();
 			do_read_memory.begin (address, size, promise);
 			return process_events_until_ready<Bytes> (promise);
 		}
 
-		private async void do_read_memory (uint64 address, uint size, Promise<Bytes> promise) {
+		private async void do_read_memory (uint64 address, uint size, Efni.Promise<Bytes> promise) {
 			try {
 				Bytes bytes = yield debugger.read_byte_array (address, size, io_cancellable);
 
@@ -2492,12 +2494,12 @@ namespace Frida {
 		}
 
 		private bool write_memory (uint64 address, Bytes bytes) {
-			var promise = new Promise<Debugger> ();
+			var promise = new Efni.Promise<Debugger> ();
 			do_write_memory.begin (address, bytes, promise);
 			return process_events_until_ready<Debugger> (promise) != null;
 		}
 
-		private async void do_write_memory (uint64 address, Bytes bytes, Promise<Debugger> promise) {
+		private async void do_write_memory (uint64 address, Bytes bytes, Efni.Promise<Debugger> promise) {
 			try {
 				yield debugger.write_byte_array (address, bytes, io_cancellable);
 
@@ -2522,7 +2524,7 @@ namespace Frida {
 			if (!script->unparse_uint (argv[2], out size))
 				return QuickJS.Exception;
 
-			var promise = new Promise<DebuggerBreakpoint> ();
+			var promise = new Efni.Promise<DebuggerBreakpoint> ();
 			script->do_gdb_add_breakpoint.begin (kind, address, size, promise);
 
 			DebuggerBreakpoint? bp = script->process_events_until_ready (promise);
@@ -2533,7 +2535,7 @@ namespace Frida {
 		}
 
 		private async void do_gdb_add_breakpoint (BreakpointKind kind, uint64 address, uint size,
-				Promise<DebuggerBreakpoint> promise) {
+				Efni.Promise<DebuggerBreakpoint> promise) {
 			try {
 				DebuggerBreakpoint bp = yield debugger.add_breakpoint (kind, address, size, io_cancellable);
 
@@ -2550,7 +2552,7 @@ namespace Frida {
 			if (!script->unparse_string (argv[0], out command))
 				return QuickJS.Exception;
 
-			var promise = new Promise<string> ();
+			var promise = new Efni.Promise<string> ();
 			script->do_gdb_run_remote_command.begin (command, promise);
 
 			string? result = script->process_events_until_ready (promise);
@@ -2560,7 +2562,7 @@ namespace Frida {
 			return ctx.make_string (result);
 		}
 
-		private async void do_gdb_run_remote_command (string command, Promise<string> promise) {
+		private async void do_gdb_run_remote_command (string command, Efni.Promise<string> promise) {
 			try {
 				string result = yield debugger.run_remote_command (command, io_cancellable);
 
@@ -2577,7 +2579,7 @@ namespace Frida {
 			if (!script->unparse_string (argv[0], out command))
 				return QuickJS.Exception;
 
-			var promise = new Promise<Debugger> ();
+			var promise = new Efni.Promise<Debugger> ();
 			script->do_gdb_execute.begin (command, promise);
 
 			Debugger? result = script->process_events_until_ready (promise);
@@ -2587,14 +2589,14 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private GDB.Client gdb_client () throws Error {
+		private GDB.Client gdb_client () throws Efni.Error {
 			var client = debugger as GDB.Client;
 			if (client == null)
-				throw new Error.NOT_SUPPORTED ("Raw packets are specific to the GDB remote protocol");
+				throw new Efni.Error.NOT_SUPPORTED ("Raw packets are specific to the GDB remote protocol");
 			return client;
 		}
 
-		private async void do_gdb_execute (string command, Promise<Debugger> promise) {
+		private async void do_gdb_execute (string command, Efni.Promise<Debugger> promise) {
 			try {
 				yield gdb_client ().execute_simple (command, io_cancellable);
 
@@ -2611,7 +2613,7 @@ namespace Frida {
 			if (!script->unparse_string (argv[0], out request))
 				return QuickJS.Exception;
 
-			var promise = new Promise<GDB.Client.Packet> ();
+			var promise = new Efni.Promise<GDB.Client.Packet> ();
 			script->do_gdb_query.begin (request, promise);
 
 			GDB.Client.Packet? response = script->process_events_until_ready (promise);
@@ -2621,7 +2623,7 @@ namespace Frida {
 			return ctx.make_string (response.payload);
 		}
 
-		private async void do_gdb_query (string request, Promise<GDB.Client.Packet> promise) {
+		private async void do_gdb_query (string request, Efni.Promise<GDB.Client.Packet> promise) {
 			try {
 				GDB.Client.Packet packet = yield gdb_client ().query_simple (request, io_cancellable);
 
@@ -2659,7 +2661,7 @@ namespace Frida {
 			BareboneScript * script = ctx.get_opaque ();
 			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 
-			var promise = new Promise<DebuggerThread> ();
+			var promise = new Efni.Promise<DebuggerThread> ();
 			script->do_gdb_thread_step.begin (thread, promise);
 
 			DebuggerThread? result = script->process_events_until_ready (promise);
@@ -2669,7 +2671,7 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_thread_step (DebuggerThread thread, Promise<DebuggerThread> promise) {
+		private async void do_gdb_thread_step (DebuggerThread thread, Efni.Promise<DebuggerThread> promise) {
 			try {
 				yield thread.step (io_cancellable);
 
@@ -2686,7 +2688,7 @@ namespace Frida {
 
 			try {
 				thread->step_and_continue ();
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				script->throw_js_error (error_message_to_js (e.message));
 				return QuickJS.Exception;
 			}
@@ -2699,7 +2701,7 @@ namespace Frida {
 			BareboneScript * script = ctx.get_opaque ();
 			DebuggerThread * thread = this_val.get_opaque (gdb_thread_class);
 
-			var promise = new Promise<Gee.Map<string, Variant>> ();
+			var promise = new Efni.Promise<Gee.Map<string, Variant>> ();
 			script->do_gdb_thread_read_registers.begin (thread, promise);
 
 			Gee.Map<string, Variant> regs = script->process_events_until_ready (promise);
@@ -2709,7 +2711,7 @@ namespace Frida {
 			return script->make_cpu_context (regs);
 		}
 
-		private async void do_gdb_thread_read_registers (DebuggerThread thread, Promise<Gee.Map<string, Variant>> promise) {
+		private async void do_gdb_thread_read_registers (DebuggerThread thread, Efni.Promise<Gee.Map<string, Variant>> promise) {
 			try {
 				Gee.Map<string, Variant> regs = yield thread.read_registers (io_cancellable);
 
@@ -2728,7 +2730,7 @@ namespace Frida {
 			if (!script->unparse_string (argv[0], out name))
 				return QuickJS.Exception;
 
-			var promise = new Promise<uint64?> ();
+			var promise = new Efni.Promise<uint64?> ();
 			script->do_gdb_thread_read_register.begin (thread, name, promise);
 
 			uint64? val = script->process_events_until_ready (promise);
@@ -2738,7 +2740,7 @@ namespace Frida {
 			return script->make_native_pointer (val);
 		}
 
-		private async void do_gdb_thread_read_register (DebuggerThread thread, string name, Promise<uint64?> promise) {
+		private async void do_gdb_thread_read_register (DebuggerThread thread, string name, Efni.Promise<uint64?> promise) {
 			try {
 				uint64 val = yield thread.read_register (name, io_cancellable);
 
@@ -2761,7 +2763,7 @@ namespace Frida {
 			if (!script->unparse_uint64 (argv[1], out val))
 				return QuickJS.Exception;
 
-			var promise = new Promise<DebuggerThread> ();
+			var promise = new Efni.Promise<DebuggerThread> ();
 			script->do_gdb_thread_write_register.begin (thread, name, val, promise);
 
 			DebuggerThread? result = script->process_events_until_ready (promise);
@@ -2771,7 +2773,7 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_thread_write_register (DebuggerThread thread, string name, uint64 val, Promise<DebuggerThread> promise) {
+		private async void do_gdb_thread_write_register (DebuggerThread thread, string name, uint64 val, Efni.Promise<DebuggerThread> promise) {
 			try {
 				yield thread.write_register (name, val, io_cancellable);
 
@@ -2828,7 +2830,7 @@ namespace Frida {
 			BareboneScript * script = ctx.get_opaque ();
 			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 
-			var promise = new Promise<DebuggerBreakpoint> ();
+			var promise = new Efni.Promise<DebuggerBreakpoint> ();
 			script->do_gdb_breakpoint_enable.begin (bp, promise);
 
 			DebuggerBreakpoint? result = script->process_events_until_ready (promise);
@@ -2838,7 +2840,7 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_breakpoint_enable (DebuggerBreakpoint bp, Promise<DebuggerBreakpoint> promise) {
+		private async void do_gdb_breakpoint_enable (DebuggerBreakpoint bp, Efni.Promise<DebuggerBreakpoint> promise) {
 			try {
 				yield bp.enable (io_cancellable);
 
@@ -2852,7 +2854,7 @@ namespace Frida {
 			BareboneScript * script = ctx.get_opaque ();
 			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 
-			var promise = new Promise<DebuggerBreakpoint> ();
+			var promise = new Efni.Promise<DebuggerBreakpoint> ();
 			script->do_gdb_breakpoint_disable.begin (bp, promise);
 
 			DebuggerBreakpoint? result = script->process_events_until_ready (promise);
@@ -2862,7 +2864,7 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_breakpoint_disable (DebuggerBreakpoint bp, Promise<DebuggerBreakpoint> promise) {
+		private async void do_gdb_breakpoint_disable (DebuggerBreakpoint bp, Efni.Promise<DebuggerBreakpoint> promise) {
 			try {
 				yield bp.disable (io_cancellable);
 
@@ -2876,7 +2878,7 @@ namespace Frida {
 			BareboneScript * script = ctx.get_opaque ();
 			DebuggerBreakpoint * bp = this_val.get_opaque (gdb_breakpoint_class);
 
-			var promise = new Promise<DebuggerBreakpoint> ();
+			var promise = new Efni.Promise<DebuggerBreakpoint> ();
 			script->do_gdb_breakpoint_remove.begin (bp, promise);
 
 			DebuggerBreakpoint? result = script->process_events_until_ready (promise);
@@ -2886,7 +2888,7 @@ namespace Frida {
 			return QuickJS.Undefined;
 		}
 
-		private async void do_gdb_breakpoint_remove (DebuggerBreakpoint bp, Promise<DebuggerBreakpoint> promise) {
+		private async void do_gdb_breakpoint_remove (DebuggerBreakpoint bp, Efni.Promise<DebuggerBreakpoint> promise) {
 			try {
 				yield bp.remove (io_cancellable);
 
@@ -2896,7 +2898,7 @@ namespace Frida {
 			}
 		}
 
-		private T? process_events_until_ready<T> (Promise<T> promise) {
+		private T? process_events_until_ready<T> (Efni.Promise<T> promise) {
 			var future = promise.future;
 			var main_context = MainContext.get_thread_default ();
 			while (!future.ready)
@@ -3174,8 +3176,8 @@ namespace Frida {
 				return false;
 
 			try {
-				result = (int) Marshal.enum_from_nick<T> (nick);
-			} catch (Error e) {
+				result = (int) Efni.Marshal.enum_from_nick<T> (nick);
+			} catch (Efni.Error e) {
 				throw_js_error (error_message_to_js (e.message));
 				return false;
 			} finally {

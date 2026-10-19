@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public class Binjector : Object, Injector {
 		public signal void output (uint pid, int fd, uint8[] data);
@@ -14,6 +16,8 @@ namespace Frida {
 					try {
 						_resource_store = new ResourceStore ();
 					} catch (Error e) {
+						assert_not_reached ();
+					} catch (Efni.Error e) {
 						assert_not_reached ();
 					}
 				}

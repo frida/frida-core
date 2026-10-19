@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida.Gadget {
 	private sealed class Config : Object, Json.Serializable {
 		public Object interaction {

@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class DroidyHostSessionBackend : Object, HostSessionBackend {
 		private AdbDeviceTracker tracker;

@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	/**
 	 * Compiles a TypeScript or JavaScript project into a single script bundle

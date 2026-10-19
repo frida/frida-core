@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class VirtualBoxStubClient : GDB.Client {
@@ -12,13 +14,13 @@ namespace Frida.Barebone {
 		}
 
 		public static new async VirtualBoxStubClient open (IOStream stream, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var client = new VirtualBoxStubClient (stream);
 
 			try {
 				yield client.init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				Efni.throw_api_error (e);
 			}
 
 			return client;
@@ -36,12 +38,12 @@ namespace Frida.Barebone {
 			}
 		}
 
-		protected override async void prepare_connection (Cancellable? cancellable) throws Error, IOError {
+		protected override async void prepare_connection (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield wait_until_quiet (cancellable);
 			set_max_packet_size (MAX_PACKET_SIZE);
 		}
 
-		private async void wait_until_quiet (Cancellable? cancellable) throws Error, IOError {
+		private async void wait_until_quiet (Cancellable? cancellable) throws Efni.Error, IOError {
 			while (get_monotonic_time () - last_packet_arrival_time < QUIET_PERIOD_USEC) {
 				var source = new TimeoutSource (QUIET_POLL_MSEC);
 				source.set_callback (wait_until_quiet.callback);
@@ -52,7 +54,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		protected override async void enable_extensions (Cancellable? cancellable) throws Error, IOError {
+		protected override async void enable_extensions (Cancellable? cancellable) throws Efni.Error, IOError {
 			connected = true;
 		}
 	}

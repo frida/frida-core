@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public class MatchPattern {
@@ -15,7 +17,7 @@ namespace Frida.Barebone {
 			return true;
 		}
 
-		public MatchPattern.from_string (string pattern) throws Error {
+		public MatchPattern.from_string (string pattern) throws Efni.Error {
 			string[] parts = pattern.replace (" ", "").split (":", 2);
 
 			unowned string match_str = parts[0];
@@ -86,7 +88,7 @@ namespace Frida.Barebone {
 			return t;
 		}
 
-		private static uint8 parse_xdigit_value (char ch) throws Error {
+		private static uint8 parse_xdigit_value (char ch) throws Efni.Error {
 			int v = ch.xdigit_value ();
 			if (v == -1)
 				throw_invalid_pattern ();
@@ -94,8 +96,8 @@ namespace Frida.Barebone {
 		}
 
 		[NoReturn]
-		private static void throw_invalid_pattern () throws Error {
-			throw new Error.INVALID_ARGUMENT ("Invalid pattern");
+		private static void throw_invalid_pattern () throws Efni.Error {
+			throw new Efni.Error.INVALID_ARGUMENT ("Invalid pattern");
 		}
 	}
 
@@ -228,7 +230,7 @@ namespace Frida.Barebone {
 			builder
 				.align (pointer_size)
 				.append_label ("matches");
-		} catch (Error e) {
+		} catch (Efni.Error e) {
 			assert_not_reached ();
 		}
 

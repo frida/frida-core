@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class IA32Machine : Object, Machine {
@@ -31,7 +33,7 @@ namespace Frida.Barebone {
 			page_tables = new X86PageTables (debugger);
 		}
 
-		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
+		public async size_t query_page_size (Cancellable? cancellable) throws Efni.Error, IOError {
 			return 4096;
 		}
 
@@ -43,10 +45,10 @@ namespace Frida.Barebone {
 		private const uint64 USER_PRIVILEGE = 3;
 		private const int64 LANDING_TIMEOUT_USEC = 60000000;
 
-		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
+		public async uint query_exception_level (Cancellable? cancellable) throws Efni.Error, IOError {
 			DebuggerException? exception = debugger.exception;
 			if (exception == null)
-				throw new Error.INVALID_OPERATION ("Unable to query in current state");
+				throw new Efni.Error.INVALID_OPERATION ("Unable to query in current state");
 			DebuggerThread thread = exception.thread;
 
 			var cs = yield thread.read_register ("cs", cancellable);
@@ -55,7 +57,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			foreach (RangeDetails r in coalesce_ranges (yield page_tables.collect_ranges (cancellable))) {
 				if ((r.protection & prot) != prot)
 					continue;
@@ -65,19 +67,19 @@ namespace Frida.Barebone {
 		}
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield page_tables.map (physical_addresses, cancellable);
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			yield page_tables.protect (virtual_address, size, prot, cancellable);
 		}
 
 		// Read the memory and do the match here. A script asks about small ranges, thus a scanner in
 		// the guest would cost more round trips than it saves.
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			var matches = new Gee.ArrayList<uint64?> ();
 
 			foreach (Gum.MemoryRange r in ranges) {
@@ -90,7 +92,7 @@ namespace Frida.Barebone {
 					Bytes chunk;
 					try {
 						chunk = yield debugger.read_byte_array (cursor, chunk_size, cancellable);
-					} catch (Error e) {
+					} catch (Efni.Error e) {
 						cursor += chunk_size;
 						continue;
 					}
@@ -113,7 +115,7 @@ namespace Frida.Barebone {
 		// keep the overlap at the boundaries small.
 		private const size_t SCAN_CHUNK_SIZE = 256 * 1024;
 
-		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error {
+		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Efni.Error {
 			Gum.ElfIA32Relocation type = (Gum.ElfIA32Relocation) r.type;
 			switch (type) {
 				case NONE:
@@ -132,12 +134,12 @@ namespace Frida.Barebone {
 					// Both ends of the displacement move by the same amount.
 					break;
 				default:
-					throw new Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
-						Marshal.enum_to_nick<Gum.ElfIA32Relocation> (type));
+					throw new Efni.Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
+						Efni.Marshal.enum_to_nick<Gum.ElfIA32Relocation> (type));
 			}
 		}
 
-		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
+		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Efni.Error, IOError {
 			bool was_running = debugger.state != STOPPED;
 			if (was_running)
 				yield debugger.stop (cancellable);
@@ -178,7 +180,7 @@ namespace Frida.Barebone {
 			int64 deadline = get_monotonic_time () + LANDING_TIMEOUT_USEC;
 			while (true) {
 				if (get_monotonic_time () >= deadline)
-					throw new Error.TIMED_OUT ("Timed out waiting for the call to return");
+					throw new Efni.Error.TIMED_OUT ("Timed out waiting for the call to return");
 
 				ex = yield debugger.continue_until_exception (cancellable);
 				if (ex.breakpoint != bp)
@@ -200,7 +202,7 @@ namespace Frida.Barebone {
 			return retval;
 		}
 
-		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
+		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Efni.Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
 			uint64 original_esp = regs["esp"].get_uint64 ();
@@ -289,7 +291,7 @@ namespace Frida.Barebone {
 				stack_state = MODIFIED;
 			}
 
-			public async void commit (Cancellable? cancellable) throws Error, IOError {
+			public async void commit (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (regs.get_data<bool> ("dirty"))
 					yield thread.write_registers (regs, cancellable);
 
@@ -307,11 +309,11 @@ namespace Frida.Barebone {
 		}
 
 		public async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield X86InlineHook.create (target, handler, IA32, allocator, debugger, cancellable);
 		}
 
-		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Efni.Error, IOError {
 			return yield page_tables.translate (va, cancellable);
 		}
 	}

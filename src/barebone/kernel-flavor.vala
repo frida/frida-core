@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	/**
@@ -5,8 +7,8 @@ namespace Frida.Barebone {
 	 * quiescent state beforehand, and how it is let go afterwards.
 	 */
 	internal interface KernelFlavor : Object {
-		public abstract async void prepare (Cancellable? cancellable) throws Error, IOError;
-		public abstract async void settle (Cancellable? cancellable) throws Error, IOError;
+		public abstract async void prepare (Cancellable? cancellable) throws Efni.Error, IOError;
+		public abstract async void settle (Cancellable? cancellable) throws Efni.Error, IOError;
 
 		public abstract bool stays_attached { get; }
 	}
@@ -22,10 +24,10 @@ namespace Frida.Barebone {
 			this.machine = machine;
 		}
 
-		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+		public async void prepare (Cancellable? cancellable) throws Efni.Error, IOError {
 		}
 
-		public async void settle (Cancellable? cancellable) throws Error, IOError {
+		public async void settle (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield machine.debugger.resume (cancellable);
 		}
 	}
@@ -42,18 +44,18 @@ namespace Frida.Barebone {
 		private SymbolInfo? panic;
 
 		public XnuKernelFlavor (Machine machine, uint64 kernel_base, Gee.Map<string, SymbolInfo> symbols)
-				throws Error {
+				throws Efni.Error {
 			this.machine = machine;
 			this.kernel_base = kernel_base;
 
 			thread_block = symbols["thread_block"];
 			if (thread_block == null)
-				throw new Error.NOT_SUPPORTED ("Missing symbol for thread_block");
+				throw new Efni.Error.NOT_SUPPORTED ("Missing symbol for thread_block");
 
 			panic = symbols["panic"];
 		}
 
-		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+		public async void prepare (Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 thread_block_address = kernel_base + thread_block.offset;
 
 			var arm64 = machine as Arm64Machine;
@@ -71,7 +73,7 @@ namespace Frida.Barebone {
 				yield arm64.learn_permission_templates (thread_block_address, cancellable);
 		}
 
-		public async void settle (Cancellable? cancellable) throws Error, IOError {
+		public async void settle (Cancellable? cancellable) throws Efni.Error, IOError {
 			Debugger debugger = machine.debugger;
 
 			// The vphone research kernel panics on any synchronous exception taken while a
@@ -87,7 +89,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async void run_until_thread_block (uint64 address, Cancellable? cancellable) throws Error, IOError {
+		private async void run_until_thread_block (uint64 address, Cancellable? cancellable) throws Efni.Error, IOError {
 			Debugger debugger = machine.debugger;
 			var bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
 
@@ -115,19 +117,19 @@ namespace Frida.Barebone {
 			Numeric.uint64_hash, Numeric.uint64_equal);
 
 		public LinuxKernelFlavor (Machine machine, uint64 kernel_base,
-				Gee.Map<string, SymbolInfo> symbols) throws Error {
+				Gee.Map<string, SymbolInfo> symbols) throws Efni.Error {
 			this.machine = machine;
 			this.kernel_base = kernel_base;
 			this.symbols = symbols;
 
 			schedule = symbols["schedule"];
 			if (schedule == null)
-				throw new Error.NOT_SUPPORTED ("Missing symbol for schedule");
+				throw new Efni.Error.NOT_SUPPORTED ("Missing symbol for schedule");
 
 			panic = symbols["panic"];
 		}
 
-		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+		public async void prepare (Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 schedule_address = kernel_base + schedule.offset;
 
 			var arm64 = machine as Arm64Machine;
@@ -157,7 +159,7 @@ namespace Frida.Barebone {
 				arm64.set_memory_x = symbol_address ("set_memory_x");
 				arm64.set_memory_nx = symbol_address ("set_memory_nx");
 				if (arm64.set_memory_x == 0)
-					throw new Error.NOT_SUPPORTED ("Missing set_memory_* symbols for kernel-API page protection");
+					throw new Efni.Error.NOT_SUPPORTED ("Missing set_memory_* symbols for kernel-API page protection");
 			}
 
 			yield machine.enter_exception_level (1, 1000, cancellable);
@@ -181,7 +183,7 @@ namespace Frida.Barebone {
 				yield relax_cfi_enforcement (cancellable);
 		}
 
-		private async void keep_current_runnable (Cancellable? cancellable) throws Error, IOError {
+		private async void keep_current_runnable (Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 wake_up_process = symbol_address ("wake_up_process");
 			if (wake_up_process == 0)
 				return;
@@ -193,7 +195,7 @@ namespace Frida.Barebone {
 			yield machine.invoke (wake_up_process, { current }, cancellable);
 		}
 
-		private async void relax_cfi_enforcement (Cancellable? cancellable) throws Error, IOError {
+		private async void relax_cfi_enforcement (Cancellable? cancellable) throws Efni.Error, IOError {
 			foreach (unowned string name in CFI_CHECK_ENTRY_POINTS) {
 				uint64 entry = symbol_address (name);
 				if (entry == 0)
@@ -204,7 +206,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async uint64 read_current_task (Cancellable? cancellable) throws Error, IOError {
+		private async uint64 read_current_task (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (machine is X64Machine)
 				return yield read_per_cpu_task ("current_task", cancellable);
 			if (symbols["__entry_task"] != null)
@@ -212,7 +214,7 @@ namespace Frida.Barebone {
 			return yield read_current_from_stack (cancellable);
 		}
 
-		private async bool task_is_idle (uint64 task, Cancellable? cancellable) throws Error, IOError {
+		private async bool task_is_idle (uint64 task, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (task == symbol_address ("init_task"))
 				return true;
 			if (symbols["idle_threads"] == null)
@@ -220,7 +222,7 @@ namespace Frida.Barebone {
 			return task == yield read_per_cpu_task ("idle_threads", cancellable);
 		}
 
-		private async uint64 read_per_cpu_task (string symbol, Cancellable? cancellable) throws Error, IOError {
+		private async uint64 read_per_cpu_task (string symbol, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 variable = (machine is X64Machine) ? percpu_offset (symbol) : symbol_address (symbol);
 			uint64 cpu = uint64.parse (machine.debugger.exception.thread.id, 16) - 1;
 			var slot = yield machine.read_virtual (symbol_address ("__per_cpu_offset") + cpu * 8, 8,
@@ -231,7 +233,7 @@ namespace Frida.Barebone {
 			return read_u64 (task.get_data (), 0);
 		}
 
-		private async uint64 read_current_from_stack (Cancellable? cancellable) throws Error, IOError {
+		private async uint64 read_current_from_stack (Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 sp = yield machine.debugger.exception.thread.read_register ("sp", cancellable);
 			uint64 thread_info = sp & ~(ARM64_THREAD_SIZE - 1);
 			var task = yield machine.read_virtual (thread_info + ARM64_THREAD_INFO_TASK_OFFSET, 8, cancellable);
@@ -255,7 +257,7 @@ namespace Frida.Barebone {
 			return (sym != null) ? sym.offset : 0;
 		}
 
-		public async void settle (Cancellable? cancellable) throws Error, IOError {
+		public async void settle (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield machine.debugger.resume (cancellable);
 		}
 
@@ -263,7 +265,7 @@ namespace Frida.Barebone {
 		// from: sleepable, on a stack of its own, holding nothing. The CPU idle loop reaches the
 		// scheduler with interrupts masked, and injecting from the idle task deadlocks a sleeping
 		// callee (module_alloc, execmem_alloc), so those hits are skipped and a real task awaited.
-		private async void run_until_schedule (uint64 address, Cancellable? cancellable) throws Error, IOError {
+		private async void run_until_schedule (uint64 address, Cancellable? cancellable) throws Efni.Error, IOError {
 			SymbolInfo? system_state = symbols["system_state"];
 			uint64 system_state_address = (system_state != null) ? kernel_base + system_state.offset : 0;
 
@@ -300,7 +302,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void park_at (uint64 address, uint64 system_state_address, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			Debugger debugger = machine.debugger;
 			unowned string pc_name = (machine is X64Machine) ? "rip" : "eip";
 
@@ -333,7 +335,7 @@ namespace Frida.Barebone {
 			yield machine.write_virtual (address, original.get_data (), cancellable);
 
 			if (!parked) {
-				throw new Error.TIMED_OUT ("Timed out waiting for a task to reach 0x%" +
+				throw new Efni.Error.TIMED_OUT ("Timed out waiting for a task to reach 0x%" +
 					uint64.FORMAT_MODIFIER + "x", address);
 			}
 		}
@@ -347,7 +349,7 @@ namespace Frida.Barebone {
 		}
 
 		private async bool system_is_running (uint64 system_state_address, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (system_state_address == 0)
 				return true;
 			var data = (yield machine.read_virtual (system_state_address, 4, cancellable)).get_data ();
@@ -359,7 +361,7 @@ namespace Frida.Barebone {
 
 		// Linux on arm64 runs with FIQ permanently masked, so only the IRQ mask distinguishes a
 		// sleepable task (interrupts on) from the idle loop and interrupt-context reschedules.
-		private async bool interrupts_masked (DebuggerThread thread, Cancellable? cancellable) throws Error, IOError {
+		private async bool interrupts_masked (DebuggerThread thread, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (machine is IA32Machine || machine is X64Machine) {
 				uint64 eflags = yield thread.read_register ("eflags", cancellable);
 				return (eflags & INTERRUPT_ENABLE_BIT) == 0;
@@ -392,24 +394,24 @@ namespace Frida.Barebone {
 		private Machine machine;
 		private uint64 yield_point;
 
-		public Win9xKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Error {
+		public Win9xKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Efni.Error {
 			this.machine = machine;
 
 			SymbolInfo? get_system_time = symbols["Get_System_Time"];
 			if (get_system_time == null)
-				throw new Error.NOT_SUPPORTED ("Missing symbol for Get_System_Time");
+				throw new Efni.Error.NOT_SUPPORTED ("Missing symbol for Get_System_Time");
 			yield_point = get_system_time.offset;
 		}
 
-		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+		public async void prepare (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield run_until_yield_point (cancellable);
 		}
 
-		public async void settle (Cancellable? cancellable) throws Error, IOError {
+		public async void settle (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield machine.debugger.resume (cancellable);
 		}
 
-		private async void run_until_yield_point (Cancellable? cancellable) throws Error, IOError {
+		private async void run_until_yield_point (Cancellable? cancellable) throws Efni.Error, IOError {
 			Debugger debugger = machine.debugger;
 			var bp = yield debugger.add_breakpoint (SOFT, yield_point, 1, cancellable);
 
@@ -423,7 +425,7 @@ namespace Frida.Barebone {
 		}
 
 		private async bool stopped_in_ring_zero (Debugger debugger, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint64 cs = yield debugger.exception.thread.read_register ("cs", cancellable);
 
 			return (cs & RING_MASK) == 0;
@@ -442,20 +444,20 @@ namespace Frida.Barebone {
 		private uint64 yield_point;
 		private SymbolInfo? bug_check;
 
-		public WinNtKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Error {
+		public WinNtKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Efni.Error {
 			this.machine = machine;
 
 			// A thread in this system service is at PASSIVE_LEVEL on its own kernel stack, which the
 			// agent needs to start.
 			SymbolInfo? wait_for_single_object = symbols["NtWaitForSingleObject"];
 			if (wait_for_single_object == null)
-				throw new Error.NOT_SUPPORTED ("Missing symbol for NtWaitForSingleObject");
+				throw new Efni.Error.NOT_SUPPORTED ("Missing symbol for NtWaitForSingleObject");
 			yield_point = wait_for_single_object.offset;
 
 			bug_check = symbols["KeBugCheckEx"];
 		}
 
-		public async void prepare (Cancellable? cancellable) throws Error, IOError {
+		public async void prepare (Cancellable? cancellable) throws Efni.Error, IOError {
 			var arm64 = machine as Arm64Machine;
 			if (bug_check != null && arm64 != null)
 				arm64.call_landing_zone = bug_check.offset;
@@ -469,11 +471,11 @@ namespace Frida.Barebone {
 			yield run_until_yield_point (cancellable);
 		}
 
-		public async void settle (Cancellable? cancellable) throws Error, IOError {
+		public async void settle (Cancellable? cancellable) throws Efni.Error, IOError {
 			yield machine.debugger.resume (cancellable);
 		}
 
-		private async void run_until_yield_point (Cancellable? cancellable) throws Error, IOError {
+		private async void run_until_yield_point (Cancellable? cancellable) throws Efni.Error, IOError {
 			Debugger debugger = machine.debugger;
 			var bp = yield debugger.add_breakpoint (SOFT, yield_point, breakpoint_size_for (debugger), cancellable);
 

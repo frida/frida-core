@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class DarwinHelperProcess : Object, DarwinHelper {
 		public uint pid {

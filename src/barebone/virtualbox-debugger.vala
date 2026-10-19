@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class VirtualBoxDebugger : Object, Debugger {
@@ -52,7 +54,7 @@ namespace Frida.Barebone {
 		}
 
 		public static async VirtualBoxDebugger open (string host, uint16 port, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var console = yield VirtualBoxConsole.open (host, port, cancellable);
 
 			var debugger = new VirtualBoxDebugger (console);
@@ -65,14 +67,14 @@ namespace Frida.Barebone {
 		}
 
 		internal async Gee.Map<string, uint64?> read_registers (uint cpu, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (full_registers == null)
 				full_registers = yield console.read_registers (cancellable);
 			return full_registers[(int) cpu];
 		}
 
 		internal async uint64? read_register (uint cpu, string name, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (name in VirtualBoxConsole.CORE_REGISTERS) {
 				if (core_registers == null)
 					core_registers = yield console.read_core_registers (cancellable);
@@ -87,7 +89,7 @@ namespace Frida.Barebone {
 		}
 
 		internal async void write_register (uint cpu, string name, uint64 val, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			yield console.write_register (cpu, name, val, cancellable);
 			forget_registers ();
 		}
@@ -97,7 +99,7 @@ namespace Frida.Barebone {
 			full_registers = null;
 		}
 
-		private async void note_stopped (Cancellable? cancellable) throws Error, IOError {
+		private async void note_stopped (Cancellable? cancellable) throws Efni.Error, IOError {
 			full_registers = null;
 			core_registers = yield console.read_core_registers (cancellable);
 
@@ -145,27 +147,27 @@ namespace Frida.Barebone {
 		}
 
 		public async Bytes read_byte_array (uint64 address, size_t size, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield console.read_memory (address, size, cancellable);
 		}
 
 		public async void write_byte_array (uint64 address, Bytes bytes, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			yield console.write_memory (address, bytes, cancellable);
 		}
 
 		public async Buffer read_buffer (uint64 address, size_t size, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return make_buffer (yield read_byte_array (address, size, cancellable));
 		}
 
-		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
+		public async void resume (Cancellable? cancellable = null) throws Efni.Error, IOError {
 			forget_registers ();
 			yield console.resume (cancellable);
 			change_state (RUNNING, null);
 		}
 
-		public async void stop (Cancellable? cancellable = null) throws Error, IOError {
+		public async void stop (Cancellable? cancellable = null) throws Efni.Error, IOError {
 			if (_state == STOPPED)
 				return;
 
@@ -173,12 +175,12 @@ namespace Frida.Barebone {
 			yield note_stopped (cancellable);
 		}
 
-		public void restart () throws Error {
-			throw new Error.NOT_SUPPORTED ("The VirtualBox debugger console cannot restart the guest");
+		public void restart () throws Efni.Error {
+			throw new Efni.Error.NOT_SUPPORTED ("The VirtualBox debugger console cannot restart the guest");
 		}
 
 		public async DebuggerException continue_until_exception (Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			yield release_parked_processors (cancellable);
 			yield resume (cancellable);
 
@@ -196,7 +198,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async void release_parked_processors (Cancellable? cancellable) throws Error, IOError {
+		private async void release_parked_processors (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (_state != STOPPED || breakpoints.is_empty)
 				return;
 
@@ -237,7 +239,7 @@ namespace Frida.Barebone {
 		}
 
 		public async DebuggerBreakpoint add_breakpoint (BreakpointKind kind, uint64 address, size_t size,
-				Cancellable? cancellable = null) throws Error, IOError {
+				Cancellable? cancellable = null) throws Efni.Error, IOError {
 			var breakpoint = new VirtualBoxBreakpoint (kind, address, size, console);
 			yield breakpoint.enable (cancellable);
 			breakpoints[address] = breakpoint;
@@ -248,16 +250,16 @@ namespace Frida.Barebone {
 		}
 
 		public async void set_physical_memory_mode (bool enabled, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			console.physical_addressing = enabled;
 		}
 
 		public async string run_remote_command (string command, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield console.run (command, cancellable);
 		}
 
-		public async void detach (Cancellable? cancellable = null) throws Error, IOError {
+		public async void detach (Cancellable? cancellable = null) throws Efni.Error, IOError {
 			yield console.resume (cancellable);
 			change_state (RUNNING, null);
 		}
@@ -265,7 +267,7 @@ namespace Frida.Barebone {
 		public async void close (Cancellable? cancellable = null) throws IOError {
 			try {
 				yield console.resume (cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 			}
 			change_state (CLOSED, null);
 		}
@@ -314,28 +316,28 @@ namespace Frida.Barebone {
 			this.owner = owner;
 		}
 
-		public async void step (Cancellable? cancellable = null) throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("VirtualBox cannot single-step the guest");
+		public async void step (Cancellable? cancellable = null) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("VirtualBox cannot single-step the guest");
 		}
 
-		public void step_and_continue () throws Error {
-			throw new Error.NOT_SUPPORTED ("The VirtualBox debugger console steps synchronously");
+		public void step_and_continue () throws Efni.Error {
+			throw new Efni.Error.NOT_SUPPORTED ("The VirtualBox debugger console steps synchronously");
 		}
 
-		public async uint64 read_register (string name, Cancellable? cancellable = null) throws Error, IOError {
+		public async uint64 read_register (string name, Cancellable? cancellable = null) throws Efni.Error, IOError {
 			uint64? val = yield owner.read_register (cpu, name, cancellable);
 			if (val == null)
-				throw new Error.NOT_SUPPORTED ("Register “%s” is not exposed by VirtualBox", name);
+				throw new Efni.Error.NOT_SUPPORTED ("Register “%s” is not exposed by VirtualBox", name);
 			return val;
 		}
 
 		public async void write_register (string name, uint64 val, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			yield owner.write_register (cpu, name, val, cancellable);
 		}
 
 		public async Gee.Map<string, Variant> read_registers (Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var raw = yield owner.read_registers (cpu, cancellable);
 
 			var registers = new Gee.HashMap<string, Variant> ();
@@ -346,7 +348,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void write_registers (Gee.Map<string, Variant> regs, Cancellable? cancellable = null)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var current = yield owner.read_registers (cpu, cancellable);
 
 			foreach (var e in regs.entries) {
@@ -393,7 +395,7 @@ namespace Frida.Barebone {
 			this.console = console;
 		}
 
-		public async void enable (Cancellable? cancellable = null) throws Error, IOError {
+		public async void enable (Cancellable? cancellable = null) throws Efni.Error, IOError {
 			if (displaced != null)
 				return;
 
@@ -401,7 +403,7 @@ namespace Frida.Barebone {
 			yield console.write_memory (address, new Bytes (SPIN), cancellable);
 		}
 
-		public async void disable (Cancellable? cancellable = null) throws Error, IOError {
+		public async void disable (Cancellable? cancellable = null) throws Efni.Error, IOError {
 			if (displaced == null)
 				return;
 
@@ -409,7 +411,7 @@ namespace Frida.Barebone {
 			displaced = null;
 		}
 
-		public async void remove (Cancellable? cancellable = null) throws Error, IOError {
+		public async void remove (Cancellable? cancellable = null) throws Efni.Error, IOError {
 			yield disable (cancellable);
 
 			removed ();

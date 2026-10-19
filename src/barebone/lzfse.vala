@@ -7,13 +7,13 @@ namespace Frida.Barebone.LZFSE {
 		return d[0] == 'b' && d[1] == 'v' && d[2] == 'x';
 	}
 
-	public Bytes decode (Bytes compressed) throws Error {
+	public Bytes decode (Bytes compressed) throws Efni.Error {
 		size_t est_max = compressed.get_size () * 15;
 		uint8[] dst_buf = new uint8[est_max];
 
 		size_t written = decode_buffer (dst_buf, compressed.get_data ());
 		if (written == 0)
-			throw new Error.PROTOCOL ("liblzfse returned 0 bytes");
+			throw new Efni.Error.PROTOCOL ("liblzfse returned 0 bytes");
 
 		return new Bytes (dst_buf[:written]);
 	}

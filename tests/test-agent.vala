@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida.AgentTest {
 	public void add_tests () {
 		GLib.Test.add_func ("/Agent/Script/load-and-receive-messages", () => {

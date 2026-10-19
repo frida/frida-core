@@ -1,8 +1,10 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public interface PhysicalMemory : Object {
-		public abstract uint8[] read (uint64 pa, size_t size) throws Error;
-		public abstract void write (uint64 pa, uint8[] data) throws Error;
+		public abstract uint8[] read (uint64 pa, size_t size) throws Efni.Error;
+		public abstract void write (uint64 pa, uint8[] data) throws Efni.Error;
 		public abstract bool contains (uint64 pa);
 	}
 
@@ -20,20 +22,20 @@ namespace Frida.Barebone {
 			get;
 		}
 
-		public abstract async size_t query_page_size (Cancellable? cancellable) throws Error, IOError;
+		public abstract async size_t query_page_size (Cancellable? cancellable) throws Efni.Error, IOError;
 
 		public virtual async Bytes read_virtual (uint64 va, size_t size, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			return yield debugger.read_byte_array (va, size, cancellable);
 		}
 
-		public virtual async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+		public virtual async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Efni.Error, IOError {
 			yield debugger.write_byte_array (va, new Bytes (data), cancellable);
 		}
 
-		public abstract async uint query_exception_level (Cancellable? cancellable) throws Error, IOError;
+		public abstract async uint query_exception_level (Cancellable? cancellable) throws Efni.Error, IOError;
 
-		public async void enter_exception_level (uint level, uint timeout, Cancellable? cancellable) throws Error, IOError {
+		public async void enter_exception_level (uint level, uint timeout, Cancellable? cancellable) throws Efni.Error, IOError {
 			var timer = new Timer ();
 
 			do {
@@ -51,31 +53,31 @@ namespace Frida.Barebone {
 				yield debugger.stop (cancellable);
 			} while ((uint) (timer.elapsed () * 1000.0) < timeout);
 
-			throw new Error.TIMED_OUT ("Timed out while trying to get target to exception level %u", level);
+			throw new Efni.Error.TIMED_OUT ("Timed out while trying to get target to exception level %u", level);
 		}
 
 		public abstract async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
-			throws Error, IOError;
+			throws Efni.Error, IOError;
 
-		public virtual async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("Address translation is not implemented for this architecture");
+		public virtual async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Address translation is not implemented for this architecture");
 		}
 
 		public abstract async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
-			throws Error, IOError;
+			throws Efni.Error, IOError;
 
 		public virtual async void protect_pages_leaving_the_flush (uint64 virtual_address, size_t size,
-				Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
+				Gum.PageProtection prot, Cancellable? cancellable) throws Efni.Error, IOError {
 			yield protect_pages (virtual_address, size, prot, cancellable);
 		}
 
 		public abstract async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
-			Cancellable? cancellable) throws Error, IOError;
+			Cancellable? cancellable) throws Efni.Error, IOError;
 
 		public abstract async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern,
-			uint max_matches, Cancellable? cancellable) throws Error, IOError;
+			uint max_matches, Cancellable? cancellable) throws Efni.Error, IOError;
 
-		public Bytes relocate (Gum.ElfModule elf, Bytes raw_elf, uint64 base_va) throws Error {
+		public Bytes relocate (Gum.ElfModule elf, Bytes raw_elf, uint64 base_va) throws Efni.Error {
 			uint64 file_start = uint64.MAX;
 			uint64 file_end = 0;
 			elf.enumerate_segments (s => {
@@ -92,7 +94,7 @@ namespace Frida.Barebone {
 			bool position_independent = elf.etype == Gum.ElfType.DYN;
 
 			var relocated_buf = debugger.make_buffer (new Bytes (raw_elf[(size_t) file_start:(size_t) file_end].get_data ()));
-			Error? pending_error = null;
+			Efni.Error? pending_error = null;
 			elf.enumerate_relocations (r => {
 				unowned string parent_section = (r.parent != null) ? r.parent.name : "";
 				if (parent_section.has_prefix (".rela.debug_"))
@@ -104,7 +106,7 @@ namespace Frida.Barebone {
 
 				try {
 					apply_relocation (r, base_va, relocated_buf);
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 					pending_error = e;
 					return false;
 				}
@@ -126,7 +128,7 @@ namespace Frida.Barebone {
 			return section != ".rela.dyn" && section != ".rel.dyn";
 		}
 
-		public abstract void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error;
+		public abstract void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Efni.Error;
 
 		// Code that uses displacements in the instructions needs no relocation, and its relocation
 		// section holds types that this code does not know. Code that uses absolute addresses needs
@@ -135,16 +137,16 @@ namespace Frida.Barebone {
 			return false;
 		}
 
-		public abstract async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError;
+		public abstract async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Efni.Error, IOError;
 
 		public abstract async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable)
-			throws Error, IOError;
+			throws Efni.Error, IOError;
 
 		public abstract uint64 address_from_funcptr (uint64 ptr);
 		public abstract size_t breakpoint_size_from_funcptr (uint64 ptr);
 
 		public abstract async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator,
-			Cancellable? cancellable) throws Error, IOError;
+			Cancellable? cancellable) throws Efni.Error, IOError;
 	}
 
 	public delegate bool FoundRangeFunc (RangeDetails details);
@@ -197,7 +199,7 @@ namespace Frida.Barebone {
 		DEVICE;
 
 		public string to_nick () {
-			return Marshal.enum_to_nick<MappingType> (this);
+			return Efni.Marshal.enum_to_nick<MappingType> (this);
 		}
 	}
 
@@ -217,13 +219,13 @@ namespace Frida.Barebone {
 
 		public abstract void force_return ();
 
-		public abstract async void commit (Cancellable? cancellable) throws Error, IOError;
+		public abstract async void commit (Cancellable? cancellable) throws Efni.Error, IOError;
 	}
 
 	public interface InlineHook : Object {
-		public abstract async void destroy (Cancellable? cancellable) throws Error, IOError;
-		public abstract async void enable (Cancellable? cancellable) throws Error, IOError;
-		public abstract async void disable (Cancellable? cancellable) throws Error, IOError;
+		public abstract async void destroy (Cancellable? cancellable) throws Efni.Error, IOError;
+		public abstract async void enable (Cancellable? cancellable) throws Efni.Error, IOError;
+		public abstract async void disable (Cancellable? cancellable) throws Efni.Error, IOError;
 	}
 
 	internal enum AddressingMode {
@@ -235,7 +237,7 @@ namespace Frida.Barebone {
 	// arrives while the next command is pending, and that command consumes it instead — leaving
 	// its caller with an empty response and the stub still in the old mode. Vala rejects a yield
 	// inside a finally block, so callers hold on to any failure across the restore.
-	internal static async bool halt_guest (Debugger debugger, Cancellable? cancellable) throws Error, IOError {
+	internal static async bool halt_guest (Debugger debugger, Cancellable? cancellable) throws Efni.Error, IOError {
 		bool was_running = debugger.state != STOPPED;
 		if (was_running)
 			yield debugger.stop (cancellable);
@@ -244,13 +246,13 @@ namespace Frida.Barebone {
 	}
 
 	internal static async void resume_guest (Debugger debugger, bool was_running, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		if (was_running)
 			yield debugger.resume (cancellable);
 	}
 
 	internal static async bool enter_physical_addressing (Debugger debugger, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		bool was_running = yield halt_guest (debugger, cancellable);
 
 		yield set_addressing_mode (debugger, PHYSICAL, cancellable);
@@ -259,23 +261,23 @@ namespace Frida.Barebone {
 	}
 
 	internal static async void leave_physical_addressing (Debugger debugger, bool was_running, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		yield set_addressing_mode (debugger, VIRTUAL, cancellable);
 
 		yield resume_guest (debugger, was_running, cancellable);
 	}
 
 	internal static async void set_addressing_mode (Debugger debugger, AddressingMode mode, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		yield debugger.set_physical_memory_mode (mode == PHYSICAL, cancellable);
 	}
 
-	internal static void throw_if_failed (GLib.Error? failure) throws Error, IOError {
+	internal static void throw_if_failed (GLib.Error? failure) throws Efni.Error, IOError {
 		if (failure == null)
 			return;
 		if (failure is IOError)
 			throw (IOError) failure;
-		throw (Error) failure;
+		throw (Efni.Error) failure;
 	}
 
 	internal static Gee.List<RangeDetails> coalesce_ranges (Gee.List<RangeDetails> ranges) {

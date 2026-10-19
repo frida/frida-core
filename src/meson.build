@@ -9,8 +9,6 @@ base_sources = [
   'host-session-service.vala',
   'agent-container.vala',
   'adb.vala',
-  'gdb.vala',
-  'debugger.vala',
   'system.vala',
   'file-monitor.vala',
   'async-task.vala',
@@ -591,79 +589,9 @@ endif
 if have_fruity_backend
   backend_sources += [
     'fruity' / 'fruity-host-session.vala',
-    'fruity' / 'device-monitor.vala',
-    'fruity' / 'network-stack.vala',
-    'fruity' / 'xpc.vala',
-    'fruity' / 'dtx.vala',
-    'fruity' / 'lockdown.vala',
-    'fruity' / 'installation-proxy.vala',
-    'fruity' / 'springboard-services.vala',
-    'fruity' / 'lldb.vala',
     'fruity' / 'injector.vala',
-    'fruity' / 'debugger-mappings.vala',
-    'fruity' / 'usbmux.vala',
-    'fruity' / 'dns.vala',
-    'fruity' / 'keyed-archive.vala',
-    'fruity' / 'plist.vala',
-    'fruity' / 'plist-service.vala',
-    'fruity' / 'opack.vala',
-    'fruity' / 'kcdata.vala',
-    'fruity' / 'kdebug.vala',
-    'fruity' / 'kperfdata.vala',
-    'fruity' / 'cs-signature.vala',
   ]
-  if host_os != 'macos'
-    backend_sources += [
-      'fruity' / 'device-monitor-portable.vala',
-      'fruity' / 'pairing.vala',
-      'fruity' / 'tunnel.vala',
-      'fruity' / 'tls-psk.vala',
-      'fruity' / 'virtual-network-stack.vala',
-      'fruity' / 'usb.vala',
-      'fruity' / 'ncm.vala',
-    ]
-  endif
-
-  if host_os_family == 'windows'
-    backend_sources += 'fruity' / 'device-monitor-windows.vala'
-  elif host_os == 'macos'
-    backend_sources += 'fruity' / 'device-monitor-macos.vala'
-  elif host_os == 'linux'
-    backend_sources += 'fruity' / 'device-monitor-linux.vala'
-  endif
-
-  if host_os_family == 'windows'
-    backend_sources += 'fruity' / 'device-monitor-windows.c'
-  elif host_os_family == 'darwin'
-    backend_sources += 'fruity' / 'device-monitor-darwin.m'
-  else
-    backend_sources += 'fruity' / 'device-monitor-unix.c'
-  endif
-
-  backend_vala_args += '--pkg=libnghttp2'
-  if host_os != 'macos'
-    backend_deps += openssl_dep
-    backend_vala_args += [
-      '--pkg=openssl',
-      '--pkg=libngtcp2',
-      ngtcp2_crypto_quictls_dep.found() ? '--pkg=libngtcp2_crypto_quictls' : '--pkg=libngtcp2_crypto_ossl',
-      '--pkg=libusb-1.0',
-      '--pkg=lwip',
-    ]
-  endif
-  if host_os_family == 'windows'
-    backend_vala_args += '--pkg=windows-windns'
-  elif host_os_family == 'darwin'
-    backend_vala_args += [
-      '--pkg=darwin-xnu',
-      '--pkg=darwin-xpc',
-      '--pkg=darwin-gcd',
-      '--pkg=corefoundation',
-    ]
-  endif
-  if host_os_family == 'linux'
-    backend_vala_args += '--pkg=linux'
-  endif
+  backend_deps += idun_dep
 endif
 
 if have_droidy_backend
@@ -727,7 +655,7 @@ subdir('compiler')
 
 core_sources = base_sources + backend_sources + compiler_sources
 
-internal_libs = [base, netif, pipe] + backend_libs
+internal_libs = [base, netif, pipe] + backend_libs + efni_libs + idun_libs
 internal_deps = [base_dep, netif_dep, pipe_dep]
 
 if host_os_family == 'windows'

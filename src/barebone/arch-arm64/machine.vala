@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class Arm64Machine : Object, Machine {
@@ -74,7 +76,7 @@ namespace Frida.Barebone {
 			Object (debugger: debugger);
 		}
 
-		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
+		public async size_t query_page_size (Cancellable? cancellable) throws Efni.Error, IOError {
 			if ("parallels" in debugger.features)
 				return SMALLEST_GRANULE;
 
@@ -86,10 +88,10 @@ namespace Frida.Barebone {
 			return p.granule;
 		}
 
-		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
+		public async uint query_exception_level (Cancellable? cancellable) throws Efni.Error, IOError {
 			DebuggerException? exception = debugger.exception;
 			if (exception == null)
-				throw new Error.INVALID_OPERATION ("Unable to query in current state");
+				throw new Efni.Error.INVALID_OPERATION ("Unable to query in current state");
 			DebuggerThread thread = exception.thread;
 
 			var cpsr = yield thread.read_register ("cpsr", cancellable);
@@ -98,7 +100,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			Gee.List<RangeDetails> ranges = ("corellium" in debugger.features)
 				? yield collect_ranges_using_corellium (cancellable)
 				: yield collect_ranges_using_mmu (cancellable);
@@ -110,7 +112,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async Gee.List<RangeDetails> collect_ranges_using_mmu (Cancellable? cancellable) throws Error, IOError {
+		private async Gee.List<RangeDetails> collect_ranges_using_mmu (Cancellable? cancellable) throws Efni.Error, IOError {
 			var result = new Gee.ArrayList<RangeDetails> ();
 
 			MMUParameters p = yield load_mmu_parameters (cancellable);
@@ -129,7 +131,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void collect_ranges_in_table (uint64 table_address, uint level, uint64 upper_bits, MMUParameters p,
-				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Error, IOError {
+				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint max_entries = compute_max_entries (level, p);
 			Buffer entries = yield read_physical_buffer (table_address, max_entries * Descriptor.SIZE, cancellable);
 			uint shift = address_shift_at_level (level, p.granule);
@@ -155,7 +157,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async Gee.List<RangeDetails> collect_ranges_using_corellium (Cancellable? cancellable) throws Error, IOError {
+		private async Gee.List<RangeDetails> collect_ranges_using_corellium (Cancellable? cancellable) throws Efni.Error, IOError {
 			var result = new Gee.ArrayList<RangeDetails> ();
 
 			string pt = yield debugger.run_remote_command ("pt", cancellable);
@@ -168,7 +170,7 @@ namespace Frida.Barebone {
 
 				string[] range_tokens = range.split ("-");
 				if (range_tokens.length != 2)
-					throw new Error.PROTOCOL ("Unexpected Corellium response; please file a bug");
+					throw new Efni.Error.PROTOCOL ("Unexpected Corellium response; please file a bug");
 
 				uint64 base_va = uint64.parse (range_tokens[0], 16);
 				uint64 end_va = uint64.parse (range_tokens[1], 16) + 1;
@@ -184,7 +186,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
 			bool was_running = yield begin_physical_addressing (cancellable);
@@ -200,14 +202,14 @@ namespace Frida.Barebone {
 			throw_if_failed (failure);
 
 			if (allocation == null)
-				throw new Error.NOT_SUPPORTED ("Unable to insert page table mapping; please file a bug");
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to insert page table mapping; please file a bug");
 
 			return allocation;
 		}
 
 		private async Allocation? maybe_insert_descriptor_in_table (Gee.List<uint64?> physical_addresses,
 				uint64 table_address, uint level, uint64 upper_bits, MMUParameters p, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint max_entries = compute_max_entries (level, p);
 			uint shift = address_shift_at_level (level, p.granule);
 
@@ -286,7 +288,7 @@ namespace Frida.Barebone {
 		// A kernel using permission indirection reads an index out of those bits instead, leaving
 		// AP to say nothing at all, so both kinds of page are granted by sampling one the kernel
 		// already made that way and replaying its exact attribute encoding.
-		public async void learn_permission_templates (uint64 code_va, Cancellable? cancellable) throws Error, IOError {
+		public async void learn_permission_templates (uint64 code_va, Cancellable? cancellable) throws Efni.Error, IOError {
 			code_template_descriptor = yield read_level3_descriptor (code_va, cancellable);
 			code_template_known = true;
 
@@ -295,7 +297,7 @@ namespace Frida.Barebone {
 			data_template_known = true;
 		}
 
-		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Efni.Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 			uint64 descriptor = yield read_level3_descriptor (va, cancellable);
 			uint64 page_mask = (1ULL << inpage_bits_for_granule (p.granule)) - 1;
@@ -303,7 +305,7 @@ namespace Frida.Barebone {
 		}
 
 		public override async Bytes read_virtual (uint64 va, size_t size, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (physical_memory == null)
 				return yield debugger.read_byte_array (va, size, cancellable);
 
@@ -314,7 +316,7 @@ namespace Frida.Barebone {
 				uint64 cur_va = va + offset;
 				uint64 pa = yield translate_address (cur_va, cancellable);
 				if (!physical_memory.contains (pa))
-					throw new Error.NOT_SUPPORTED ("Address 0x%" + uint64.FORMAT_MODIFIER + "x is a device, not memory", cur_va);
+					throw new Efni.Error.NOT_SUPPORTED ("Address 0x%" + uint64.FORMAT_MODIFIER + "x is a device, not memory", cur_va);
 				size_t chunk = size_t.min ((size_t) (p.granule - (cur_va & (p.granule - 1))), size - offset);
 				taken.append (physical_memory.read (pa, chunk));
 				offset += chunk;
@@ -323,7 +325,7 @@ namespace Frida.Barebone {
 			return ByteArray.free_to_bytes ((owned) taken);
 		}
 
-		public override async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+		public override async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (physical_memory == null) {
 				yield debugger.write_byte_array (va, new Bytes (data), cancellable);
 				return;
@@ -340,13 +342,13 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async Buffer read_physical_buffer (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
+		private async Buffer read_physical_buffer (uint64 pa, size_t size, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (physical_memory != null && physical_memory.contains (pa))
 				return debugger.make_buffer (new Bytes (physical_memory.read (pa, size)));
 			return yield debugger.read_buffer (pa, size, cancellable);
 		}
 
-		private async void write_physical_buffer (uint64 pa, Bytes data, Cancellable? cancellable) throws Error, IOError {
+		private async void write_physical_buffer (uint64 pa, Bytes data, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (physical_memory != null && physical_memory.contains (pa)) {
 				physical_memory.write (pa, data.get_data ());
 				return;
@@ -354,13 +356,13 @@ namespace Frida.Barebone {
 			yield debugger.write_byte_array (pa, data, cancellable);
 		}
 
-		public async uint8[] read_physical (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
+		public async uint8[] read_physical (uint64 pa, size_t size, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (physical_memory != null && physical_memory.contains (pa))
 				return physical_memory.read (pa, size);
 			return yield read_physical_via_stub (pa, size, cancellable);
 		}
 
-		public async void write_physical (uint64 pa, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+		public async void write_physical (uint64 pa, uint8[] data, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (physical_memory != null && physical_memory.contains (pa)) {
 				physical_memory.write (pa, data);
 				return;
@@ -376,7 +378,7 @@ namespace Frida.Barebone {
 			throw_if_failed (failure);
 		}
 
-		public async uint8[] read_physical_via_stub (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
+		public async uint8[] read_physical_via_stub (uint64 pa, size_t size, Cancellable? cancellable) throws Efni.Error, IOError {
 			bool was_running = yield enter_physical_addressing (debugger, cancellable);
 			uint8[]? data = null;
 			GLib.Error? failure = null;
@@ -391,7 +393,7 @@ namespace Frida.Barebone {
 			return data;
 		}
 
-		public async uint64 read_level3_descriptor (uint64 va, Cancellable? cancellable) throws Error, IOError {
+		public async uint64 read_level3_descriptor (uint64 va, Cancellable? cancellable) throws Efni.Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 			bool was_running = yield begin_physical_addressing (cancellable);
 			uint64 descriptor = 0;
@@ -416,12 +418,12 @@ namespace Frida.Barebone {
 		}
 
 		public override async void protect_pages_leaving_the_flush (uint64 virtual_address, size_t size,
-				Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
+				Gum.PageProtection prot, Cancellable? cancellable) throws Efni.Error, IOError {
 			yield write_page_protection (virtual_address, size, prot, cancellable);
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (!mmu_registers_available) {
 				yield set_pages_protection (virtual_address, size, prot, cancellable);
 				return;
@@ -436,7 +438,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void ensure_level3_coverage (uint64 virtual_address, size_t size, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (code_allocator == null)
 				return;
 
@@ -469,7 +471,7 @@ namespace Frida.Barebone {
 		}
 
 		private async Gee.List<BlockMapping> locate_blocks (uint64 start_va, uint64 end_va, MMUParameters p,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			var blocks = new Gee.ArrayList<BlockMapping> ();
 
 			bool was_running = yield begin_physical_addressing (cancellable);
@@ -496,7 +498,7 @@ namespace Frida.Barebone {
 		}
 
 		private async BlockMapping? locate_block (uint64 va, MMUParameters p, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint64 table_pa = p.tt1;
 			uint level = p.first_level;
 			while (true) {
@@ -522,7 +524,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void split_block (BlockMapping block, uint64 table_pa, MMUParameters p, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint sub_level = block.level + 1;
 			uint64 sub_size = (sub_level == 3)
 				? (uint64) 1 << inpage_bits_for_granule (p.granule)
@@ -545,7 +547,7 @@ namespace Frida.Barebone {
 		}
 
 		private async uint64 resolve_physical_address (uint64 va, MMUParameters p, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint64 table_pa = p.tt1;
 			uint level = p.first_level;
 			while (true) {
@@ -565,7 +567,7 @@ namespace Frida.Barebone {
 					return (raw & INT48_MASK & ~(span - 1)) | (va & (span - 1));
 				}
 				if (desc.kind != TABLE)
-					throw new Error.NOT_SUPPORTED ("Unable to resolve physical address for 0x%" + uint64.FORMAT_MODIFIER + "x", va);
+					throw new Efni.Error.NOT_SUPPORTED ("Unable to resolve physical address for 0x%" + uint64.FORMAT_MODIFIER + "x", va);
 
 				table_pa = desc.target_address;
 				level++;
@@ -576,9 +578,9 @@ namespace Frida.Barebone {
 		// clearing write before adding execute; the helpers take a page-aligned base and a page
 		// count, and handle the TLB and cache maintenance themselves.
 		private async void set_pages_protection (uint64 virtual_address, size_t size, Gum.PageProtection prot,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			if (set_memory_x == 0)
-				throw new Error.NOT_SUPPORTED ("Kernel set_memory_* helpers are unavailable");
+				throw new Efni.Error.NOT_SUPPORTED ("Kernel set_memory_* helpers are unavailable");
 
 			uint64 aligned = virtual_address & ~(uint64) 0xfff;
 			uint num_pages = (uint) (((virtual_address + size + 0xfff) & ~(uint64) 0xfff) - aligned) / 4096;
@@ -594,7 +596,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void write_page_protection (uint64 virtual_address, size_t size, Gum.PageProtection prot,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 
 			bool was_running = yield begin_physical_addressing (cancellable);
@@ -613,7 +615,7 @@ namespace Frida.Barebone {
 			throw_if_failed (failure);
 		}
 
-		private async void flush_translations (Cancellable? cancellable) throws Error, IOError {
+		private async void flush_translations (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (flush_stub == null) {
 				flush_stub = yield code_allocator.allocate (code_allocator.page_size, code_allocator.page_size,
 					cancellable);
@@ -631,7 +633,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void grant_execution (uint64 virtual_address, size_t size, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			yield ensure_level3_coverage (virtual_address, size, cancellable);
 
 			MMUParameters p = yield load_mmu_parameters (cancellable);
@@ -654,7 +656,7 @@ namespace Frida.Barebone {
 
 		// The bridge reads and writes guest physical memory directly, so the stub's
 		// physical-addressing mode, which requires a halted target, is unnecessary.
-		private async bool begin_physical_addressing (Cancellable? cancellable) throws Error, IOError {
+		private async bool begin_physical_addressing (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (physical_memory != null)
 				return false;
 
@@ -662,21 +664,21 @@ namespace Frida.Barebone {
 		}
 
 		private async void end_physical_addressing (bool was_running, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (physical_memory != null)
 				return;
 
 			yield leave_physical_addressing (debugger, was_running, cancellable);
 		}
 
-		private async MMUParameters load_mmu_parameters (Cancellable? cancellable) throws Error, IOError {
+		private async MMUParameters load_mmu_parameters (Cancellable? cancellable) throws Efni.Error, IOError {
 			if (cached_mmu_parameters == null)
 				cached_mmu_parameters = yield MMUParameters.load (debugger, cancellable);
 			return cached_mmu_parameters;
 		}
 
 		private async void perform_protect_pages (uint64 start_va, uint num_pages, Gum.PageProtection prot, MMUParameters p,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			var table_cache = new TableWalkCache ();
 			uint pages_processed = 0;
 
@@ -708,7 +710,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void protect_pages_in_table (uint64 current_va, uint batch_size, Gum.PageProtection prot,
-				uint64 table_pa, MMUParameters p, Cancellable? cancellable) throws Error, IOError {
+				uint64 table_pa, MMUParameters p, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint index_bits = num_address_bits_at_level (3, p);
 			uint index_shift = inpage_bits_for_granule (p.granule);
 			uint index_mask = (1U << index_bits) - 1;
@@ -734,7 +736,7 @@ namespace Frida.Barebone {
 		}
 
 		private async uint64 find_level3_table (uint64 va, MMUParameters p, TableWalkCache cache, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			TableWalkResult? cached = cache.lookup (va, p);
 			if (cached != null)
 				return yield walk_to_level3 (va, cached.table_pa, cached.level, p, cache, cancellable);
@@ -743,7 +745,7 @@ namespace Frida.Barebone {
 		}
 
 		private async uint64 walk_to_level3 (uint64 va, uint64 start_table_pa, uint start_level, MMUParameters p,
-				TableWalkCache cache, Cancellable? cancellable) throws Error, IOError {
+				TableWalkCache cache, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 table_pa = start_table_pa;
 			uint level = start_level;
 
@@ -760,7 +762,7 @@ namespace Frida.Barebone {
 				Descriptor desc = Descriptor.parse (raw, level, p.granule);
 
 				if (desc.kind != TABLE)
-					throw new Error.NOT_SUPPORTED ("Walk failed at level %u", level);
+					throw new Efni.Error.NOT_SUPPORTED ("Walk failed at level %u", level);
 
 				table_pa = desc.target_address;
 				level++;
@@ -770,7 +772,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void clear_pxn_table_bits_for_va (uint64 va, MMUParameters p, TableWalkCache cache, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint64 table_pa = p.tt1;
 			for (uint level = p.first_level; level != 3; level++) {
 				uint entries = compute_max_entries (level, p);
@@ -847,7 +849,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			unowned uint8[] scanner_blob = Data.Barebone.get_memory_scanner_arm64_elf_blob ().data;
 
 			var raw_scanner = new Bytes.static (scanner_blob);
@@ -856,7 +858,7 @@ namespace Frida.Barebone {
 			try {
 				scanner = new Gum.ElfModule.from_blob (raw_scanner);
 			} catch (Gum.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
+				throw new Efni.Error.NOT_SUPPORTED ("%s", e.message);
 			}
 
 			size_t vm_size = (size_t) scanner.mapped_size;
@@ -895,7 +897,7 @@ namespace Frida.Barebone {
 
 			RangeDetails? stack_range = writable_ranges.first_match (r => r.contains_virtual_address (old_sp));
 			if (stack_range == null)
-				throw new Error.NOT_SUPPORTED ("Unable to find stack memory range");
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to find stack memory range");
 
 			uint64 module_pa;
 			size_t logical_page_size = 4096;
@@ -950,7 +952,7 @@ namespace Frida.Barebone {
 			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, landing_zone_va, 4, cancellable);
 			DebuggerException ex = yield debugger.continue_until_exception (cancellable);
 			if (ex.breakpoint != bp)
-				throw new Error.NOT_SUPPORTED ("Breakpoint did not trigger; please file a bug");
+				throw new Efni.Error.NOT_SUPPORTED ("Breakpoint did not trigger; please file a bug");
 			yield bp.remove (cancellable);
 
 			var num_matches = (uint) yield thread.read_register ("x0", cancellable);
@@ -972,7 +974,7 @@ namespace Frida.Barebone {
 			return matches;
 		}
 
-		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error {
+		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Efni.Error {
 			Gum.ElfArm64Relocation type = (Gum.ElfArm64Relocation) r.type;
 			switch (type) {
 				case ABS64:
@@ -986,14 +988,14 @@ namespace Frida.Barebone {
 					relocated.write_int32 ((size_t) r.address, (int32) diff);
 					break;
 				default:
-					throw new Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
-						Marshal.enum_to_nick<Gum.ElfArm64Relocation> (type));
+					throw new Efni.Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
+						Efni.Marshal.enum_to_nick<Gum.ElfArm64Relocation> (type));
 			}
 		}
 
-		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
+		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (args.length > 8)
-				throw new Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
+				throw new Efni.Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
 
 			bool was_running = debugger.state != STOPPED;
 			if (was_running)
@@ -1044,7 +1046,7 @@ namespace Frida.Barebone {
 			return retval;
 		}
 
-		public async void execute (uint64 start, uint64 end, Cancellable? cancellable) throws Error, IOError {
+		public async void execute (uint64 start, uint64 end, Cancellable? cancellable) throws Efni.Error, IOError {
 			bool was_running = debugger.state != STOPPED;
 			if (was_running)
 				yield debugger.stop (cancellable);
@@ -1071,13 +1073,13 @@ namespace Frida.Barebone {
 		// reschedule onto another core, and the stub identifies threads by core; nothing else reaches
 		// these addresses (a cold landing zone, or the scheduler with a predicate), so whichever
 		// thread stops there is ours.
-		public async DebuggerThread run_until_pc (uint64 address, Cancellable? cancellable) throws Error, IOError {
+		public async DebuggerThread run_until_pc (uint64 address, Cancellable? cancellable) throws Efni.Error, IOError {
 			DebuggerBreakpoint bp = yield debugger.add_breakpoint (SOFT, address, 4, cancellable);
 			DebuggerException ex = null;
 			int64 deadline = get_monotonic_time () + LANDING_TIMEOUT_USEC;
 			do {
 				if (get_monotonic_time () >= deadline)
-					throw new Error.TIMED_OUT ("Timed out waiting for the call to return");
+					throw new Efni.Error.TIMED_OUT ("Timed out waiting for the call to return");
 
 				ex = yield debugger.continue_until_exception (cancellable);
 			} while (ex.breakpoint != bp);
@@ -1089,7 +1091,7 @@ namespace Frida.Barebone {
 		// points at that core's per-processor data. Handing it the register of the core we began
 		// on would make every later access reach the wrong processor.
 		private async void restore_registers (DebuggerThread origin, DebuggerThread landed,
-				Gee.Map<string, Variant> saved, Cancellable? cancellable) throws Error, IOError {
+				Gee.Map<string, Variant> saved, Cancellable? cancellable) throws Efni.Error, IOError {
 			var restored = saved;
 			if (landed.id != origin.id) {
 				restored = new Gee.HashMap<string, Variant> ();
@@ -1100,7 +1102,7 @@ namespace Frida.Barebone {
 			yield landed.write_registers (restored, cancellable);
 		}
 
-		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
+		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Efni.Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
 			Buffer? stack = null;
@@ -1203,7 +1205,7 @@ namespace Frida.Barebone {
 				stack_state = MODIFIED;
 			}
 
-			public async void commit (Cancellable? cancellable) throws Error, IOError {
+			public async void commit (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (regs.get_data<bool> ("dirty"))
 					yield thread.write_registers (regs, cancellable);
 
@@ -1221,7 +1223,7 @@ namespace Frida.Barebone {
 		}
 
 		public async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			size_t page_size = allocator.page_size;
 			var allocation = yield allocator.allocate (page_size, page_size, cancellable);
 			uint64 code_va = allocation.virtual_address;
@@ -1335,7 +1337,7 @@ namespace Frida.Barebone {
 				this.debugger = debugger;
 			}
 
-			public async void destroy (Cancellable? cancellable) throws Error, IOError {
+			public async void destroy (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (state == DESTROYED)
 					return;
 
@@ -1352,16 +1354,16 @@ namespace Frida.Barebone {
 					yield debugger.resume (cancellable);
 			}
 
-			public async void enable (Cancellable? cancellable) throws Error, IOError {
+			public async void enable (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (state == ENABLED)
 					return;
 				if (state != DISABLED)
-					throw new Error.INVALID_OPERATION ("Invalid operation");
+					throw new Efni.Error.INVALID_OPERATION ("Invalid operation");
 				yield debugger.write_byte_array (target, new_target_code, cancellable);
 				state = ENABLED;
 			}
 
-			public async void disable (Cancellable? cancellable) throws Error, IOError {
+			public async void disable (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (state != ENABLED)
 					return;
 				yield debugger.write_byte_array (target, old_target_code, cancellable);
@@ -1379,10 +1381,10 @@ namespace Frida.Barebone {
 			public bool sprr_enabled;
 			public uint64 sprr_perm;
 
-			public static async MMUParameters load (Debugger debugger, Cancellable? cancellable) throws Error, IOError {
+			public static async MMUParameters load (Debugger debugger, Cancellable? cancellable) throws Efni.Error, IOError {
 				DebuggerException? exception = debugger.exception;
 				if (exception == null)
-					throw new Error.INVALID_OPERATION ("Unable to query in current state");
+					throw new Efni.Error.INVALID_OPERATION ("Unable to query in current state");
 				DebuggerThread thread = exception.thread;
 
 				MMURegisters regs = yield MMURegisters.read (thread, cancellable);
@@ -1422,7 +1424,7 @@ namespace Frida.Barebone {
 			public uint64 sprr_config;
 			public uint64 sprr_perm;
 
-			public static async MMURegisters read (DebuggerThread thread, Cancellable? cancellable) throws Error, IOError {
+			public static async MMURegisters read (DebuggerThread thread, Cancellable? cancellable) throws Efni.Error, IOError {
 				var regs = new MMURegisters ();
 
 				Debugger client = thread.debugger;
@@ -1447,14 +1449,14 @@ namespace Frida.Barebone {
 					// The stub serves no system register, and the monitor command that would
 					// print them aborts the VM whenever another processor is somewhere it
 					// cannot be read from, so leave the caller to manage without them.
-					throw new Error.NOT_SUPPORTED ("Parallels serves no system register");
+					throw new Efni.Error.NOT_SUPPORTED ("Parallels serves no system register");
 				} else {
 					regs.tcr = yield thread.read_register ("tcr_el1", cancellable);
 					regs.ttbr1 = yield thread.read_register ("ttbr1_el1", cancellable);
 					try {
 						regs.sprr_config = yield thread.read_register ("sprr_config_el1", cancellable);
 						regs.sprr_perm = yield thread.read_register ("sprr_el1br1_el1", cancellable);
-					} catch (Error e) {
+					} catch (Efni.Error e) {
 					}
 				}
 
@@ -1587,9 +1589,9 @@ namespace Frida.Barebone {
 				this.debugger = debugger;
 			}
 
-			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
+			public async void deallocate (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (old_descriptors == null)
-					throw new Error.INVALID_OPERATION ("Already deallocated");
+					throw new Efni.Error.INVALID_OPERATION ("Already deallocated");
 				Bytes d = old_descriptors;
 				old_descriptors = null;
 				bool was_running = yield enter_physical_addressing (debugger, cancellable);
@@ -1610,7 +1612,7 @@ namespace Frida.Barebone {
 			64K = 65536
 		}
 
-		private static Granule granule_from_tg1 (uint tg1) throws Error {
+		private static Granule granule_from_tg1 (uint tg1) throws Efni.Error {
 			switch (tg1) {
 				case 1:
 					return 16K;
@@ -1619,7 +1621,7 @@ namespace Frida.Barebone {
 				case 3:
 					return 64K;
 				default:
-					throw new Error.PROTOCOL ("Invalid TG1 value");
+					throw new Efni.Error.PROTOCOL ("Invalid TG1 value");
 			}
 		}
 
@@ -1733,7 +1735,7 @@ namespace Frida.Barebone {
 			return prot;
 		}
 
-		private uint64 apply_protection_bits (uint64 descriptor, Gum.PageProtection prot, MMUParameters p) throws Error {
+		private uint64 apply_protection_bits (uint64 descriptor, Gum.PageProtection prot, MMUParameters p) throws Efni.Error {
 			bool want_exec = (prot & Gum.PageProtection.EXECUTE) != 0;
 			if (want_exec && code_template_known)
 				return apply_code_template (descriptor, p);
@@ -1786,7 +1788,7 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		private static uint find_sprr_index_for_permissions (Gum.PageProtection prot, MMUParameters p) throws Error {
+		private static uint find_sprr_index_for_permissions (Gum.PageProtection prot, MMUParameters p) throws Efni.Error {
 			bool want_read = (prot & Gum.PageProtection.READ) != 0;
 			bool want_write = (prot & Gum.PageProtection.WRITE) != 0;
 			bool want_exec = (prot & Gum.PageProtection.EXECUTE) != 0;
@@ -1819,7 +1821,7 @@ namespace Frida.Barebone {
 					return i;
 			}
 
-			throw new Error.INVALID_ARGUMENT ("No suitable SPRR slot found for protection 0x%x", prot);
+			throw new Efni.Error.INVALID_ARGUMENT ("No suitable SPRR slot found for protection 0x%x", prot);
 		}
 
 		private static uint64 apply_sprr_index_to_descriptor (uint64 descriptor, uint sprr_index) {

@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	/**
 	 * What a Linux kernel names, taken from wherever the caller happens to have it. Ask it
@@ -58,7 +60,11 @@ namespace Frida {
 		 * @param path the image's location
 		 */
 		public static LinuxKernelImage open (string path) throws Error {
-			return from_blob (FS.read_all_bytes_sync (File.new_for_path (path)));
+			try {
+				return from_blob (FS.read_all_bytes_sync (File.new_for_path (path)));
+			} catch (Efni.Error e) {
+				throw error_from_efni (e);
+			}
 		}
 
 		public override bool try_find_symbol (string name, out uint64 address) {
@@ -116,7 +122,11 @@ namespace Frida {
 		 * @param path the map's location
 		 */
 		public static LinuxSystemMap open (string path) throws Error {
-			return from_blob (FS.read_all_bytes_sync (File.new_for_path (path)));
+			try {
+				return from_blob (FS.read_all_bytes_sync (File.new_for_path (path)));
+			} catch (Efni.Error e) {
+				throw error_from_efni (e);
+			}
 		}
 
 		public override bool try_find_symbol (string name, out uint64 address) {

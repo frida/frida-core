@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	private sealed class EmulatorInstrumentation : InternalAgent {
 		private LocalConnection local_connection;

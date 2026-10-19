@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class LinuxHelperBackend : Object, LinuxHelper {
 		public signal void idle ();

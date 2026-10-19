@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class WindowsHelperProcess : Object, WindowsHelper {
 		public TemporaryDirectory tempdir {

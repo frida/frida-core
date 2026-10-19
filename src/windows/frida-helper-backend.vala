@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class WindowsHelperBackend : Object, WindowsHelper {
 		public PrivilegeLevel level {
@@ -37,6 +39,8 @@ namespace Frida {
 				try {
 					yield close_request.future.wait_async (cancellable);
 				} catch (Error e) {
+					assert_not_reached ();
+				} catch (Efni.Error e) {
 					assert_not_reached ();
 				}
 			} else {

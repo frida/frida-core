@@ -158,7 +158,7 @@ if is_shared
 else
   pkg_kwargs += {
     'libraries': core_public_lib,
-    'requires_private': ['gmodule-2.0', 'gee-0.8', 'libsoup-3.0', 'frida-gum-1.0', 'frida-gumjs-inspector-1.0', 'libbrotlidec'] + backend_reqs_private,
+    'requires_private': ['gmodule-2.0', 'gee-0.8', 'libsoup-3.0', 'efni-1.0', 'frida-gum-1.0', 'frida-gumjs-inspector-1.0', 'libbrotlidec'] + backend_reqs_private,
     'libraries_private': backend_libs_private,
   }
 endif

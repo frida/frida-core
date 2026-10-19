@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida.BareboneTest {
 	public void add_tests () {
 		GLib.Test.add_func ("/Barebone/IA32/enumerate-ranges-walks-legacy-tables", () => {
@@ -1977,7 +1979,7 @@ namespace Frida.BareboneTest {
 				yield collect_ranges (machine, Gum.PageProtection.READ);
 				assert_not_reached ();
 			} catch (GLib.Error e) {
-				assert_true (e is Error.NOT_SUPPORTED);
+				assert_true (e is Efni.Error.NOT_SUPPORTED);
 			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
@@ -2096,7 +2098,7 @@ FAIL: %s
 				yield machine.protect_pages (0x00200000, 0x1000, READ | WRITE, null);
 				assert_not_reached ();
 			} catch (GLib.Error e) {
-				assert_true (e is Error.NOT_SUPPORTED);
+				assert_true (e is Efni.Error.NOT_SUPPORTED);
 			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
@@ -2244,8 +2246,8 @@ FAIL: %s
 			try {
 				yield machine.translate_address (0x00003000, null);
 				assert_not_reached ();
-			} catch (Error e) {
-				assert_true (e is Error.NOT_SUPPORTED);
+			} catch (Efni.Error e) {
+				assert_true (e is Efni.Error.NOT_SUPPORTED);
 			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
@@ -2311,8 +2313,8 @@ FAIL: %s
 			try {
 				yield machine.protect_pages (0x00400000, 4096, READ | WRITE, null);
 				assert_not_reached ();
-			} catch (Error e) {
-				assert_true (e is Error.NOT_SUPPORTED);
+			} catch (Efni.Error e) {
+				assert_true (e is Efni.Error.NOT_SUPPORTED);
 			}
 
 			assert_true (target.read_uint32 (PD_PA + (1 * 4)) == 0x00800081);
@@ -2351,8 +2353,8 @@ FAIL: %s
 			try {
 				machine.apply_relocation (make_relocation (Gum.ElfIA32Relocation.TLS_DESC, 0), base_va, image);
 				assert_not_reached ();
-			} catch (Error e) {
-				assert_true (e is Error.NOT_SUPPORTED);
+			} catch (Efni.Error e) {
+				assert_true (e is Efni.Error.NOT_SUPPORTED);
 			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
@@ -2468,8 +2470,8 @@ FAIL: %s
 			try {
 				yield machine.translate_address (0x00003000, null);
 				assert_not_reached ();
-			} catch (Error e) {
-				assert_true (e is Error.NOT_SUPPORTED);
+			} catch (Efni.Error e) {
+				assert_true (e is Efni.Error.NOT_SUPPORTED);
 			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
@@ -2522,8 +2524,8 @@ FAIL: %s
 			try {
 				yield machine.protect_pages (0x200000, 4096, READ | WRITE, null);
 				assert_not_reached ();
-			} catch (Error e) {
-				assert_true (e is Error.NOT_SUPPORTED);
+			} catch (Efni.Error e) {
+				assert_true (e is Efni.Error.NOT_SUPPORTED);
 			}
 
 			assert_true (target.read_uint64 (X64_PD_PA + (1 * 8)) == 0x8000000140000081);
@@ -2561,8 +2563,8 @@ FAIL: %s
 			try {
 				machine.apply_relocation (make_relocation (Gum.ElfX64Relocation.TLSGD, 0), base_va, image);
 				assert_not_reached ();
-			} catch (Error e) {
-				assert_true (e is Error.NOT_SUPPORTED);
+			} catch (Efni.Error e) {
+				assert_true (e is Efni.Error.NOT_SUPPORTED);
 			}
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n", e.message);
@@ -2900,11 +2902,11 @@ FAIL: %s
 			return new Barebone.PhysicalAllocator (machine, 4096, config);
 		}
 
-		private async void clear_marker (QemuGuest guest, uint64 va) throws Error, IOError {
+		private async void clear_marker (QemuGuest guest, uint64 va) throws Error, Efni.Error, IOError {
 			yield guest.client.write_byte_array (va, new Bytes (new uint8[4]), null);
 		}
 
-		private async uint32 read_marker (QemuGuest guest, uint64 va) throws Error, IOError {
+		private async uint32 read_marker (QemuGuest guest, uint64 va) throws Error, Efni.Error, IOError {
 			return (yield guest.client.read_buffer (va, 4, null)).read_uint32 (0);
 		}
 
@@ -3099,7 +3101,7 @@ FAIL: %s
 		}
 
 		private async void check_protect_pages_takes_effect (Barebone.Machine machine, QemuGuest guest,
-				Gee.List<GuestPage> pages) throws Error, IOError {
+				Gee.List<GuestPage> pages) throws Error, Efni.Error, IOError {
 			GuestPage? victim = null;
 			foreach (GuestPage page in pages) {
 				if (!page.writable && !page.large) {
@@ -3118,7 +3120,7 @@ FAIL: %s
 	}
 
 	private async Gee.List<Barebone.RangeDetails> collect_ranges (Barebone.Machine machine,
-			Gum.PageProtection prot) throws Error, IOError {
+			Gum.PageProtection prot) throws Error, Efni.Error, IOError {
 		var result = new Gee.ArrayList<Barebone.RangeDetails> ();
 		yield machine.enumerate_ranges (prot, r => {
 			result.add (r.clone ());
@@ -4474,7 +4476,7 @@ FAIL: %s
 			var client = new SocketClient ();
 			var connection = yield client.connect_to_host_async ("127.0.0.1", (uint16) uint.parse (port), null);
 			var debugger = yield Barebone.ParallelsStubClient.open (connection, null);
-			assert_true (debugger.arch == Frida.TargetArch.ARM64);
+			assert_true (debugger.arch == Efni.TargetArch.ARM64);
 			assert_true (debugger.pointer_size == 8);
 
 			var machine = new Barebone.Arm64Machine (debugger);
@@ -4605,7 +4607,7 @@ FAIL: %s
 		try {
 			Debugger debugger = yield Barebone.VirtualBoxDebugger.open ("127.0.0.1",
 				(uint16) uint.parse (port), null);
-			assert_true (debugger.arch == Frida.TargetArch.X64);
+			assert_true (debugger.arch == Efni.TargetArch.X64);
 			assert_true (debugger.pointer_size == 8);
 			assert_true (debugger.state == STOPPED);
 
@@ -4655,7 +4657,7 @@ FAIL: %s
 			var client = new SocketClient ();
 			var connection = yield client.connect_to_host_async ("127.0.0.1", (uint16) uint.parse (port), null);
 			var debugger = yield Barebone.VirtualBoxStubClient.open (connection, null);
-			assert_true (debugger.arch == Frida.TargetArch.X64);
+			assert_true (debugger.arch == Efni.TargetArch.X64);
 			assert_true (debugger.pointer_size == 8);
 
 			var machine = new Barebone.X64Machine (debugger);
@@ -7315,7 +7317,7 @@ FAIL: %s
 			this.arm_state = arm_state;
 		}
 
-		public async void open () throws Error, IOError {
+		public async void open () throws Error, Efni.Error, IOError {
 			service = new SocketService ();
 			uint16 port;
 			try {
@@ -7707,7 +7709,7 @@ FAIL: %s
 
 		public const uint MEMORY_SIZE_IN_MB = 256;
 
-		public static async QemuGuest? boot (GuestArch arch) throws Error, IOError {
+		public static async QemuGuest? boot (GuestArch arch) throws Error, Efni.Error, IOError {
 			uint16 port = pick_unused_port ();
 
 			Subprocess process;
@@ -7782,7 +7784,7 @@ FAIL: %s
 			}
 		}
 
-		public async Gee.List<Interval> query_mapped_intervals () throws Error, IOError {
+		public async Gee.List<Interval> query_mapped_intervals () throws Error, Efni.Error, IOError {
 			var result = new Gee.ArrayList<Interval> ();
 
 			// E.g.: 0000000000000000-0000800000000000 0000800000000000 -rw
@@ -7808,7 +7810,7 @@ FAIL: %s
 			return result;
 		}
 
-		public async Gee.List<GuestPage> query_pages () throws Error, IOError {
+		public async Gee.List<GuestPage> query_pages () throws Error, Efni.Error, IOError {
 			var result = new Gee.ArrayList<GuestPage> ();
 
 			// E.g.: 00000000d07ea000: 0000000001150000 -G--A----
@@ -7833,7 +7835,7 @@ FAIL: %s
 			return result;
 		}
 
-		public async GuestPage query_page (uint64 va) throws Error, IOError {
+		public async GuestPage query_page (uint64 va) throws Error, Efni.Error, IOError {
 			foreach (GuestPage page in yield query_pages ()) {
 				if (page.va == va)
 					return page;

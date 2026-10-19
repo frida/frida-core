@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class PipeTransport : Object {
 		public string local_address {

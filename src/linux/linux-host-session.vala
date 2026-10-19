@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class LinuxHostSessionBackend : LocalHostSessionBackend {
 		protected override LocalHostSessionProvider make_provider () {
@@ -107,6 +109,7 @@ namespace Frida {
 					var client = yield get_android_helper_client (cancellable);
 					yield client.transport.close (cancellable);
 				} catch (Error e) {
+				} catch (Efni.Error e) {
 				}
 			}
 #endif
@@ -574,6 +577,8 @@ namespace Frida {
 			try {
 				yield promise.future.wait_async (cancellable);
 			} catch (Error e) {
+				assert_not_reached ();
+			} catch (Efni.Error e) {
 				assert_not_reached ();
 			}
 
@@ -1443,6 +1448,7 @@ namespace Frida {
 						Posix.kill ((Posix.pid_t) pid, Posix.Signal.CONT);
 					}
 				} catch (Error e) {
+				} catch (Efni.Error e) {
 				}
 			}
 			zymbiote_patches.clear ();
@@ -2335,6 +2341,7 @@ namespace Frida {
 					var crash = parse_java_report (entry.message);
 					on_crash_received (crash);
 				} catch (Error e) {
+				} catch (Efni.Error e) {
 				}
 
 				return;
@@ -2375,6 +2382,7 @@ namespace Frida {
 				var crash = parse_native_report (report);
 				on_crash_received (crash);
 			} catch (Error e) {
+			} catch (Efni.Error e) {
 			}
 		}
 
@@ -2780,225 +2788,229 @@ namespace Frida {
 		}
 
 		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
-			ensure_active ();
+			try {
+				ensure_active ();
 
-			var reader = new VariantReader (parameters);
+				var reader = new VariantReader (parameters);
 
-			string type = reader.read_member ("type").get_string_value ();
-			reader.end_member ();
+				string type = reader.read_member ("type").get_string_value ();
+				reader.end_member ();
 
-			var reply = new VariantBuilder (VariantType.VARDICT);
+				var reply = new VariantBuilder (VariantType.VARDICT);
 
-			if (type == "read-events") {
-				var events = new VariantBuilder (new VariantType ("av"));
-				var processes = new VariantBuilder (new VariantType ("a(us)"));
+				if (type == "read-events") {
+					var events = new VariantBuilder (new VariantType ("av"));
+					var processes = new VariantBuilder (new VariantType ("a(us)"));
 
-				var abi_by_tgid = new Gee.HashMap<uint32, SyscallTracer.Abi> ();
-				var expired_tgids = new Gee.HashSet<uint32> ();
+					var abi_by_tgid = new Gee.HashMap<uint32, SyscallTracer.Abi> ();
+					var expired_tgids = new Gee.HashSet<uint32> ();
 
-				size_t total = 0;
+					size_t total = 0;
 
-				var drain_status = tracer.drain_events (ev => {
-					var event = ev.event;
-					uint32 tgid = event->tgid;
+					var drain_status = tracer.drain_events (ev => {
+						var event = ev.event;
+						uint32 tgid = event->tgid;
 
-					if (expired_tgids.contains (tgid))
-						return CONTINUE;
-
-					var abi = abi_by_tgid[tgid];
-					if (abi == INVALID) {
-						try {
-							abi = tracer.get_process_abi (tgid);
-						} catch (Error e) {
-							expired_tgids.add (tgid);
+						if (expired_tgids.contains (tgid))
 							return CONTINUE;
+
+						var abi = abi_by_tgid[tgid];
+						if (abi == INVALID) {
+							try {
+								abi = tracer.get_process_abi (tgid);
+							} catch (Error e) {
+								expired_tgids.add (tgid);
+								return CONTINUE;
+							}
+							abi_by_tgid[tgid] = abi;
 						}
-						abi_by_tgid[tgid] = abi;
+
+						unowned LinuxSyscallSignature[] sigs = (abi == COMPAT32)
+							? get_compat32_syscall_signatures ()
+							: get_syscall_signatures ();
+						LinuxSyscallSignature * sig = find_sig_by_nr (sigs, ev.se->syscall_nr);
+
+						Variant item = build_event_variant (ev, sig);
+						size_t item_size = (size_t) item.get_size ();
+
+						if (total != 0 && total + item_size > MAX_BATCH_BYTES)
+							return STOP;
+
+						events.add_value (new Variant.variant (item));
+						total += item_size;
+
+						return CONTINUE;
+					});
+
+					foreach (var e in abi_by_tgid.entries) {
+						unowned string abi = (e.value == COMPAT32) ? "compat32" : "native";
+						processes.add ("(us)", e.key, abi);
 					}
 
-					unowned LinuxSyscallSignature[] sigs = (abi == COMPAT32)
-						? get_compat32_syscall_signatures ()
-						: get_syscall_signatures ();
-					LinuxSyscallSignature * sig = find_sig_by_nr (sigs, ev.se->syscall_nr);
+					vardict_add (reply, "events", events.end ());
+					vardict_add (reply, "processes", processes.end ());
+					vardict_add (reply, "status",
+						(drain_status == SyscallTracer.DrainStatus.DRAINED) ? "drained" : "more");
 
-					Variant item = build_event_variant (ev, sig);
-					size_t item_size = (size_t) item.get_size ();
-
-					if (total != 0 && total + item_size > MAX_BATCH_BYTES)
-						return STOP;
-
-					events.add_value (new Variant.variant (item));
-					total += item_size;
-
-					return CONTINUE;
-				});
-
-				foreach (var e in abi_by_tgid.entries) {
-					unowned string abi = (e.value == COMPAT32) ? "compat32" : "native";
-					processes.add ("(us)", e.key, abi);
+					return reply.end ();
 				}
 
-				vardict_add (reply, "events", events.end ());
-				vardict_add (reply, "processes", processes.end ());
-				vardict_add (reply, "status",
-					(drain_status == SyscallTracer.DrainStatus.DRAINED) ? "drained" : "more");
+				if (type == "resolve-stacks") {
+					reader.read_member ("ids");
+					var ids = read_uint32_array (reader);
+					reader.end_member ();
 
-				return reply.end ();
-			}
+					var stacks = new VariantBuilder (new VariantType ("aat"));
 
-			if (type == "resolve-stacks") {
-				reader.read_member ("ids");
-				var ids = read_uint32_array (reader);
-				reader.end_member ();
-
-				var stacks = new VariantBuilder (new VariantType ("aat"));
-
-				tracer.resolve_stacks (ids, (sid, frames) => {
-					stacks.open (new VariantType ("at"));
-					foreach (var frame in frames)
-						stacks.add_value (frame);
-					stacks.close ();
-				});
-
-				vardict_add (reply, "stacks", stacks.end ());
-
-				return reply.end ();
-			}
-
-			if (type == "resolve-symbols") {
-				var pid = (uint) reader.read_member ("pid").get_int64_value ();
-				reader.end_member ();
-
-				var gen = (uint32) reader.read_member ("gen").get_int64_value ();
-				reader.end_member ();
-
-				reader.read_member ("addresses");
-				var addrs = read_uint64_array (reader);
-				reader.end_member ();
-
-				var symbols = new VariantBuilder (new VariantType ("a(uu)"));
-				var modules = new VariantBuilder (new VariantType ("av"));
-
-				tracer.resolver.resolve_addresses (pid, gen, addrs,
-					(addr, mod_idx, rel) => {
-						symbols.add ("(uu)", mod_idx, rel);
-					},
-					module_list => {
-						foreach (var path in module_list)
-							modules.add_value (new Variant.variant (new Variant.tuple ({ path })));
+					tracer.resolve_stacks (ids, (sid, frames) => {
+						stacks.open (new VariantType ("at"));
+						foreach (var frame in frames)
+							stacks.add_value (frame);
+						stacks.close ();
 					});
 
-				vardict_add (reply, "modules", modules.end ());
-				vardict_add (reply, "symbols", symbols.end ());
+					vardict_add (reply, "stacks", stacks.end ());
 
-				return reply.end ();
+					return reply.end ();
+				}
+
+				if (type == "resolve-symbols") {
+					var pid = (uint) reader.read_member ("pid").get_int64_value ();
+					reader.end_member ();
+
+					var gen = (uint32) reader.read_member ("gen").get_int64_value ();
+					reader.end_member ();
+
+					reader.read_member ("addresses");
+					var addrs = read_uint64_array (reader);
+					reader.end_member ();
+
+					var symbols = new VariantBuilder (new VariantType ("a(uu)"));
+					var modules = new VariantBuilder (new VariantType ("av"));
+
+					tracer.resolver.resolve_addresses (pid, gen, addrs,
+						(addr, mod_idx, rel) => {
+							symbols.add ("(uu)", mod_idx, rel);
+						},
+						module_list => {
+							foreach (var path in module_list)
+								modules.add_value (new Variant.variant (new Variant.tuple ({ path })));
+						});
+
+					vardict_add (reply, "modules", modules.end ());
+					vardict_add (reply, "symbols", symbols.end ());
+
+					return reply.end ();
+				}
+
+				if (type == "read-stats") {
+					var stats = tracer.read_stats ();
+
+					vardict_add (reply, "emitted-events", stats.emitted_events);
+					vardict_add (reply, "emitted-bytes", stats.emitted_bytes);
+
+					vardict_add (reply, "dropped-events", stats.dropped_events);
+					vardict_add (reply, "dropped-bytes", stats.dropped_bytes);
+
+					return reply.end ();
+				}
+
+				if (type == "add-targets") {
+					if (reader.has_member ("pids")) {
+						reader.read_member ("pids");
+						foreach_uint32 (reader, pid => tracer.add_target_tgid (pid));
+						reader.end_member ();
+					}
+
+					if (reader.has_member ("uids")) {
+						reader.read_member ("uids");
+						foreach_uint32 (reader, uid => tracer.add_target_uid (uid));
+						reader.end_member ();
+					}
+
+					if (reader.has_member ("users")) {
+						reader.read_member ("users");
+						foreach_string (reader, username => {
+							var uid = resolve_uid_from_username (username);
+							tracer.add_target_uid (uid);
+						});
+						reader.end_member ();
+					}
+
+					return reply.end ();
+				}
+
+				if (type == "remove-targets") {
+					if (reader.has_member ("pids")) {
+						reader.read_member ("pids");
+						foreach_uint32 (reader, pid => tracer.remove_target_tgid (pid));
+						reader.end_member ();
+					}
+
+					if (reader.has_member ("uids")) {
+						reader.read_member ("uids");
+						foreach_uint32 (reader, uid => tracer.remove_target_uid (uid));
+						reader.end_member ();
+					}
+
+					if (reader.has_member ("users")) {
+						reader.read_member ("users");
+						foreach_string (reader, username => {
+							var uid = resolve_uid_from_username (username);
+							tracer.remove_target_uid (uid);
+						});
+						reader.end_member ();
+					}
+
+					return reply.end ();
+				}
+
+				if (type == "get-signatures") {
+					vardict_add (reply, "native", build_signatures_variant (get_syscall_signatures ()));
+
+					unowned LinuxSyscallSignature[]? compat = get_compat32_syscall_signatures ();
+					if (compat != null)
+						vardict_add (reply, "compat32", build_signatures_variant (compat));
+
+					return reply.end ();
+				}
+
+				if (type == "exclude-syscalls") {
+					if (reader.has_member ("native")) {
+						reader.read_member ("native");
+						foreach_uint32 (reader, nr => tracer.exclude_syscall (NATIVE, nr));
+						reader.end_member ();
+					}
+
+					if (reader.has_member ("compat32")) {
+						reader.read_member ("compat32");
+						foreach_uint32 (reader, nr => tracer.exclude_syscall (COMPAT32, nr));
+						reader.end_member ();
+					}
+
+					return reply.end ();
+				}
+
+				if (type == "include-syscalls") {
+					if (reader.has_member ("native")) {
+						reader.read_member ("native");
+						foreach_uint32 (reader, nr => tracer.include_syscall (NATIVE, nr));
+						reader.end_member ();
+					}
+
+					if (reader.has_member ("compat32")) {
+						reader.read_member ("compat32");
+						foreach_uint32 (reader, nr => tracer.include_syscall (COMPAT32, nr));
+						reader.end_member ();
+					}
+
+					return reply.end ();
+				}
+
+				throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
+			} catch (Efni.Error e) {
+				throw_api_error (e);
 			}
-
-			if (type == "read-stats") {
-				var stats = tracer.read_stats ();
-
-				vardict_add (reply, "emitted-events", stats.emitted_events);
-				vardict_add (reply, "emitted-bytes", stats.emitted_bytes);
-
-				vardict_add (reply, "dropped-events", stats.dropped_events);
-				vardict_add (reply, "dropped-bytes", stats.dropped_bytes);
-
-				return reply.end ();
-			}
-
-			if (type == "add-targets") {
-				if (reader.has_member ("pids")) {
-					reader.read_member ("pids");
-					foreach_uint32 (reader, pid => tracer.add_target_tgid (pid));
-					reader.end_member ();
-				}
-
-				if (reader.has_member ("uids")) {
-					reader.read_member ("uids");
-					foreach_uint32 (reader, uid => tracer.add_target_uid (uid));
-					reader.end_member ();
-				}
-
-				if (reader.has_member ("users")) {
-					reader.read_member ("users");
-					foreach_string (reader, username => {
-						var uid = resolve_uid_from_username (username);
-						tracer.add_target_uid (uid);
-					});
-					reader.end_member ();
-				}
-
-				return reply.end ();
-			}
-
-			if (type == "remove-targets") {
-				if (reader.has_member ("pids")) {
-					reader.read_member ("pids");
-					foreach_uint32 (reader, pid => tracer.remove_target_tgid (pid));
-					reader.end_member ();
-				}
-
-				if (reader.has_member ("uids")) {
-					reader.read_member ("uids");
-					foreach_uint32 (reader, uid => tracer.remove_target_uid (uid));
-					reader.end_member ();
-				}
-
-				if (reader.has_member ("users")) {
-					reader.read_member ("users");
-					foreach_string (reader, username => {
-						var uid = resolve_uid_from_username (username);
-						tracer.remove_target_uid (uid);
-					});
-					reader.end_member ();
-				}
-
-				return reply.end ();
-			}
-
-			if (type == "get-signatures") {
-				vardict_add (reply, "native", build_signatures_variant (get_syscall_signatures ()));
-
-				unowned LinuxSyscallSignature[]? compat = get_compat32_syscall_signatures ();
-				if (compat != null)
-					vardict_add (reply, "compat32", build_signatures_variant (compat));
-
-				return reply.end ();
-			}
-
-			if (type == "exclude-syscalls") {
-				if (reader.has_member ("native")) {
-					reader.read_member ("native");
-					foreach_uint32 (reader, nr => tracer.exclude_syscall (NATIVE, nr));
-					reader.end_member ();
-				}
-
-				if (reader.has_member ("compat32")) {
-					reader.read_member ("compat32");
-					foreach_uint32 (reader, nr => tracer.exclude_syscall (COMPAT32, nr));
-					reader.end_member ();
-				}
-
-				return reply.end ();
-			}
-
-			if (type == "include-syscalls") {
-				if (reader.has_member ("native")) {
-					reader.read_member ("native");
-					foreach_uint32 (reader, nr => tracer.include_syscall (NATIVE, nr));
-					reader.end_member ();
-				}
-
-				if (reader.has_member ("compat32")) {
-					reader.read_member ("compat32");
-					foreach_uint32 (reader, nr => tracer.include_syscall (COMPAT32, nr));
-					reader.end_member ();
-				}
-
-				return reply.end ();
-			}
-
-			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
 		}
 
 		private void on_events_available () {
@@ -3269,7 +3281,7 @@ namespace Frida {
 		private delegate void UInt32Handler (uint32 v) throws Error;
 		private delegate void StringHandler (string s) throws Error;
 
-		private static uint32[] read_uint32_array (VariantReader reader) throws Error {
+		private static uint32[] read_uint32_array (VariantReader reader) throws Error, Efni.Error {
 			uint n = reader.count_elements ();
 			var arr = new uint32[n];
 
@@ -3285,7 +3297,7 @@ namespace Frida {
 			return arr;
 		}
 
-		private static uint64[] read_uint64_array (VariantReader reader) throws Error {
+		private static uint64[] read_uint64_array (VariantReader reader) throws Error, Efni.Error {
 			uint n = reader.count_elements ();
 			var arr = new uint64[n];
 
@@ -3297,7 +3309,7 @@ namespace Frida {
 			return arr;
 		}
 
-		private static void foreach_uint32 (VariantReader reader, UInt32Handler cb) throws Error {
+		private static void foreach_uint32 (VariantReader reader, UInt32Handler cb) throws Error, Efni.Error {
 			uint n = reader.count_elements ();
 			for (uint i = 0; i != n; i++) {
 				int64 v = reader.read_element (i).get_int64_value ();
@@ -3310,7 +3322,7 @@ namespace Frida {
 			}
 		}
 
-		private static void foreach_string (VariantReader reader, StringHandler cb) throws Error {
+		private static void foreach_string (VariantReader reader, StringHandler cb) throws Error, Efni.Error {
 			uint n = reader.count_elements ();
 			for (uint i = 0; i != n; i++) {
 				unowned string s = reader.read_element (i).get_string_value ();

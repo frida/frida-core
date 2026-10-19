@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaJDWP", gir_version = "1.0")]
 namespace Frida.JDWP {
 	public sealed class Client : GLib.Object, AsyncInitable {

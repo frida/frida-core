@@ -1,7 +1,9 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public static async uint64 find_export (Machine machine, uint64 image, string wanted, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		foreach (Export e in yield enumerate_exports (machine, image, cancellable)) {
 			if (e.name == wanted)
 				return image + e.rva;
@@ -13,7 +15,7 @@ namespace Frida.Barebone {
 	// Read the full export directory once, because its tables and its strings are adjacent. Thus
 	// a module with one thousand exports needs one transfer.
 	public static async Gee.List<Export> enumerate_exports (Machine machine, uint64 image, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		var exports = new Gee.ArrayList<Export> ();
 
 		Debugger debugger = machine.debugger;
@@ -21,7 +23,7 @@ namespace Frida.Barebone {
 		Buffer headers;
 		try {
 			headers = debugger.make_buffer (yield debugger.read_byte_array (image, HEADERS_SIZE, cancellable));
-		} catch (Error e) {
+		} catch (Efni.Error e) {
 			return exports;
 		}
 		if (headers.read_uint16 (0) != DOS_SIGNATURE)
@@ -84,13 +86,13 @@ namespace Frida.Barebone {
 	}
 
 	public static async uint32 read_image_size (Machine machine, uint64 image, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		Buffer headers;
 		try {
 			headers = debugger.make_buffer (yield debugger.read_byte_array (image, HEADERS_SIZE, cancellable));
-		} catch (Error e) {
+		} catch (Efni.Error e) {
 			return 0;
 		}
 		if (headers.read_uint16 (0) != DOS_SIGNATURE)
@@ -106,10 +108,10 @@ namespace Frida.Barebone {
 	// otherwise one page at a time, letting the absent pages read as zero, because no name or
 	// table entry has that value.
 	private static async Bytes read_present_pages (Debugger debugger, uint64 address, size_t size,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		try {
 			return yield debugger.read_byte_array (address, size, cancellable);
-		} catch (Error e) {
+		} catch (Efni.Error e) {
 		}
 
 		var result = new uint8[size];
@@ -126,14 +128,14 @@ namespace Frida.Barebone {
 					.get_data ();
 				Memory.copy ((uint8 *) result + offset, page, chunk);
 				present++;
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 			}
 
 			offset += chunk;
 		}
 
 		if (present == 0)
-			throw new Error.NOT_SUPPORTED (
+			throw new Efni.Error.NOT_SUPPORTED (
 				"Unable to read any page of 0x%" + uint64.FORMAT_MODIFIER + "x", address);
 
 		return new Bytes.take ((owned) result);

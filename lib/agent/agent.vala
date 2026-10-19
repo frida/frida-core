@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida.Agent {
 	public void main (string agent_parameters, ref Frida.UnloadPolicy unload_policy, void * injector_state) {
 		if (Runner.shared_instance == null)

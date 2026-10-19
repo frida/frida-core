@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	private sealed class RustModule : Object {
@@ -23,7 +25,7 @@ namespace Frida.Barebone {
 		private Callback console_log_callback;
 
 		public async RustModule.from_string (string str, Gee.Map<string, uint64?> symbols, Gee.List<string> dependencies,
-				Machine machine, Allocator allocator, Cancellable? cancellable) throws Error, IOError {
+				Machine machine, Allocator allocator, Cancellable? cancellable) throws Efni.Error, IOError {
 			var assets = yield new CompilationAssets (str, symbols, dependencies, machine, cancellable);
 
 			int exit_status;
@@ -73,15 +75,15 @@ namespace Frida.Barebone {
 				yield tool.communicate_utf8_async (null, cancellable, out output, null);
 				exit_status = tool.get_exit_status ();
 			} catch (GLib.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
+				throw new Efni.Error.NOT_SUPPORTED ("%s", e.message);
 			}
 			if (exit_status != 0)
-				throw new Error.INVALID_ARGUMENT ("Compilation failed: %s", output.chomp ());
+				throw new Efni.Error.INVALID_ARGUMENT ("Compilation failed: %s", output.chomp ());
 
 			try {
 				elf = new Gum.ElfModule.from_file (assets.output_elf.get_path ());
 			} catch (Gum.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
+				throw new Efni.Error.NOT_SUPPORTED ("%s", e.message);
 			}
 
 			var raw_elf = new Bytes.static (elf.get_file_data ());
@@ -144,7 +146,7 @@ namespace Frida.Barebone {
 			public File output_elf;
 
 			public async CompilationAssets (string code, Gee.Map<string, uint64?> symbols, Gee.List<string> dependencies,
-					Machine machine, Cancellable? cancellable) throws Error, IOError {
+					Machine machine, Cancellable? cancellable) throws Efni.Error, IOError {
 				try {
 					int io_priority = Priority.DEFAULT;
 
@@ -171,14 +173,14 @@ namespace Frida.Barebone {
 
 					yield write_text_file (workdir, "module.lds", make_linker_script (code, symbols), cancellable);
 				} catch (GLib.Error e) {
-					throw new Error.PERMISSION_DENIED ("%s", e.message);
+					throw new Efni.Error.PERMISSION_DENIED ("%s", e.message);
 				}
 			}
 
 			~CompilationAssets () {
 				try {
 					FS.rmtree (workdir);
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 				}
 			}
 

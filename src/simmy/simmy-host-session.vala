@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class SimmyHostSessionBackend : Object, HostSessionBackend {
 		private Gee.Map<string, SimmyHostSessionProvider> providers = new Gee.HashMap<string, SimmyHostSessionProvider> ();
@@ -278,6 +280,7 @@ namespace Frida {
 				try {
 					icons = yield springboard_agent.fetch_application_icons (app_ids, cancellable);
 				} catch (Error e) {
+				} catch (Efni.Error e) {
 				}
 			}
 

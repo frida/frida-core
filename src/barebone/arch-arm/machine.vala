@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class ArmMachine : Object, Machine {
@@ -84,14 +86,14 @@ namespace Frida.Barebone {
 			Object (debugger: debugger);
 		}
 
-		public async size_t query_page_size (Cancellable? cancellable) throws Error, IOError {
+		public async size_t query_page_size (Cancellable? cancellable) throws Efni.Error, IOError {
 			return 4096;
 		}
 
-		public async uint query_exception_level (Cancellable? cancellable) throws Error, IOError {
+		public async uint query_exception_level (Cancellable? cancellable) throws Efni.Error, IOError {
 			DebuggerException? exception = debugger.exception;
 			if (exception == null)
-				throw new Error.INVALID_OPERATION ("Unable to query in current state");
+				throw new Efni.Error.INVALID_OPERATION ("Unable to query in current state");
 			DebuggerThread thread = exception.thread;
 
 			var cpsr = yield thread.read_register ("cpsr", cancellable);
@@ -100,7 +102,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void enumerate_ranges (Gum.PageProtection prot, FoundRangeFunc func, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			Gee.List<RangeDetails> ranges = yield collect_ranges_using_mmu (cancellable);
 			foreach (RangeDetails r in coalesce_ranges (ranges)) {
 				if ((r.protection & prot) != prot)
@@ -110,7 +112,7 @@ namespace Frida.Barebone {
 			}
 		}
 
-		private async Gee.List<RangeDetails> collect_ranges_using_mmu (Cancellable? cancellable) throws Error, IOError {
+		private async Gee.List<RangeDetails> collect_ranges_using_mmu (Cancellable? cancellable) throws Efni.Error, IOError {
 			var result = new Gee.ArrayList<RangeDetails> ();
 
 			MMUParameters p = yield MMUParameters.load (debugger, cancellable);
@@ -132,7 +134,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void collect_ranges_in_l1 (uint64 table_address, uint first_index, uint end_index, MMUParameters p,
-				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Error, IOError {
+				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Efni.Error, IOError {
 			Buffer entries = yield read_physical_buffer (table_address + (first_index * L1_ENTRY_SIZE),
 				(end_index - first_index) * L1_ENTRY_SIZE, cancellable);
 
@@ -158,7 +160,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void collect_ranges_in_l2 (uint64 table_address, uint64 base_va, MMUParameters p,
-				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Error, IOError {
+				Gee.List<RangeDetails> ranges, Cancellable? cancellable) throws Efni.Error, IOError {
 			Buffer entries = yield read_physical_buffer (table_address, L2_NUM_ENTRIES * L2_ENTRY_SIZE, cancellable);
 
 			for (uint i = 0; i != L2_NUM_ENTRIES; i++) {
@@ -202,7 +204,7 @@ namespace Frida.Barebone {
 		}
 
 		public override async void write_virtual (uint64 va, uint8[] data, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (kernel_page_table == 0) {
 				yield debugger.write_byte_array (va, new Bytes (data), cancellable);
 				return;
@@ -229,7 +231,7 @@ namespace Frida.Barebone {
 		}
 
 		private async bool write_through_kernel_table (uint64 va, uint8[] data, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			size_t offset = 0;
 			while (offset < data.length) {
 				uint64 cur_va = va + offset;
@@ -247,7 +249,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void locate_kernel_page_table (MMUParameters p, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (kernel_page_table == 0 || kernel_page_table_pa != 0)
 				return;
 
@@ -257,7 +259,7 @@ namespace Frida.Barebone {
 				kernel_page_table_pa = table;
 		}
 
-		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Error, IOError {
+		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Efni.Error, IOError {
 			MMUParameters p = yield MMUParameters.load (debugger, cancellable);
 
 			bool was_running = yield enter_physical_addressing (debugger, cancellable);
@@ -274,13 +276,13 @@ namespace Frida.Barebone {
 			throw_if_failed (failure);
 
 			if (pa == null)
-				throw new Error.INVALID_ARGUMENT ("Address 0x%x is not mapped", (uint) va);
+				throw new Efni.Error.INVALID_ARGUMENT ("Address 0x%x is not mapped", (uint) va);
 
 			return pa;
 		}
 
 		private async uint64 table_describing (uint64 va, MMUParameters p, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (kernel_page_table_pa != 0) {
 				uint64 slot = kernel_page_table_pa + (((va >> L1_SHIFT) & (L1_NUM_ENTRIES - 1)) * L1_ENTRY_SIZE);
 				uint32 entry = (yield read_physical_buffer (slot, L1_ENTRY_SIZE, cancellable)).read_uint32 (0);
@@ -292,7 +294,7 @@ namespace Frida.Barebone {
 		}
 
 		private async uint64? translate_in_table (uint64 table_pa, uint64 va, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			uint64 l1_slot = table_pa + (((va >> L1_SHIFT) & (L1_NUM_ENTRIES - 1)) * L1_ENTRY_SIZE);
 			uint32 l1 = (yield read_physical_buffer (l1_slot, L1_ENTRY_SIZE, cancellable)).read_uint32 (0);
 
@@ -317,7 +319,7 @@ namespace Frida.Barebone {
 			return (l2 & SMALL_PAGE_MASK) | (va & 0xfff);
 		}
 
-		private async Buffer read_physical_buffer (uint64 pa, size_t size, Cancellable? cancellable) throws Error, IOError {
+		private async Buffer read_physical_buffer (uint64 pa, size_t size, Cancellable? cancellable) throws Efni.Error, IOError {
 			return yield debugger.read_buffer (pa, size, cancellable);
 		}
 
@@ -327,15 +329,15 @@ namespace Frida.Barebone {
 			public uint n;
 			public bool afe;
 
-			public static async MMUParameters load (Debugger debugger, Cancellable? cancellable) throws Error, IOError {
+			public static async MMUParameters load (Debugger debugger, Cancellable? cancellable) throws Efni.Error, IOError {
 				DebuggerException? exception = debugger.exception;
 				if (exception == null)
-					throw new Error.INVALID_OPERATION ("Unable to query in current state");
+					throw new Efni.Error.INVALID_OPERATION ("Unable to query in current state");
 				DebuggerThread thread = exception.thread;
 
 				uint64 ttbcr = yield thread.read_register ("ttbcr", cancellable);
 				if ((ttbcr & TTBCR_EAE) != 0)
-					throw new Error.NOT_SUPPORTED ("LPAE translation tables are not supported; please open a PR");
+					throw new Efni.Error.NOT_SUPPORTED ("LPAE translation tables are not supported; please open a PR");
 
 				uint64 sctlr;
 				try {
@@ -344,7 +346,7 @@ namespace Frida.Barebone {
 					sctlr = yield thread.read_register ("sctlr_el1", cancellable);
 				}
 				if ((sctlr & SCTLR_M) == 0)
-					throw new Error.NOT_SUPPORTED ("The MMU is off");
+					throw new Efni.Error.NOT_SUPPORTED ("The MMU is off");
 
 				var p = new MMUParameters ();
 				p.n = (uint) (ttbcr & TTBCR_N_MASK);
@@ -367,7 +369,7 @@ namespace Frida.Barebone {
 		}
 
 		public async Allocation allocate_pages (Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			MMUParameters p = yield MMUParameters.load (debugger, cancellable);
 
 			uint num_pages = physical_addresses.size;
@@ -387,12 +389,12 @@ namespace Frida.Barebone {
 			throw_if_failed (failure);
 
 			if (allocation == null)
-				throw new Error.NOT_SUPPORTED ("Unable to find a free run of page table entries");
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to find a free run of page table entries");
 
 			return allocation;
 		}
 
-		private async bool scan_for_run (Run run, MMUParameters p, Cancellable? cancellable) throws Error, IOError {
+		private async bool scan_for_run (Run run, MMUParameters p, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint boundary = p.split_index;
 
 			if (boundary != L1_NUM_ENTRIES) {
@@ -410,7 +412,7 @@ namespace Frida.Barebone {
 		}
 
 		private async bool scan_for_run_in_l1 (Run run, uint64 table_address, uint first_index, uint end_index,
-				MMUParameters p, Cancellable? cancellable) throws Error, IOError {
+				MMUParameters p, Cancellable? cancellable) throws Efni.Error, IOError {
 			Buffer l1 = yield read_physical_buffer (table_address + (first_index * L1_ENTRY_SIZE),
 				(end_index - first_index) * L1_ENTRY_SIZE, cancellable);
 
@@ -441,7 +443,7 @@ namespace Frida.Barebone {
 		}
 
 		private async Allocation occupy (Run run, Gee.List<uint64?> physical_addresses, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var displaced = new Gee.ArrayList<DisplacedEntries> ();
 
 			uint next_page = 0;
@@ -463,7 +465,7 @@ namespace Frida.Barebone {
 		}
 
 		public async void protect_pages (uint64 virtual_address, size_t size, Gum.PageProtection prot,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			MMUParameters p = yield MMUParameters.load (debugger, cancellable);
 
 			uint64 start_va = page_start (virtual_address, SMALL_PAGE_SIZE);
@@ -517,9 +519,9 @@ namespace Frida.Barebone {
 		}
 
 		private async uint64 skip_section (uint64 page_va, uint64 end_va, uint32 l1_entry, Gum.PageProtection prot,
-				MMUParameters p, Cancellable? cancellable) throws Error, IOError {
+				MMUParameters p, Cancellable? cancellable) throws Efni.Error, IOError {
 			if ((l1_entry & L1_KIND_MASK) != L1_KIND_SECTION) {
-				throw new Error.NOT_SUPPORTED ("Unable to change protection of the unmapped page at 0x%"
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to change protection of the unmapped page at 0x%"
 					+ uint64.FORMAT_MODIFIER + "x", page_va);
 			}
 
@@ -527,7 +529,7 @@ namespace Frida.Barebone {
 				| (((l1_entry >> SECTION_APX_SHIFT) & 1) << AP_HIGH_SHIFT);
 			Gum.PageProtection current = protection_from_ap (ap, (l1_entry & SECTION_XN) != 0, p.afe);
 			if ((current & prot) != prot) {
-				throw new Error.NOT_SUPPORTED ("Unable to change protection of the section mapping at 0x%"
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to change protection of the section mapping at 0x%"
 					+ uint64.FORMAT_MODIFIER + "x", page_va);
 			}
 
@@ -561,7 +563,7 @@ namespace Frida.Barebone {
 		}
 
 		private async void write_physical_buffer (uint64 pa, Bytes data, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			yield debugger.write_byte_array (pa, data, cancellable);
 		}
 
@@ -649,7 +651,7 @@ namespace Frida.Barebone {
 				this.machine = machine;
 			}
 
-			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
+			public async void deallocate (Cancellable? cancellable) throws Efni.Error, IOError {
 				bool was_running = yield enter_physical_addressing (machine.debugger, cancellable);
 				GLib.Error? failure = null;
 				try {
@@ -664,11 +666,11 @@ namespace Frida.Barebone {
 		}
 
 		public async Gee.List<uint64?> scan_ranges (Gee.List<Gum.MemoryRange?> ranges, MatchPattern pattern, uint max_matches,
-				Cancellable? cancellable) throws Error, IOError {
-			throw_not_supported ();
+				Cancellable? cancellable) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("Not yet supported");
 		}
 
-		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Error {
+		public void apply_relocation (Gum.ElfRelocationDetails r, uint64 base_va, Buffer relocated) throws Efni.Error {
 			Gum.ElfArmRelocation type = (Gum.ElfArmRelocation) r.type;
 			size_t offset = (size_t) r.address;
 			switch (type) {
@@ -682,14 +684,14 @@ namespace Frida.Barebone {
 					relocated.write_int32 (offset, (int32) diff);
 					break;
 				default:
-					throw new Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
-						Marshal.enum_to_nick<Gum.ElfArmRelocation> (type));
+					throw new Efni.Error.NOT_SUPPORTED ("Unsupported relocation type: %s",
+						Efni.Marshal.enum_to_nick<Gum.ElfArmRelocation> (type));
 			}
 		}
 
-		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Error, IOError {
+		public async uint64 invoke (uint64 impl, uint64[] args, Cancellable? cancellable) throws Efni.Error, IOError {
 			if (args.length > NUM_ARGS_IN_REGS)
-				throw new Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
+				throw new Efni.Error.NOT_SUPPORTED ("Unsupported number of arguments; please open a PR");
 
 			bool was_running = debugger.state != STOPPED;
 			if (was_running)
@@ -718,7 +720,7 @@ namespace Frida.Barebone {
 			int64 deadline = get_monotonic_time () + LANDING_TIMEOUT_USEC;
 			do {
 				if (get_monotonic_time () >= deadline)
-					throw new Error.TIMED_OUT ("Timed out waiting for the call to return");
+					throw new Efni.Error.TIMED_OUT ("Timed out waiting for the call to return");
 
 				ex = yield debugger.continue_until_exception (cancellable);
 			} while (ex.breakpoint != bp);
@@ -741,7 +743,7 @@ namespace Frida.Barebone {
 			return cpsr & ~CPSR_THUMB_BIT;
 		}
 
-		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Error, IOError {
+		public async CallFrame load_call_frame (DebuggerThread thread, uint arity, Cancellable? cancellable) throws Efni.Error, IOError {
 			var regs = yield thread.read_registers (cancellable);
 
 			Buffer? stack = null;
@@ -844,7 +846,7 @@ namespace Frida.Barebone {
 				stack_state = MODIFIED;
 			}
 
-			public async void commit (Cancellable? cancellable) throws Error, IOError {
+			public async void commit (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (regs.get_data<bool> ("dirty"))
 					yield thread.write_registers (regs, cancellable);
 
@@ -876,7 +878,7 @@ namespace Frida.Barebone {
 				this.debugger = debugger;
 			}
 
-			public async void destroy (Cancellable? cancellable) throws Error, IOError {
+			public async void destroy (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (state == DESTROYED)
 					return;
 
@@ -892,16 +894,16 @@ namespace Frida.Barebone {
 					yield debugger.resume (cancellable);
 			}
 
-			public async void enable (Cancellable? cancellable) throws Error, IOError {
+			public async void enable (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (state == ENABLED)
 					return;
 				if (state != DISABLED)
-					throw new Error.INVALID_OPERATION ("Invalid operation");
+					throw new Efni.Error.INVALID_OPERATION ("Invalid operation");
 				yield debugger.write_byte_array (target, new_target_code, cancellable);
 				state = ENABLED;
 			}
 
-			public async void disable (Cancellable? cancellable) throws Error, IOError {
+			public async void disable (Cancellable? cancellable) throws Efni.Error, IOError {
 				if (state != ENABLED)
 					return;
 				yield debugger.write_byte_array (target, old_target_code, cancellable);
@@ -918,7 +920,7 @@ namespace Frida.Barebone {
 		}
 
 		public async InlineHook create_inline_hook (uint64 target, uint64 handler, Allocator allocator,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 target_address = address_from_funcptr (target);
 			bool target_is_thumb = (target & THUMB_BIT) != 0;
 

@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public sealed class Layout : Object {
@@ -25,16 +27,16 @@ namespace Frida.Barebone {
 			Object (modules: new Gee.ArrayList<ModuleInfo> (), symbols: new Gee.ArrayList<SymbolInfo> ());
 		}
 
-		public static Gum.DarwinModule parse_kernelcache (Bytes kerncache) throws Error {
+		public static Gum.DarwinModule parse_kernelcache (Bytes kerncache) throws Efni.Error {
 			try {
 				return new Gum.DarwinModule.from_blob (kerncache, ARM64, Gum.PtrauthSupport.SUPPORTED);
 			} catch (Gum.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
+				throw new Efni.Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
 		public static Layout load_from_module (Gum.DarwinModule mod, Bytes kerncache, uint64 kernel_base, ByteOrder byte_order,
-				uint pointer_size) throws Error {
+				uint pointer_size) throws Efni.Error {
 			var blob = new Blob (kerncache, byte_order, pointer_size);
 
 			var modules = compute_module_list (mod, blob, kernel_base);
@@ -43,14 +45,14 @@ namespace Frida.Barebone {
 			return new Layout (modules, symbols);
 		}
 
-		private static Gee.List<ModuleInfo> compute_module_list (Gum.DarwinModule mod, Blob blob, uint64 kernel_base) throws Error {
+		private static Gee.List<ModuleInfo> compute_module_list (Gum.DarwinModule mod, Blob blob, uint64 kernel_base) throws Efni.Error {
 			var fileset = compute_fileset_module_list (blob, mod.source_version);
 			if (fileset != null)
 				return fileset;
 
 			Buffer? kmod_info = null;
 			Buffer? kmod_start = null;
-			Error? pending_error = null;
+			Efni.Error? pending_error = null;
 			mod.enumerate_sections (s => {
 				if (s.segment_name == "__PRELINK_INFO") {
 					try {
@@ -58,7 +60,7 @@ namespace Frida.Barebone {
 							kmod_info = blob.slice (s.file_offset, (size_t) s.size, "__kmod_info");
 						else if (s.section_name == "__kmod_start")
 							kmod_start = blob.slice (s.file_offset, (size_t) s.size, "__kmod_start");
-					} catch (Error e) {
+					} catch (Efni.Error e) {
 						pending_error = e;
 						return false;
 					}
@@ -107,7 +109,7 @@ namespace Frida.Barebone {
 			while (start_pointers.available != 0)
 				start_offsets.add ((uint) chained_pointer_to_vm_offset (start_pointers.read_pointer (), kernel_base));
 			if (start_offsets.size != kexts.size + 1)
-				throw new Error.PROTOCOL ("Unexpected __kmod_start length");
+				throw new Efni.Error.PROTOCOL ("Unexpected __kmod_start length");
 
 			var n = kexts.size;
 			for (var i = 0; i != n; i++) {
@@ -129,7 +131,7 @@ namespace Frida.Barebone {
 			return result;
 		}
 
-		private static Gee.List<ModuleInfo>? compute_fileset_module_list (Blob blob, string? kernel_version) throws Error {
+		private static Gee.List<ModuleInfo>? compute_fileset_module_list (Blob blob, string? kernel_version) throws Efni.Error {
 			var header = blob.slice (0, 32, "Mach-O header");
 			if (header.read_uint32 (0) != MH_MAGIC_64 || header.read_uint32 (12) != MH_FILESET)
 				return null;
@@ -178,7 +180,7 @@ namespace Frida.Barebone {
 			return modules;
 		}
 
-		private static string read_lc_string (Buffer image, size_t offset) throws Error {
+		private static string read_lc_string (Buffer image, size_t offset) throws Efni.Error {
 			var builder = new StringBuilder ();
 			for (size_t i = 0; ; i++) {
 				uint8 c = image.read_uint8 (offset + i);
@@ -251,13 +253,13 @@ namespace Frida.Barebone {
 			pointer_size = ptr_size;
 		}
 
-		public Buffer slice (size_t offset, size_t n, string label) throws Error {
+		public Buffer slice (size_t offset, size_t n, string label) throws Efni.Error {
 			if (offset >= size)
-				throw new Error.PROTOCOL ("Offset out of bounds while parsing %s", label);
+				throw new Efni.Error.PROTOCOL ("Offset out of bounds while parsing %s", label);
 
 			size_t end = offset + n;
 			if (end > size)
-				throw new Error.PROTOCOL ("Size out of bounds while parsing %s", label);
+				throw new Efni.Error.PROTOCOL ("Size out of bounds while parsing %s", label);
 
 			return new Buffer (bytes[offset:end], byte_order, pointer_size);
 		}

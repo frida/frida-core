@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class BareboneHostSessionBackend : Object, HostSessionBackend {
 		private BareboneHostSessionProvider? provider;
@@ -62,128 +64,132 @@ namespace Frida {
 
 		public async HostSession create (HostSessionHub hub, HostSessionOptions? options, owned ConnectingFunc connecting,
 				Cancellable? cancellable) throws Error, IOError {
-			if (host_session != null)
-				throw new Error.INVALID_OPERATION ("Already created");
+			try {
+				if (host_session != null)
+					throw new Error.INVALID_OPERATION ("Already created");
 
-			BareboneConfig? config = null;
-			if (options != null) {
-				Value? val = options.map["config"];
-				if (val != null) {
-					config = (BareboneConfig) val.get_object ();
-					config.check ();
+				BareboneConfig? config = null;
+				if (options != null) {
+					Value? val = options.map["config"];
+					if (val != null) {
+						config = (BareboneConfig) val.get_object ();
+						config.check ();
+					}
 				}
-			}
 
-			unowned string? config_path = Environment.get_variable ("FRIDA_BAREBONE_CONFIG");
-			if (config == null && config_path != null) {
+				unowned string? config_path = Environment.get_variable ("FRIDA_BAREBONE_CONFIG");
+				if (config == null && config_path != null) {
+					try {
+						var config_data = yield FS.read_all_text (File.new_for_path (config_path), cancellable);
+						var cfg = (BareboneConfig) Json.gobject_from_data (typeof (BareboneConfig), config_data);
+						cfg.check ();
+						config = cfg;
+					} catch (GLib.Error e) {
+						throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
+					}
+				}
+
+				if (config == null)
+					config = new BareboneConfig ();
+
+				var resident_agent = config.agent as BareboneResidentAgentConfig;
+				if (resident_agent != null) {
+					host_session = yield attach_to_resident_agent (resident_agent.transport, cancellable);
+					host_session.agent_session_detached.connect (on_agent_session_detached);
+
+					return host_session;
+				}
+
+				SocketConnectable connectable;
 				try {
-					var config_data = yield FS.read_all_text (File.new_for_path (config_path), cancellable);
-					var cfg = (BareboneConfig) Json.gobject_from_data (typeof (BareboneConfig), config_data);
-					cfg.check ();
-					config = cfg;
+					BareboneConnectionConfig c = config.connection;
+					connectable = NetworkAddress.parse (c.host, c.port);
 				} catch (GLib.Error e) {
 					throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
 				}
-			}
 
-			if (config == null)
-				config = new BareboneConfig ();
+				connecting ("Connecting to the debugger", 0.0);
 
-			var resident_agent = config.agent as BareboneResidentAgentConfig;
-			if (resident_agent != null) {
-				host_session = yield attach_to_resident_agent (resident_agent.transport, cancellable);
-				host_session.agent_session_detached.connect (on_agent_session_detached);
+				if (config.connection.flavor == BareboneStubFlavor.VIRTUALBOX_CONSOLE) {
+					var console_debugger = yield Barebone.VirtualBoxDebugger.open (config.connection.host,
+						config.connection.port, cancellable);
+					host_session = yield establish (config, console_debugger, (owned) connecting, cancellable);
+					host_session.agent_session_detached.connect (on_agent_session_detached);
 
-				return host_session;
-			}
-
-			SocketConnectable connectable;
-			try {
-				BareboneConnectionConfig c = config.connection;
-				connectable = NetworkAddress.parse (c.host, c.port);
-			} catch (GLib.Error e) {
-				throw new Error.INVALID_ARGUMENT ("Unable to load %s: %s", config_path, e.message);
-			}
-
-			connecting ("Connecting to the debugger", 0.0);
-
-			if (config.connection.flavor == BareboneStubFlavor.VIRTUALBOX_CONSOLE) {
-				var console_debugger = yield Barebone.VirtualBoxDebugger.open (config.connection.host,
-					config.connection.port, cancellable);
-				host_session = yield establish (config, console_debugger, (owned) connecting, cancellable);
-				host_session.agent_session_detached.connect (on_agent_session_detached);
-
-				return host_session;
-			}
-
-			IOStream stream;
-			try {
-				var client = new SocketClient ();
-				var connection = yield client.connect_async (connectable, cancellable);
-
-				Tcp.enable_nodelay (connection.socket);
-
-				stream = connection;
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("The specified GDB remote stub cannot be reached: %s", e.message);
-			}
-
-#if WINDOWS || MACOS || (LINUX && !ANDROID)
-			if (config.connection.flavor == BareboneStubFlavor.ANDROID_EMULATOR) {
-				connecting ("Instrumenting the emulator", 0.05);
-				emulator_instrumentation = yield EmulatorInstrumentation.apply (hub, config, cancellable);
-			}
-#endif
-
-			Debugger debugger;
-			switch (config.connection.flavor) {
-				case BareboneStubFlavor.VZ:
-					debugger = yield Barebone.VzStubClient.open (stream, cancellable);
-					break;
-				case BareboneStubFlavor.PARALLELS:
-					debugger = yield Barebone.ParallelsStubClient.open (stream, cancellable);
-					break;
-				case BareboneStubFlavor.VIRTUALBOX:
-					debugger = yield Barebone.VirtualBoxStubClient.open (stream, cancellable);
-					break;
-				case BareboneStubFlavor.ANDROID_EMULATOR:
-					debugger = yield Barebone.AndroidEmulatorStubClient.open (stream, cancellable);
-					break;
-				default:
-					debugger = yield GDB.Client.open (stream, cancellable);
-					break;
-			}
-
-#if WINDOWS
-			if (emulator_instrumentation != null) {
-				var client = debugger as GDB.Client;
-				if (client != null)
-					emulator_instrumentation.adopt_breakpoints (client);
-			}
-#endif
-
-			try {
-				host_session = yield establish (config, debugger, (owned) connecting, cancellable);
-			} catch (GLib.Error e) {
-				if (debugger.state == STOPPED) {
-					try {
-						yield debugger.resume (cancellable);
-					} catch (GLib.Error ee) {
-					}
+					return host_session;
 				}
+
+				IOStream stream;
 				try {
-					yield debugger.close (cancellable);
-				} catch (IOError ee) {
+					var client = new SocketClient ();
+					var connection = yield client.connect_async (connectable, cancellable);
+
+					Tcp.enable_nodelay (connection.socket);
+
+					stream = connection;
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("The specified GDB remote stub cannot be reached: %s", e.message);
 				}
+
+	#if WINDOWS || MACOS || (LINUX && !ANDROID)
+				if (config.connection.flavor == BareboneStubFlavor.ANDROID_EMULATOR) {
+					connecting ("Instrumenting the emulator", 0.05);
+					emulator_instrumentation = yield EmulatorInstrumentation.apply (hub, config, cancellable);
+				}
+	#endif
+
+				Debugger debugger;
+				switch (config.connection.flavor) {
+					case BareboneStubFlavor.VZ:
+						debugger = yield Barebone.VzStubClient.open (stream, cancellable);
+						break;
+					case BareboneStubFlavor.PARALLELS:
+						debugger = yield Barebone.ParallelsStubClient.open (stream, cancellable);
+						break;
+					case BareboneStubFlavor.VIRTUALBOX:
+						debugger = yield Barebone.VirtualBoxStubClient.open (stream, cancellable);
+						break;
+					case BareboneStubFlavor.ANDROID_EMULATOR:
+						debugger = yield Barebone.AndroidEmulatorStubClient.open (stream, cancellable);
+						break;
+					default:
+						debugger = yield GDB.Client.open (stream, cancellable);
+						break;
+				}
+
+	#if WINDOWS
+				if (emulator_instrumentation != null) {
+					var client = debugger as GDB.Client;
+					if (client != null)
+						emulator_instrumentation.adopt_breakpoints (client);
+				}
+	#endif
+
+				try {
+					host_session = yield establish (config, debugger, (owned) connecting, cancellable);
+				} catch (GLib.Error e) {
+					if (debugger.state == STOPPED) {
+						try {
+							yield debugger.resume (cancellable);
+						} catch (GLib.Error ee) {
+						}
+					}
+					try {
+						yield debugger.close (cancellable);
+					} catch (IOError ee) {
+					}
+					throw_api_error (e);
+				}
+				host_session.agent_session_detached.connect (on_agent_session_detached);
+
+				return host_session;
+			} catch (Efni.Error e) {
 				throw_api_error (e);
 			}
-			host_session.agent_session_detached.connect (on_agent_session_detached);
-
-			return host_session;
 		}
 
 		private async BareboneHostSession establish (BareboneConfig config, Debugger debugger, owned ConnectingFunc connecting,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			// The arm64 MMU system registers (TTBR1_EL1/TCR_EL1) are exposed by some stubs and not
 			// others (the Android emulator's does not); detect it from the advertised register set,
 			// which selects host page-table walking versus the kernel's set_memory_* helpers.
@@ -226,7 +232,7 @@ namespace Frida {
 			size_t page_size;
 			try {
 				page_size = yield machine.query_page_size (cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				page_size = 0;
 			}
 
@@ -341,7 +347,7 @@ namespace Frida {
 		}
 
 		private async BareboneHostSession attach_to_resident_agent (BareboneResidentTransportConfig transport,
-				Cancellable? cancellable) throws Error, IOError {
+				Cancellable? cancellable) throws Error, Efni.Error, IOError {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Resident agents are not available on this OS");
 #else
@@ -654,51 +660,55 @@ namespace Frida {
 
 		public async HostApplicationInfo[] enumerate_applications (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			if (connection == null)
-				throw_not_supported ();
+			try {
+				if (connection == null)
+					throw_not_supported ();
 
-			var query = ApplicationQueryOptions._deserialize (options);
+				var query = ApplicationQueryOptions._deserialize (options);
 
-			if (android_emulator_pid != 0) {
-				var helper = yield get_android_helper (cancellable);
-				return yield helper.enumerate_applications (query, cancellable);
+				if (android_emulator_pid != 0) {
+					var helper = yield get_android_helper (cancellable);
+					return yield helper.enumerate_applications (query, cancellable);
+				}
+
+				var selected = new Gee.HashSet<string> ();
+				query.enumerate_selected_identifiers (identifier => {
+					selected.add (identifier);
+				});
+
+				var applications = yield list_applications (selected.to_array (), cancellable);
+
+				var running = new Gee.HashMap<string, uint> ();
+				foreach (HostProcessInfo p in yield connection.enumerate_processes (Scope.METADATA, {},
+						cancellable)) {
+					var path = p.parameters["path"];
+					if (path != null)
+						running[basename_of (path.get_string ()).down ()] = p.pid;
+				}
+
+				var scope = query.scope;
+				var result = new HostApplicationInfo[applications.length];
+				for (int i = 0; i != applications.length; i++) {
+					var app = applications[i];
+					var parameters = make_parameters_dict ();
+					if (scope != MINIMAL)
+						parameters["path"] = app.path;
+
+					uint pid;
+					if (!running.unset (basename_of (app.path).down (), out pid))
+						pid = 0;
+
+					var name = (app.description != "") ? app.description : basename_of (app.path);
+					result[i] = HostApplicationInfo (app.identifier, name, pid, (owned) parameters);
+				}
+				return result;
+			} catch (Efni.Error e) {
+				throw_api_error (e);
 			}
-
-			var selected = new Gee.HashSet<string> ();
-			query.enumerate_selected_identifiers (identifier => {
-				selected.add (identifier);
-			});
-
-			var applications = yield list_applications (selected.to_array (), cancellable);
-
-			var running = new Gee.HashMap<string, uint> ();
-			foreach (HostProcessInfo p in yield connection.enumerate_processes (Scope.METADATA, {},
-					cancellable)) {
-				var path = p.parameters["path"];
-				if (path != null)
-					running[basename_of (path.get_string ()).down ()] = p.pid;
-			}
-
-			var scope = query.scope;
-			var result = new HostApplicationInfo[applications.length];
-			for (int i = 0; i != applications.length; i++) {
-				var app = applications[i];
-				var parameters = make_parameters_dict ();
-				if (scope != MINIMAL)
-					parameters["path"] = app.path;
-
-				uint pid;
-				if (!running.unset (basename_of (app.path).down (), out pid))
-					pid = 0;
-
-				var name = (app.description != "") ? app.description : basename_of (app.path);
-				result[i] = HostApplicationInfo (app.identifier, name, pid, (owned) parameters);
-			}
-			return result;
 		}
 
 		private async Barebone.AgentConnection.Application[] list_applications (
-				string[] identifiers, Cancellable? cancellable) throws Error, IOError {
+				string[] identifiers, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			var listed = new Gee.ArrayList<Barebone.AgentConnection.Application> ();
 			listed.add_all_array (yield connection.enumerate_applications (identifiers, cancellable));
 
@@ -738,19 +748,23 @@ namespace Frida {
 
 		public async HostProcessInfo[] enumerate_processes (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			if (connection == null)
-				throw_not_supported ();
-			var query = ProcessQueryOptions._deserialize (options);
-			uint[] pids = {};
-			query.enumerate_selected_pids (pid => {
-				pids += pid;
-			});
-			var processes = yield connection.enumerate_processes (query.scope, pids, cancellable);
+			try {
+				if (connection == null)
+					throw_not_supported ();
+				var query = ProcessQueryOptions._deserialize (options);
+				uint[] pids = {};
+				query.enumerate_selected_pids (pid => {
+					pids += pid;
+				});
+				var processes = yield connection.enumerate_processes (query.scope, pids, cancellable);
 
-			if (query.scope == FULL && android_emulator_pid != 0)
-				yield attach_app_icons (processes, cancellable);
+				if (query.scope == FULL && android_emulator_pid != 0)
+					yield attach_app_icons (processes, cancellable);
 
-			return processes;
+				return processes;
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		private async void attach_app_icons (HostProcessInfo[] processes, Cancellable? cancellable) throws IOError {
@@ -758,6 +772,8 @@ namespace Frida {
 			try {
 				icons = yield resolve_app_icons (cancellable);
 			} catch (Error e) {
+				return;
+			} catch (Efni.Error e) {
 				return;
 			}
 
@@ -768,7 +784,7 @@ namespace Frida {
 			}
 		}
 
-		private async Gee.HashMap<string, Variant> resolve_app_icons (Cancellable? cancellable) throws Error, IOError {
+		private async Gee.HashMap<string, Variant> resolve_app_icons (Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			if (android_app_icons == null) {
 				var helper = yield get_android_helper (cancellable);
 
@@ -788,7 +804,7 @@ namespace Frida {
 			return android_app_icons;
 		}
 
-		private async AndroidHelperClient get_android_helper (Cancellable? cancellable) throws Error, IOError {
+		private async AndroidHelperClient get_android_helper (Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			while (android_helper_request != null) {
 				try {
 					return yield android_helper_request.future.wait_async (cancellable);
@@ -854,15 +870,23 @@ namespace Frida {
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			yield start_gating (cancellable);
+			try {
+				yield start_gating (cancellable);
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		public async void enable_spawn_gating_with_options (HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			yield start_gating (cancellable);
+			try {
+				yield start_gating (cancellable);
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
-		private async void start_gating (Cancellable? cancellable) throws Error, IOError {
+		private async void start_gating (Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			if (connection == null)
 				throw_not_supported ();
 
@@ -872,12 +896,16 @@ namespace Frida {
 		}
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
-			if (connection == null)
-				throw_not_supported ();
+			try {
+				if (connection == null)
+					throw_not_supported ();
 
-			yield connection.gate_spawns (false, cancellable);
-			watchdog.clear ();
-			pending_spawn.clear ();
+				yield connection.gate_spawns (false, cancellable);
+				watchdog.clear ();
+				pending_spawn.clear ();
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
@@ -894,23 +922,27 @@ namespace Frida {
 
 		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable)
 				throws Error, IOError {
-			if (connection == null)
-				throw_not_supported ();
+			try {
+				if (connection == null)
+					throw_not_supported ();
 
-			if (android_emulator_pid != 0 && program[0] != '/')
-				return yield spawn_android_app (program, options, cancellable);
+				if (android_emulator_pid != 0 && program[0] != '/')
+					return yield spawn_android_app (program, options, cancellable);
 
-			if (connection.spawns_by_itself)
-				return yield connection.spawn_program (words_of (program, options), cancellable);
+				if (connection.spawns_by_itself)
+					return yield connection.spawn_program (words_of (program, options), cancellable);
 
-			uint helper = yield acquire_spawn_helper (cancellable);
+				uint helper = yield acquire_spawn_helper (cancellable);
 
-			return yield connection.spawn_process (helper,
-				command_line_of (yield file_of (program, cancellable), options), cancellable);
+				return yield connection.spawn_process (helper,
+					command_line_of (yield file_of (program, cancellable), options), cancellable);
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		private async uint spawn_android_app (string package, HostSpawnOptions options, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Error, Efni.Error, IOError {
 			var entrypoint = PackageEntrypoint.parse (package, options);
 
 			var helper = yield get_android_helper (cancellable);
@@ -963,28 +995,32 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
-			if (connection.spawns_by_itself) {
-				pending_spawn.unset (pid);
-				watchdog.cancel (pid);
+			try {
+				if (connection.spawns_by_itself) {
+					pending_spawn.unset (pid);
+					watchdog.cancel (pid);
 
-				yield connection.resume_process (0, pid, cancellable);
+					yield connection.resume_process (0, pid, cancellable);
 
-				return;
+					return;
+				}
+
+				uint holder = spawn_helper_pid;
+
+				HeldSpawn? held = pending_spawn[pid];
+				if (held != null) {
+					holder = held.holder_pid;
+					pending_spawn.unset (pid);
+					watchdog.cancel (pid);
+				}
+
+				if (holder == 0)
+					throw new Error.INVALID_ARGUMENT ("Process %u was not spawned by us", pid);
+
+				yield connection.resume_process (holder, pid, cancellable);
+			} catch (Efni.Error e) {
+				throw_api_error (e);
 			}
-
-			uint holder = spawn_helper_pid;
-
-			HeldSpawn? held = pending_spawn[pid];
-			if (held != null) {
-				holder = held.holder_pid;
-				pending_spawn.unset (pid);
-				watchdog.cancel (pid);
-			}
-
-			if (holder == 0)
-				throw new Error.INVALID_ARGUMENT ("Process %u was not spawned by us", pid);
-
-			yield connection.resume_process (holder, pid, cancellable);
 		}
 
 		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -993,34 +1029,38 @@ namespace Frida {
 
 		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options, Cancellable? cancellable)
 				throws Error, IOError {
-			if (pid != 0) {
-				if (connection == null)
-					throw_not_supported ();
+			try {
+				if (pid != 0) {
+					if (connection == null)
+						throw_not_supported ();
 
-				yield acquire_injected_agent (pid, cancellable);
+					yield acquire_injected_agent (pid, cancellable);
+				}
+
+				var opts = SessionOptions._deserialize (options);
+				if (opts.realm == EMULATED)
+					throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on Barebone targets");
+
+				var session_id = AgentSessionId.generate ();
+
+				MainContext dbus_context = yield get_dbus_context ();
+
+				BareboneAgentSession session;
+				if (connection != null) {
+					session = new RemoteBareboneAgentSession (connection, pid, session_id, opts.persist_timeout,
+						dbus_context);
+				} else {
+					if (services == null)
+						throw new Error.NOT_SUPPORTED ("Barebone target has neither an agent nor a debugger stub");
+					session = new LocalBareboneAgentSession (services, session_id, opts.persist_timeout, dbus_context);
+				}
+				agent_sessions[session_id] = session;
+				session.closed.connect (on_agent_session_closed);
+
+				return session_id;
+			} catch (Efni.Error e) {
+				throw_api_error (e);
 			}
-
-			var opts = SessionOptions._deserialize (options);
-			if (opts.realm == EMULATED)
-				throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on Barebone targets");
-
-			var session_id = AgentSessionId.generate ();
-
-			MainContext dbus_context = yield get_dbus_context ();
-
-			BareboneAgentSession session;
-			if (connection != null) {
-				session = new RemoteBareboneAgentSession (connection, pid, session_id, opts.persist_timeout,
-					dbus_context);
-			} else {
-				if (services == null)
-					throw new Error.NOT_SUPPORTED ("Barebone target has neither an agent nor a debugger stub");
-				session = new LocalBareboneAgentSession (services, session_id, opts.persist_timeout, dbus_context);
-			}
-			agent_sessions[session_id] = session;
-			session.closed.connect (on_agent_session_closed);
-
-			return session_id;
 		}
 
 		public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
@@ -1126,7 +1166,7 @@ namespace Frida {
 			return (end != -1) ? line[:end] : line;
 		}
 
-		private async uint acquire_spawn_helper (Cancellable? cancellable) throws Error, IOError {
+		private async uint acquire_spawn_helper (Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			if (spawn_helper_pid != 0)
 				return spawn_helper_pid;
 
@@ -1148,7 +1188,7 @@ namespace Frida {
 			return pid;
 		}
 
-		private async string file_of (string program, Cancellable? cancellable) throws Error, IOError {
+		private async string file_of (string program, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			if (connection.spawns_by_itself || program.contains ("\\") || program.contains (":"))
 				return program;
 
@@ -1190,7 +1230,7 @@ namespace Frida {
 			return "\"" + token + "\"";
 		}
 
-		private async void acquire_injected_agent (uint pid, Cancellable? cancellable) throws Error, IOError {
+		private async void acquire_injected_agent (uint pid, Cancellable? cancellable) throws Error, Efni.Error, IOError {
 			uint users = injected_agents[pid];
 			if (users != 0) {
 				injected_agents[pid] = users + 1;
@@ -1247,19 +1287,23 @@ namespace Frida {
 
 		public override async AgentScriptId create_script (string source, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			check_open ();
+			try {
+				check_open ();
 
-			var opts = ScriptOptions._deserialize (options);
-			if (opts.runtime == V8)
-				throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the Barebone backend");
+				var opts = ScriptOptions._deserialize (options);
+				if (opts.runtime == V8)
+					throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the Barebone backend");
 
-			var id = AgentScriptId (next_script_id++);
+				var id = AgentScriptId (next_script_id++);
 
-			var script = BareboneScript.create (id, source, services);
-			scripts[id] = script;
-			script.message.connect (on_message_from_script);
+				var script = BareboneScript.create (id, source, services);
+				scripts[id] = script;
+				script.message.connect (on_message_from_script);
 
-			return id;
+				return id;
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		public override async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
@@ -1347,47 +1391,63 @@ namespace Frida {
 
 		public override async AgentScriptId create_script (string source, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
-			check_open ();
+			try {
+				check_open ();
 
-			var opts = ScriptOptions._deserialize (options);
-			if (opts.runtime == V8)
-				throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the Barebone backend");
+				var opts = ScriptOptions._deserialize (options);
+				if (opts.runtime == V8)
+					throw new Error.INVALID_ARGUMENT ("The V8 runtime is not supported by the Barebone backend");
 
-			var script_id = yield connection.create_script (source, pid, cancellable);
-			own_scripts.add (script_id);
+				var script_id = yield connection.create_script (source, pid, cancellable);
+				own_scripts.add (script_id);
 
-			return script_id;
+				return script_id;
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		public override async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
+			try {
+				check_open ();
 
-			yield connection.destroy_script (script_id, pid, cancellable);
-			own_scripts.remove (script_id);
+				yield connection.destroy_script (script_id, pid, cancellable);
+				own_scripts.remove (script_id);
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		public override async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
+			try {
+				check_open ();
 
-			yield connection.load_script (script_id, pid, cancellable);
+				yield connection.load_script (script_id, pid, cancellable);
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		public override async void post_messages (AgentMessage[] messages, uint batch_id, Cancellable? cancellable)
 				throws Error, IOError {
-			transmitter.check_okay_to_receive ();
+			try {
+				transmitter.check_okay_to_receive ();
 
-			foreach (var m in messages) {
-				switch (m.kind) {
-					case SCRIPT:
-						yield connection.post_script_message (m.script_id, m.text,
-							m.has_data ? new Bytes (m.data) : null, pid, cancellable);
-						break;
-					case DEBUGGER:
-						break;
+				foreach (var m in messages) {
+					switch (m.kind) {
+						case SCRIPT:
+							yield connection.post_script_message (m.script_id, m.text,
+								m.has_data ? new Bytes (m.data) : null, pid, cancellable);
+							break;
+						case DEBUGGER:
+							break;
+					}
 				}
-			}
 
-			transmitter.notify_rx_batch_id (batch_id);
+				transmitter.notify_rx_batch_id (batch_id);
+			} catch (Efni.Error e) {
+				throw_api_error (e);
+			}
 		}
 
 		// Each copy numbers its scripts from one, thus take only what comes from our own process.

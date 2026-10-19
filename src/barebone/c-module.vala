@@ -23,11 +23,11 @@ namespace Frida.Barebone {
 		private Callback console_log_callback;
 
 		public async CModule.from_blob (Bytes blob, Machine machine, Allocator allocator, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			try {
 				elf = new Gum.ElfModule.from_blob (blob);
 			} catch (Gum.Error e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
+				throw new Efni.Error.NOT_SUPPORTED ("%s", e.message);
 			}
 
 			var raw_elf = new Bytes.static (elf.get_file_data ());

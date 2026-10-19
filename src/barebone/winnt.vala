@@ -1,7 +1,9 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	public static async WinNtLayout collect_winnt_layout (Machine machine, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		var symbols = new Gee.ArrayList<SymbolInfo> ();
 
 		Shape shape = Shape.of (machine.debugger);
@@ -10,7 +12,7 @@ namespace Frida.Barebone {
 
 		LoadedModule? first = yield read_first_loaded_module (machine, anchors.module_list, shape, cancellable);
 		if (first == null)
-			throw new Error.NOT_SUPPORTED ("Unable to find the kernel");
+			throw new Efni.Error.NOT_SUPPORTED ("Unable to find the kernel");
 
 		var kernel = new ModuleInfo () {
 			name = first.name,
@@ -55,7 +57,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async Anchors find_anchors (Machine machine, Shape shape, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		if (processor_control_region_is_reachable (machine.debugger, shape)) {
 			uint64 version_block = yield find_version_block (machine, shape, cancellable);
 			if (version_block != 0) {
@@ -94,7 +96,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async Anchors read_anchors_from_kernel (Machine machine, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		KernelImage found = yield find_kernel_image (machine, shape, cancellable);
 		uint64 kernel = found.address;
 
@@ -106,7 +108,7 @@ namespace Frida.Barebone {
 			}
 		}
 		if (!is_kernel_address (module_list, shape))
-			throw new Error.NOT_SUPPORTED ("Unable to find the loaded module list");
+			throw new Efni.Error.NOT_SUPPORTED ("Unable to find the loaded module list");
 
 		return new Anchors () {
 			module_list = module_list,
@@ -116,7 +118,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async KernelImage find_kernel_image (Machine machine, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		for (uint attempt = 0; attempt != MAX_CATCH_ATTEMPTS; attempt++) {
@@ -154,7 +156,7 @@ namespace Frida.Barebone {
 			yield catch_processor_again (debugger, cancellable);
 		}
 
-		throw new Error.NOT_SUPPORTED ("Unable to find the kernel image");
+		throw new Efni.Error.NOT_SUPPORTED ("Unable to find the kernel image");
 	}
 
 	private static string? system_call_entry_register (Debugger debugger) {
@@ -173,7 +175,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async KernelImage? find_image_below (Machine machine, uint64 address,
-			Gee.Set<uint64?> visited, Cancellable? cancellable) throws Error, IOError {
+			Gee.Set<uint64?> visited, Cancellable? cancellable) throws Efni.Error, IOError {
 		KernelImage? image = yield sweep_for_image_below (machine, address, LARGE_PAGE_SIZE,
 			make_visited (), cancellable);
 		if (image != null)
@@ -189,7 +191,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async KernelImage? sweep_for_image_below (Machine machine, uint64 address,
-			uint64 stride, Gee.Set<uint64?> visited, Cancellable? cancellable) throws Error, IOError {
+			uint64 stride, Gee.Set<uint64?> visited, Cancellable? cancellable) throws Efni.Error, IOError {
 		uint64 image = address - (address % stride);
 		for (uint step = 0; step != MAX_IMAGE_STEPS && visited.size != MAX_IMAGE_PROBES; step++,
 				image -= stride) {
@@ -199,7 +201,7 @@ namespace Frida.Barebone {
 			Gee.List<Export> candidate;
 			try {
 				candidate = yield enumerate_exports (machine, image, cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				continue;
 			}
 
@@ -223,7 +225,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async KernelImage? find_image_below_pointers (Machine machine, uint64 seed,
-			Shape shape, Gee.Set<uint64?> visited, Cancellable? cancellable) throws Error, IOError {
+			Shape shape, Gee.Set<uint64?> visited, Cancellable? cancellable) throws Efni.Error, IOError {
 
 		Debugger debugger = machine.debugger;
 		uint64 seed_page = seed - (seed % PCR_SCAN_SIZE);
@@ -245,7 +247,7 @@ namespace Frida.Barebone {
 	// The processor control region points to the block that a kernel debugger uses. That block
 	// gives the kernel and its module list, which is sufficient to find the other data.
 	private static async uint64 find_version_block (Machine machine, Shape shape, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		uint64 pcr_base = yield find_processor_control_region (machine, shape, cancellable);
@@ -269,7 +271,7 @@ namespace Frida.Barebone {
 	// and points GS to it in kernel mode. In user mode GS points to the block of the current
 	// thread, because the processor exchanges the two values.
 	private static async uint64 find_processor_control_region (Machine machine, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		if (shape.pointer_size == 4) {
@@ -282,7 +284,7 @@ namespace Frida.Barebone {
 				uint64 candidate;
 				try {
 					candidate = yield thread.read_register (name, cancellable);
-				} catch (Error e) {
+				} catch (Efni.Error e) {
 					continue;
 				}
 				if (yield points_at_itself (machine, candidate, shape, cancellable))
@@ -297,7 +299,7 @@ namespace Frida.Barebone {
 
 	// You can read only the value that GS holds now. Thus continue the guest and try again.
 	private static async void catch_processor_again (Debugger debugger, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		yield debugger.resume (cancellable);
 
 		var source = new TimeoutSource (CATCH_INTERVAL_MS);
@@ -313,7 +315,7 @@ namespace Frida.Barebone {
 
 	// A processor control region starts with its own address. Use this to identify a candidate.
 	private static async bool points_at_itself (Machine machine, uint64 candidate, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		if (!is_kernel_address (candidate, shape))
 			return false;
 
@@ -322,7 +324,7 @@ namespace Frida.Barebone {
 		try {
 			head = debugger.make_buffer (yield debugger.read_byte_array (candidate + shape.self,
 				shape.pointer_size, cancellable));
-		} catch (Error e) {
+		} catch (Efni.Error e) {
 			return false;
 		}
 
@@ -332,20 +334,20 @@ namespace Frida.Barebone {
 	// Both kernels use the 64-bit form of this structure, and a 32-bit kernel extends the sign of
 	// the pointers in it.
 	private static async uint64 read_loaded_module_list (Machine machine, uint64 version_block, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		uint64 list = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (
 			version_block + LOADED_MODULE_LIST_OFFSET, shape.pointer_size, cancellable)), 0, shape);
 		if (!is_kernel_address (list, shape))
-			throw new Error.NOT_SUPPORTED ("Unable to find the loaded module list");
+			throw new Efni.Error.NOT_SUPPORTED ("Unable to find the loaded module list");
 
 		return list;
 	}
 
 	// The kernel gives the addresses that a debugger needs here, and no module exports them.
 	private static async uint64 read_process_list_head (Machine machine, uint64 version_block, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		uint64 data_list = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (
@@ -367,7 +369,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async LoadedModule? read_first_loaded_module (Machine machine, uint64 head, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
 		uint64 entry = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (head, shape.pointer_size,
@@ -396,14 +398,14 @@ namespace Frida.Barebone {
 
 	private static async void add_export_symbols (Machine machine, LoadedModule module,
 			Gee.List<Export>? known, Gee.List<SymbolInfo> symbols, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		Gee.List<Export> exports;
 		if (known != null) {
 			exports = known;
 		} else {
 			try {
 				exports = yield enumerate_exports (machine, module.base_address, cancellable);
-			} catch (Error e) {
+			} catch (Efni.Error e) {
 				return;
 			}
 		}
@@ -419,7 +421,7 @@ namespace Frida.Barebone {
 	}
 
 	private static async string read_unicode_string (Machine machine, Buffer owner, size_t offset, Shape shape,
-			Cancellable? cancellable) throws Error, IOError {
+			Cancellable? cancellable) throws Efni.Error, IOError {
 		uint16 length = owner.read_uint16 (offset);
 		uint64 buffer = read_pointer (owner, offset + shape.name_buffer, shape);
 		if (length == 0 || length > MAX_NAME_SIZE || !is_kernel_address (buffer, shape))
@@ -434,7 +436,7 @@ namespace Frida.Barebone {
 	}
 
 	internal static async bool stopped_in_kernel_mode (Debugger debugger, Cancellable? cancellable)
-			throws Error, IOError {
+			throws Efni.Error, IOError {
 		DebuggerThread thread = debugger.exception.thread;
 
 		if (debugger.arch == TargetArch.ARM64) {

@@ -8,7 +8,7 @@ namespace Frida.Barebone {
 		public abstract Gum.PageProtection granted_protection ();
 
 		public abstract async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable)
-			throws Error, IOError;
+			throws Efni.Error, IOError;
 	}
 
 	public interface Allocation : Object {
@@ -20,11 +20,11 @@ namespace Frida.Barebone {
 			get;
 		}
 
-		public abstract async void deallocate (Cancellable? cancellable) throws Error, IOError;
+		public abstract async void deallocate (Cancellable? cancellable) throws Efni.Error, IOError;
 	}
 
 	internal async void protect_unless_already (Machine machine, Allocator allocator, uint64 address, size_t size,
-			Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
+			Gum.PageProtection prot, Cancellable? cancellable) throws Efni.Error, IOError {
 		if ((allocator.granted_protection () & prot) == prot)
 			return;
 
@@ -55,9 +55,9 @@ namespace Frida.Barebone {
 		}
 
 		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			if (size > _size)
-				throw new Error.NOT_SUPPORTED ("Reserved region is too small");
+				throw new Efni.Error.NOT_SUPPORTED ("Reserved region is too small");
 
 			return new FixedAllocation (address, size);
 		}
@@ -84,7 +84,7 @@ namespace Frida.Barebone {
 			this._size = size;
 		}
 
-		public async void deallocate (Cancellable? cancellable) throws Error, IOError {
+		public async void deallocate (Cancellable? cancellable) throws Efni.Error, IOError {
 		}
 	}
 
@@ -105,8 +105,8 @@ namespace Frida.Barebone {
 			this._page_size = page_size;
 		}
 
-		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
-			throw new Error.NOT_SUPPORTED ("To enable this feature, specify an allocator in your FRIDA_BAREBONE_CONFIG");
+		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Efni.Error, IOError {
+			throw new Efni.Error.NOT_SUPPORTED ("To enable this feature, specify an allocator in your FRIDA_BAREBONE_CONFIG");
 		}
 	}
 
@@ -132,7 +132,7 @@ namespace Frida.Barebone {
 			this.cursor = config.physical_base.address;
 		}
 
-		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
+		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Efni.Error, IOError {
 			uint64 address_pa = cursor;
 
 			size_t vm_size = round_size_up (size, _page_size);
@@ -168,7 +168,7 @@ namespace Frida.Barebone {
 				page_allocation = allocation;
 			}
 
-			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
+			public async void deallocate (Cancellable? cancellable) throws Efni.Error, IOError {
 				// TODO: Add to freelist.
 				yield page_allocation.deallocate (cancellable);
 			}
@@ -208,14 +208,14 @@ namespace Frida.Barebone {
 		// A kernel allocator gives blocks with an alignment of less than a page, and the caller can
 		// change the protection and write whole pages. Thus allocate enough for every page the
 		// result spans, give out full pages, and keep the start of the block for the release.
-		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Error, IOError {
+		public async Allocation allocate (size_t size, size_t alignment, Cancellable? cancellable) throws Efni.Error, IOError {
 			size_t aligned_size = (size + alignment - 1) & ~(alignment - 1);
 			size_t padded_size = aligned_size + alignment - 1;
 
 			uint64 block = yield machine.invoke (alloc_function,
 				resolve_arguments (alloc_arguments, padded_size, 0), cancellable);
 			if (block == 0)
-				throw new Error.NOT_SUPPORTED ("Unable to allocate %zu bytes in the target", padded_size);
+				throw new Efni.Error.NOT_SUPPORTED ("Unable to allocate %zu bytes in the target", padded_size);
 
 			uint64 address = (block + alignment - 1) & ~((uint64) alignment - 1);
 
@@ -274,7 +274,7 @@ namespace Frida.Barebone {
 				this.free_arguments = free_arguments;
 			}
 
-			public async void deallocate (Cancellable? cancellable) throws Error, IOError {
+			public async void deallocate (Cancellable? cancellable) throws Efni.Error, IOError {
 				yield machine.invoke (free_function,
 					resolve_arguments (free_arguments, block_size, block), cancellable);
 			}

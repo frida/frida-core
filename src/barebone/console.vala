@@ -1,3 +1,5 @@
+using Efni;
+
 [CCode (gir_namespace = "FridaBarebone", gir_version = "1.0")]
 namespace Frida.Barebone {
 	private class ConsoleLogHandler : Object, CallbackHandler {
@@ -14,7 +16,7 @@ namespace Frida.Barebone {
 		}
 
 		public async uint64 handle_invocation (uint64[] args, CallFrame frame, Cancellable? cancellable)
-				throws Error, IOError {
+				throws Efni.Error, IOError {
 			var message = args[0];
 			var len = (long) args[1];
 

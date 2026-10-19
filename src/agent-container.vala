@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class AgentContainer : Object, AgentSessionProvider {
 		public DBusConnection connection {

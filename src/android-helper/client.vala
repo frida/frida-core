@@ -1,3 +1,5 @@
+using Efni;
+
 namespace Frida {
 	public sealed class AndroidHelperClient : Object {
 		public AndroidHelperTransport transport {
