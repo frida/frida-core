@@ -1169,7 +1169,7 @@ namespace Frida {
 
 					if (recv_queue.len == 0) {
 #if HAVE_SOUP_WEBSOCKET_BACKPRESSURE
-						websocket.resume_input ();
+						resume_websocket_input ();
 #endif
 					}
 
@@ -1185,6 +1185,21 @@ namespace Frida {
 
 			return n;
 		}
+
+#if HAVE_SOUP_WEBSOCKET_BACKPRESSURE
+		private void resume_websocket_input () {
+			if (main_context.is_owner ()) {
+				websocket.resume_input ();
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					websocket.resume_input ();
+					return Source.REMOVE;
+				});
+				source.attach (main_context);
+			}
+		}
+#endif
 
 		public override ssize_t write (uint8[] buffer) {
 			with_state_lock (() => {
