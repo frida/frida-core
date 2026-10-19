@@ -8,6 +8,16 @@ namespace Frida {
 			new Gee.HashMap<Idun.Device, FruityHostSessionProvider> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
+#if HAVE_IDUND_BLOB
+		private TemporaryDirectory daemon_dir = new TemporaryDirectory ();
+		private TemporaryFile? daemon_file;
+
+#if WINDOWS
+		private const string DAEMON_FILENAME = "idund.exe";
+#else
+		private const string DAEMON_FILENAME = "idund";
+#endif
+#endif
 
 		construct {
 			device_monitor.device_attached.connect (on_device_attached);
@@ -18,8 +28,33 @@ namespace Frida {
 #if !MACOS
 			migrate_pairing_store ();
 #endif
-			yield device_monitor.start (cancellable);
+#if HAVE_IDUND_BLOB
+			device_monitor.set_daemon_locator (extract_daemon);
+#endif
+			try {
+				yield device_monitor.start (cancellable);
+			} catch (Efni.Error e) {
+				printerr ("Unable to start idund: %s\n", e.message);
+			}
 		}
+
+#if HAVE_IDUND_BLOB
+		private string extract_daemon () throws Efni.Error {
+#if WINDOWS
+			var blob = Frida.Data.Idund.get_idund_exe_blob ();
+#else
+			var blob = Frida.Data.Idund.get_idund_blob ();
+#endif
+			try {
+				daemon_file = new TemporaryFile.from_stream (DAEMON_FILENAME, new MemoryInputStream.from_data (blob.data, null),
+					daemon_dir);
+			} catch (Error e) {
+				throw new Efni.Error.PERMISSION_DENIED ("%s", e.message);
+			}
+			FileUtils.chmod (daemon_file.path, 0700);
+			return daemon_file.path;
+		}
+#endif
 
 #if !MACOS
 		private static void migrate_pairing_store () {

@@ -592,6 +592,33 @@ if have_fruity_backend
     'fruity' / 'injector.vala',
   ]
   backend_deps += idun_dep
+
+  if have_idund_blob
+    idund = custom_target('frida-idund',
+      input: idund_raw,
+      output: 'idund' + exe_suffix,
+      command: post_process + ['executable', 're.frida.Idund'],
+    )
+    idund_data = custom_target('frida-data-idund',
+      input: [
+        'fruity' / 'idund.resources',
+        idund,
+      ],
+      output: [
+        'frida-data-idund.vapi',
+        'frida-data-idund.h',
+        'frida-data-idund.c',
+        'frida-data-idund-blob' + resource_blob_extension,
+      ],
+      command: [
+        resource_compiler_cmd_array,
+        '-c', '@INPUT0@',
+        '-o', meson.current_build_dir() / 'frida-data-idund',
+        '@INPUT1@',
+      ],
+    )
+    backend_sources += [idund_data]
+  endif
 endif
 
 if have_droidy_backend

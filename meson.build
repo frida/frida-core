@@ -725,11 +725,18 @@ openssl_dep = dependency('openssl',
 )
 
 idun_libs = []
+have_idund_blob = false
 if have_fruity_backend
   idun_dep = dependency('idun-1.0', default_options: ['default_library=static'])
   backend_reqs_private += 'idun-1.0'
   if idun_dep.type_name() == 'internal'
-    idun_libs += subproject('idun').get_variable('idun')
+    idun_sp = subproject('idun')
+    idun_libs += idun_sp.get_variable('idun')
+    if assets_mode == 'embedded' and idun_sp.get_variable('build_daemon')
+      idund_raw = idun_sp.get_variable('idund')
+      have_idund_blob = true
+      vala_flags += '--define=HAVE_IDUND_BLOB'
+    endif
   endif
   idun_vapidir = idun_dep.get_variable('vapidir', default_value: '')
   if idun_vapidir != ''
