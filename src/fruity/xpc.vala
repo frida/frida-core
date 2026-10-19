@@ -1231,6 +1231,11 @@ namespace Frida.Fruity {
 			return this;
 		}
 
+		public unowned XpcObjectBuilder add_double_value (double val) {
+			begin_object (DOUBLE).append_double (val);
+			return this;
+		}
+
 		public unowned ObjectBuilder add_data_value (Bytes val) {
 			begin_object (DATA)
 				.append_uint32 (val.length)

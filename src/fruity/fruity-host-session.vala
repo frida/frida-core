@@ -2533,6 +2533,12 @@ namespace Frida {
 				case INT64:
 					builder.add_int64_value (val.get_int64 ());
 					return;
+				case UINT64:
+					builder.add_uint64_value (val.get_uint64 ());
+					return;
+				case DOUBLE:
+					builder.add_double_value (val.get_double ());
+					return;
 				case STRING:
 					builder.add_string_value (val.get_string ());
 					return;
