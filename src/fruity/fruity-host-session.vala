@@ -1215,6 +1215,14 @@ namespace Frida {
 				return new XpcServiceSession (new Fruity.XpcConnection (stream));
 			}
 
+			if (protocol == "udp") {
+				var tunnel = yield device.find_tunnel (cancellable);
+				if (tunnel == null)
+					throw new Error.NOT_SUPPORTED ("UDP not supported by device");
+
+				return new UdpServiceSession (tunnel);
+			}
+
 			if (protocol == "syscall-trace") {
 				var core_profile = yield Fruity.CoreProfileService.open (device, cancellable);
 				var device_info = yield Fruity.DeviceInfoService.open (device, cancellable);
@@ -2421,6 +2429,123 @@ namespace Frida {
 				return nsobject_to_variant ((Fruity.NSObject) v.get_boxed ());
 
 			assert_not_reached ();
+		}
+	}
+
+	private sealed class UdpServiceSession : Object, ServiceSession {
+		public Fruity.Tunnel tunnel {
+			get;
+			construct;
+		}
+
+		private State state = INACTIVE;
+		private Fruity.UdpSocket? socket;
+		private DatagramBasedSource? rx_source;
+		private uint8[] rx_buf = new uint8[MAX_DATAGRAM_SIZE];
+		private MainContext main_context;
+		private Cancellable io_cancellable = new Cancellable ();
+
+		private enum State {
+			INACTIVE,
+			ACTIVE,
+			CLOSED,
+		}
+
+		private const size_t MAX_DATAGRAM_SIZE = 65535;
+
+		public UdpServiceSession (Fruity.Tunnel tunnel) {
+			Object (tunnel: tunnel);
+		}
+
+		construct {
+			main_context = MainContext.ref_thread_default ();
+		}
+
+		public async void activate (Cancellable? cancellable) throws Error, IOError {
+			ensure_active ();
+		}
+
+		private void ensure_active () throws Error {
+			if (state == CLOSED)
+				throw new Error.INVALID_OPERATION ("Service is closed");
+
+			if (state == INACTIVE) {
+				socket = tunnel.create_udp_socket ();
+
+				rx_source = socket.datagram_based.create_source (IOCondition.IN, io_cancellable);
+				rx_source.set_callback (on_socket_readable);
+				rx_source.attach (main_context);
+
+				state = ACTIVE;
+			}
+		}
+
+		public async void cancel (Cancellable? cancellable) throws IOError {
+			if (state == CLOSED)
+				return;
+			state = CLOSED;
+
+			io_cancellable.cancel ();
+
+			if (rx_source != null) {
+				rx_source.destroy ();
+				rx_source = null;
+			}
+			socket = null;
+
+			close ();
+		}
+
+		public async Variant request (Variant parameters, Cancellable? cancellable = null) throws Error, IOError {
+			ensure_active ();
+
+			var reader = new VariantReader (parameters);
+
+			string type = reader.read_member ("type").get_string_value ();
+			reader.end_member ();
+
+			if (type == "describe") {
+				var local_address = socket.get_local_address ();
+				var remote_address = tunnel.make_remote_address (0);
+
+				var builder = new VariantBuilder (VariantType.VARDICT);
+				builder.add ("{sv}", "localAddress", new Variant.string (local_address.get_address ().to_string ()));
+				builder.add ("{sv}", "localPort", new Variant.uint16 (local_address.get_port ()));
+				builder.add ("{sv}", "remoteAddress", new Variant.string (remote_address.get_address ().to_string ()));
+				return builder.end ();
+			}
+
+			if (type == "send") {
+				Bytes data = reader.read_member ("data").get_data_value ();
+				reader.end_member ();
+
+				uint16 port = (uint16) reader.read_member ("port").get_int64_value ();
+				reader.end_member ();
+
+				Udp.send_to (data.get_data (), tunnel.make_remote_address (port), socket.datagram_based, io_cancellable);
+
+				return new VariantBuilder (VariantType.VARDICT).end ();
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Unsupported request type: %s", type);
+		}
+
+		private bool on_socket_readable (DatagramBased datagram_based, IOCondition condition) {
+			InetSocketAddress sender;
+			size_t n;
+			try {
+				n = Udp.recv (rx_buf, datagram_based, io_cancellable, out sender);
+			} catch (GLib.Error e) {
+				return io_cancellable.is_cancelled () ? Source.REMOVE : Source.CONTINUE;
+			}
+
+			var builder = new VariantBuilder (VariantType.VARDICT);
+			builder.add ("{sv}", "type", new Variant.string ("datagram"));
+			builder.add ("{sv}", "data", new Variant.from_bytes (new VariantType ("ay"), new Bytes (rx_buf[:n]), true));
+			builder.add ("{sv}", "port", new Variant.uint16 (sender.get_port ()));
+			message (builder.end ());
+
+			return Source.CONTINUE;
 		}
 	}
 

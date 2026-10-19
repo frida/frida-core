@@ -487,6 +487,8 @@ namespace Frida.Fruity {
 
 		public abstract async void close (Cancellable? cancellable) throws IOError;
 		public abstract async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError;
+		public abstract UdpSocket create_udp_socket () throws Error;
+		public abstract InetSocketAddress make_remote_address (uint16 port);
 
 		public async ServiceInfo resolve_service (string[] identifiers, Cancellable? cancellable) throws Error, IOError {
 			ServiceInfo? service = discovery.find_first_service (identifiers);

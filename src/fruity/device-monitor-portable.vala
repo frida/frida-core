@@ -63,13 +63,15 @@ namespace Frida.Fruity {
 		}
 
 		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
-			var netstack = tunnel_connection.tunnel_netstack;
-			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tunnel_connection.remote_address,
-				port: port,
-				scope_id: netstack.scope_id
-			);
-			return yield netstack.open_tcp_connection (endpoint, cancellable);
+			return yield tunnel_connection.tunnel_netstack.open_tcp_connection (make_remote_address (port), cancellable);
+		}
+
+		public UdpSocket create_udp_socket () throws Error {
+			return create_tunnel_udp_socket (tunnel_connection);
+		}
+
+		public InetSocketAddress make_remote_address (uint16 port) {
+			return make_tunnel_remote_address (tunnel_connection, port);
 		}
 
 		public async void refresh_discovery (Cancellable? cancellable) throws Error, IOError {
@@ -1180,13 +1182,15 @@ namespace Frida.Fruity {
 		}
 
 		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
-			var netstack = tunnel_connection.tunnel_netstack;
-			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tunnel_connection.remote_address,
-				port: port,
-				scope_id: netstack.scope_id
-			);
-			return yield netstack.open_tcp_connection (endpoint, cancellable);
+			return yield tunnel_connection.tunnel_netstack.open_tcp_connection (make_remote_address (port), cancellable);
+		}
+
+		public UdpSocket create_udp_socket () throws Error {
+			return create_tunnel_udp_socket (tunnel_connection);
+		}
+
+		public InetSocketAddress make_remote_address (uint16 port) {
+			return make_tunnel_remote_address (tunnel_connection, port);
 		}
 
 		public async void refresh_discovery (Cancellable? cancellable) throws Error, IOError {
@@ -1378,13 +1382,15 @@ namespace Frida.Fruity {
 		}
 
 		public async IOStream open_tcp_connection (uint16 port, Cancellable? cancellable) throws Error, IOError {
-			var netstack = tunnel_connection.tunnel_netstack;
-			var endpoint = (InetSocketAddress) Object.new (typeof (InetSocketAddress),
-				address: tunnel_connection.remote_address,
-				port: port,
-				scope_id: netstack.scope_id
-			);
-			return yield netstack.open_tcp_connection (endpoint, cancellable);
+			return yield tunnel_connection.tunnel_netstack.open_tcp_connection (make_remote_address (port), cancellable);
+		}
+
+		public UdpSocket create_udp_socket () throws Error {
+			return create_tunnel_udp_socket (tunnel_connection);
+		}
+
+		public InetSocketAddress make_remote_address (uint16 port) {
+			return make_tunnel_remote_address (tunnel_connection, port);
 		}
 
 		public async void refresh_discovery (Cancellable? cancellable) throws Error, IOError {
@@ -1404,6 +1410,24 @@ namespace Frida.Fruity {
 		var rsd_connection = yield netstack.open_tcp_connection (rsd_endpoint, cancellable);
 
 		return yield DiscoveryService.open (rsd_connection, cancellable);
+	}
+
+	private UdpSocket create_tunnel_udp_socket (TunnelConnection connection) throws Error {
+		var netstack = connection.tunnel_netstack;
+		var socket = netstack.create_udp_socket ();
+		socket.bind ((InetSocketAddress) Object.new (typeof (InetSocketAddress),
+			address: netstack.listener_ip,
+			scope_id: netstack.scope_id
+		));
+		return socket;
+	}
+
+	private InetSocketAddress make_tunnel_remote_address (TunnelConnection connection, uint16 port) {
+		return (InetSocketAddress) Object.new (typeof (InetSocketAddress),
+			address: connection.remote_address,
+			port: port,
+			scope_id: connection.tunnel_netstack.scope_id
+		);
 	}
 
 	private async void sleep (uint duration_msec, Cancellable? cancellable) throws IOError {

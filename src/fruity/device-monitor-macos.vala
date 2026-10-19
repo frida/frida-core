@@ -295,8 +295,11 @@ namespace Frida.Fruity {
 		private Bytes? _remote_unlock_host_key;
 		private Darwin.Xpc.Uuid? _assertion_identifier;
 		private InetAddress? tunnel_device_address;
+		private SystemNetworkStack? tunnel_netstack;
 		private DiscoveryService? _discovery;
 		private int64 _opened_at = -1;
+
+		private const uint16 DISCARD_PORT = 9;
 
 		public MacOSTunnel (XpcClient pairing_device, Bytes? remote_unlock_host_key) {
 			this.pairing_device = pairing_device;
@@ -353,6 +356,35 @@ namespace Frida.Fruity {
 			Tcp.enable_nodelay (connection.socket);
 
 			return connection;
+		}
+
+		public UdpSocket create_udp_socket () throws Error {
+			var netstack = get_tunnel_netstack ();
+			var socket = netstack.create_udp_socket ();
+			socket.bind (new InetSocketAddress (netstack.listener_ip, 0));
+			return socket;
+		}
+
+		private SystemNetworkStack get_tunnel_netstack () throws Error {
+			if (tunnel_netstack == null)
+				tunnel_netstack = new SystemNetworkStack (query_source_address_towards_device (), 0);
+			return tunnel_netstack;
+		}
+
+		private InetAddress query_source_address_towards_device () throws Error {
+			try {
+				var probe = new Socket (tunnel_device_address.get_family (), DATAGRAM, UDP);
+				probe.connect (make_remote_address (DISCARD_PORT), null);
+				var source_address = ((InetSocketAddress) probe.get_local_address ()).get_address ();
+				probe.close ();
+				return source_address;
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to determine local tunnel address: %s", e.message);
+			}
+		}
+
+		public InetSocketAddress make_remote_address (uint16 port) {
+			return new InetSocketAddress (tunnel_device_address, port);
 		}
 
 		public async void refresh_discovery (Cancellable? cancellable) throws Error, IOError {
