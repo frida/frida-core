@@ -35,16 +35,25 @@ namespace Frida.Fruity {
 	}
 
 	public sealed class LinuxPairingBrowser : Object, PairingBrowser {
-		private PairingBrowser backend;
+		private PairingBrowser? backend;
+
+		private Cancellable io_cancellable = new Cancellable ();
 
 		public async void start (Cancellable? cancellable) throws IOError {
-			backend = yield make_backend (cancellable);
-			backend.service_discovered.connect (service => service_discovered (service));
-			yield backend.start (cancellable);
+			var b = yield make_backend (cancellable);
+			if (io_cancellable.is_cancelled ())
+				return;
+
+			b.service_discovered.connect (service => service_discovered (service));
+			backend = b;
+			yield b.start (cancellable);
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
-			yield backend.stop (cancellable);
+			io_cancellable.cancel ();
+
+			if (backend != null)
+				yield backend.stop (cancellable);
 		}
 
 		private async PairingBrowser make_backend (Cancellable? cancellable) throws IOError {
