@@ -592,6 +592,7 @@ if have_fruity_backend
   backend_sources += [
     'fruity' / 'fruity-host-session.vala',
     'fruity' / 'device-monitor.vala',
+    'fruity' / 'network-stack.vala',
     'fruity' / 'xpc.vala',
     'fruity' / 'dtx.vala',
     'fruity' / 'lockdown.vala',
@@ -617,7 +618,7 @@ if have_fruity_backend
       'fruity' / 'pairing.vala',
       'fruity' / 'tunnel.vala',
       'fruity' / 'tls-psk.vala',
-      'fruity' / 'network-stack.vala',
+      'fruity' / 'virtual-network-stack.vala',
       'fruity' / 'usb.vala',
       'fruity' / 'ncm.vala',
     ]
