@@ -352,6 +352,12 @@ glib_options = [
   'tests=false',
   'nls=disabled',
 ]
+if host_os_family in ['darwin', 'qnx', 'none'] or host_os == 'android' or libc == 'uclibc'
+  glib_options += 'iconv=external'
+endif
+if host_os_family == 'qnx'
+  glib_options += 'sysprof=disabled'
+endif
 if optimize_for_prod
   glib_options += [
     'glib_debug=disabled',
@@ -408,6 +414,7 @@ json_glib_dep = dependency('json-glib-1.0', version: '>=1.8', default_options: [
   'introspection=disabled',
   'gtk_doc=disabled',
   'tests=false',
+  'nls=disabled',
 ])
 libsoup_dep = dependency('libsoup-3.0', default_options: [
   'default_library=static',
@@ -429,7 +436,13 @@ if libsoup_dep.type_name() == 'internal' \
   vala_flags += '--define=HAVE_SOUP_WEBSOCKET_BACKPRESSURE'
 endif
 brotlidec_dep = dependency('libbrotlidec', default_options: ['default_library=static'])
-capstone_dep = dependency('capstone', default_options: ['default_library=static'])
+capstone_dep = dependency('capstone', default_options: [
+  'default_library=static',
+  'archs=all',
+  'use_arch_registration=true',
+  'x86_att_disable=true',
+  'cli=disabled',
+])
 if capstone_dep.type_name() != 'internal' \
     and not cc.has_function('cs_arch_register_x86', dependencies: [capstone_dep])
   add_project_arguments(
@@ -443,9 +456,9 @@ endif
 quickjs_dep = dependency('quickjs', required: get_option('barebone_backend'), default_options: [
   'default_library=static',
   'libc=false',
-  'bignum=true',
   'atomics=disabled',
-  'stack_check=disabled',
+  'stack_check=' + ((host_os_family == 'none') ? 'enabled' : 'disabled'),
+  'stack_mode=' + ((host_os_family == 'none') ? 'optimize' : 'default'),
 ])
 lzfse_dep = dependency('lzfse', required: false, default_options: ['default_library=static'])
 lzfse_from_system = false
@@ -481,6 +494,7 @@ endif
 
 if host_os == 'android'
   minizip_dep = dependency('minizip', required: false, default_options: [
+    'default_library=static',
     'zlib=enabled',
     'lzma=disabled',
   ])
@@ -721,11 +735,16 @@ if have_fruity_backend
       vala_flags += '--define=HAVE_NGTCP2_CRYPTO_OSSL'
     endif
 
+    libusb_options = [
+      'default_library=static',
+      'examples=disabled',
+      'tests=disabled',
+    ]
     if have_frida_glib
-      libusb_dep = dependency('libusb-1.0', default_options: ['default_library=static'])
+      libusb_dep = dependency('libusb-1.0', default_options: libusb_options)
     else
-      subproject('libusb', default_options: ['default_library=static'])
-      libusb_dep = dependency('libusb-1.0', default_options: ['default_library=static'])
+      subproject('libusb', default_options: libusb_options)
+      libusb_dep = dependency('libusb-1.0', default_options: libusb_options)
     endif
     backend_deps_private += libusb_dep
     backend_reqs_private += 'libusb-1.0'
@@ -775,8 +794,12 @@ endif
 
 if host_os == 'android'
   termux_elf_cleaner = find_program('termux-elf-cleaner', native: true)
-  libselinux_dep = dependency('libselinux', version: '>=3.0', default_options: ['default_library=static'])
-  libsepol_dep = dependency('libsepol', version: '>=3.0', default_options: ['default_library=static'])
+  selinux_options = [
+    'default_library=static',
+    'regex=disabled',
+  ]
+  libselinux_dep = dependency('libselinux', version: '>=3.0', default_options: selinux_options)
+  libsepol_dep = dependency('libsepol', version: '>=3.0', default_options: selinux_options)
   backend_deps_private += [libselinux_dep, libsepol_dep]
   backend_reqs_private += ['libselinux', 'libsepol']
 else
