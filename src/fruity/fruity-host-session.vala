@@ -15,8 +15,33 @@ namespace Frida {
 		}
 
 		public async void start (Cancellable? cancellable) throws IOError {
+#if !MACOS
+			migrate_pairing_store ();
+#endif
 			yield device_monitor.start (cancellable);
 		}
+
+#if !MACOS
+		private static void migrate_pairing_store () {
+			string config_dir = Environment.get_user_config_dir ();
+			var old_dir = File.new_build_filename (config_dir, "frida");
+			var new_dir = File.new_build_filename (config_dir, "idun");
+			if (new_dir.query_exists ())
+				return;
+
+			try {
+				foreach (unowned string entry in new string[] { "self-identity.plist", "peers" }) {
+					var old_entry = old_dir.get_child (entry);
+					if (!old_entry.query_exists ())
+						continue;
+					if (!new_dir.query_exists ())
+						new_dir.make_directory_with_parents ();
+					old_entry.move (new_dir.get_child (entry), FileCopyFlags.NONE);
+				}
+			} catch (GLib.Error e) {
+			}
+		}
+#endif
 
 		public async void stop (Cancellable? cancellable) throws IOError {
 			io_cancellable.cancel ();
