@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/efni.git
-revision = bd8af5db0ee34195f4bcc4b61f7efb012f95a0c8
+revision = 429f013a8ce956be24b65c4af918382d95ffa3c0
 depth = 1
 
 [provide]
