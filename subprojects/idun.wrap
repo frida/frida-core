@@ -1,7 +1,8 @@
 [wrap-git]
 url = https://github.com/frida/idun.git
-revision = main
+revision = fc4137f13353854eaf4bf442f29f818c69e5a908
 depth = 1
 
 [provide]
 dependency_names = idun-1.0
+
