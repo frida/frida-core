@@ -56,6 +56,12 @@ namespace Frida {
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data, Cancellable? cancellable)
 				throws Error, IOError {
+#if HAVE_MAPPER
+			uint id = next_injectee_id++;
+			yield helper.inject_library_blob (pid, blob, entrypoint, data, id, cancellable);
+			pid_by_id[id] = pid;
+			return id;
+#else
 			ensure_tempdir_prepared ();
 			var name = "blob%u.dll".printf (next_blob_id++);
 			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), tempdir);
@@ -65,6 +71,7 @@ namespace Frida {
 			blob_file_by_id[id] = file;
 
 			return id;
+#endif
 		}
 
 		public async uint inject_library_resource (uint pid, AgentDescriptor agent, string entrypoint, string data,
