@@ -83,6 +83,26 @@ namespace Frida {
 			}
 		}
 
+		public async void inject_library_blob (uint pid, Bytes blob, string entrypoint, string data, uint id,
+				Cancellable? cancellable) throws Error {
+#if HAVE_MAPPER
+			void * instance, waitable_thread_handle;
+			_inject_library_blob (pid, blob, entrypoint, data, out instance, out waitable_thread_handle);
+			if (waitable_thread_handle != null) {
+				pending++;
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					monitor_remote_thread (id, instance, waitable_thread_handle);
+					return false;
+				});
+				source.attach (main_context);
+			}
+#else
+			throw new Error.NOT_SUPPORTED ("Blob injection requires the mapper, which is disabled in this build");
+#endif
+		}
+
 		private void monitor_remote_thread (uint id, void * instance, void * waitable_thread_handle) {
 			var source = WaitHandleSource.create (waitable_thread_handle, true);
 			source.set_callback (() => {
@@ -102,6 +122,10 @@ namespace Frida {
 
 		protected extern static void _inject_library_file (uint32 pid, string path, string entrypoint, string data,
 			out void * inject_instance, out void * waitable_thread_handle) throws Error;
+#if HAVE_MAPPER
+		protected extern static void _inject_library_blob (uint32 pid, Bytes blob, string entrypoint, string data,
+			out void * inject_instance, out void * waitable_thread_handle) throws Error;
+#endif
 		protected extern static void _free_inject_instance (void * inject_instance, out bool is_resident);
 	}
 

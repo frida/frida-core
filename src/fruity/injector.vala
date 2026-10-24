@@ -3,7 +3,7 @@ using Idun;
 
 [CCode (gir_namespace = "FridaFruityInjector", gir_version = "1.0")]
 namespace Frida.Fruity.Injector {
-	public static async Transaction inject (owned Gum.DarwinModule module, LLDB.Client lldb, Idun.ChannelProvider channel_provider,
+	public static async Transaction inject (owned Gum.MachoModule module, LLDB.Client lldb, Idun.ChannelProvider channel_provider,
 			Cancellable? cancellable) throws Error, IOError {
 		var session = new Session (module, lldb, channel_provider);
 		return yield session.run (cancellable);
@@ -55,7 +55,7 @@ namespace Frida.Fruity.Injector {
 	}
 
 	private sealed class Session : Object {
-		public Gum.DarwinModule module {
+		public Gum.MachoModule module {
 			get;
 			construct;
 		}
@@ -102,7 +102,7 @@ namespace Frida.Fruity.Injector {
 
 		private size_t module_size;
 
-		public Session (Gum.DarwinModule module, LLDB.Client lldb, Idun.ChannelProvider channel_provider) {
+		public Session (Gum.MachoModule module, LLDB.Client lldb, Idun.ChannelProvider channel_provider) {
 			Object (
 				module: module,
 				lldb: lldb,
@@ -221,7 +221,7 @@ namespace Frida.Fruity.Injector {
 			yield DebuggerMappings.spray_pages (lldb, module.base_address, (size_t) module.segments.index (0).vm_size,
 				page_size, cancellable);
 
-			unowned Gum.DarwinModuleImage image = module.image;
+			unowned Gum.MachoModuleImage image = module.image;
 			unowned uint8[] image_data = ((uint8[]) image.data)[0:image.size];
 			var buffer = lldb.make_buffer (new Bytes.static (image_data));
 
@@ -276,7 +276,7 @@ namespace Frida.Fruity.Injector {
 			bool have_threaded_items = false;
 			GLib.Error? pending_error = null;
 
-			Gum.FoundDarwinBindFunc collect_bind = bind => {
+			Gum.FoundMachoBindFunc collect_bind = bind => {
 				switch (bind.type) {
 					case POINTER: {
 						switch (bind.library_ordinal) {
@@ -333,13 +333,13 @@ namespace Frida.Fruity.Injector {
 		private void perform_bind_operations (Buffer buffer, SymbolSet symbols) throws GLib.Error {
 			GLib.Error? pending_error = null;
 
-			Gum.FoundDarwinBindFunc perform_bind = bind => {
+			Gum.FoundMachoBindFunc perform_bind = bind => {
 				unowned string module_name = module.get_dependency_by_ordinal (bind.library_ordinal);
 				unowned string symbol_name = bind.symbol_name;
 
 				uint64 address;
 				if (!symbols.lookup (module_name, symbol_name, out address)) {
-					bool is_weak = (bind.symbol_flags & Gum.DarwinBindSymbolFlags.WEAK_IMPORT) != 0;
+					bool is_weak = (bind.symbol_flags & Gum.MachoBindSymbolFlags.WEAK_IMPORT) != 0;
 					if (is_weak || is_dyld_stub_binder (module_name, symbol_name))
 						return true;
 					pending_error = new Error.NOT_SUPPORTED ("Unable to resolve symbol: %s", bind.symbol_name);
@@ -494,7 +494,7 @@ namespace Frida.Fruity.Injector {
 
 				uint64 slide = module.slide;
 
-				foreach (unowned Gum.DarwinSegment segment in module.segments.data) {
+				foreach (unowned Gum.MachoSegment segment in module.segments.data) {
 					uint64 address = segment.vm_address + slide;
 
 					Bytes bytes = new Bytes.from_bytes (buffer.bytes, (size_t) segment.file_offset,
@@ -510,7 +510,7 @@ namespace Frida.Fruity.Injector {
 					yield output.write_all_async (bytes.get_data (), io_priority, cancellable, out bytes_written);
 				}
 
-				foreach (unowned Gum.DarwinSegment segment in module.segments.data) {
+				foreach (unowned Gum.MachoSegment segment in module.segments.data) {
 					uint64 address = segment.vm_address + slide;
 
 					var protect_command = lldb.make_buffer_builder ()
@@ -845,10 +845,10 @@ namespace Frida.Fruity.Injector {
 			return module_name == "/usr/lib/libSystem.B.dylib" && symbol_name == "dyld_stub_binder";
 		}
 
-		private size_t compute_virtual_size (Gum.DarwinModule module) {
+		private size_t compute_virtual_size (Gum.MachoModule module) {
 			size_t total = 0;
 
-			foreach (unowned Gum.DarwinSegment segment in module.segments.data) {
+			foreach (unowned Gum.MachoSegment segment in module.segments.data) {
 				size_t size = (size_t) segment.vm_size;
 
 				size_t remainder = size % page_size;

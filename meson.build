@@ -980,12 +980,13 @@ compile_js_agent = files('tools' / 'compile-js-agent.py')
 
 mapper_opt = get_option('mapper')
 if mapper_opt.auto()
-  have_mapper = host_os_family == 'darwin'
+  have_mapper = host_os_family in ['darwin', 'windows']
 else
   have_mapper = mapper_opt.enabled()
 endif
 if have_mapper
   cdata.set('HAVE_MAPPER', 1)
+  vala_flags += '--define=HAVE_MAPPER'
 endif
 
 configure_file(

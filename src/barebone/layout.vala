@@ -27,15 +27,15 @@ namespace Frida.Barebone {
 			Object (modules: new Gee.ArrayList<ModuleInfo> (), symbols: new Gee.ArrayList<SymbolInfo> ());
 		}
 
-		public static Gum.DarwinModule parse_kernelcache (Bytes kerncache) throws Efni.Error {
+		public static Gum.MachoModule parse_kernelcache (Bytes kerncache) throws Efni.Error {
 			try {
-				return new Gum.DarwinModule.from_blob (kerncache, ARM64, Gum.PtrauthSupport.SUPPORTED);
+				return new Gum.MachoModule.from_blob (kerncache, ARM64, Gum.PtrauthSupport.SUPPORTED);
 			} catch (Gum.Error e) {
 				throw new Efni.Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
-		public static Layout load_from_module (Gum.DarwinModule mod, Bytes kerncache, uint64 kernel_base, ByteOrder byte_order,
+		public static Layout load_from_module (Gum.MachoModule mod, Bytes kerncache, uint64 kernel_base, ByteOrder byte_order,
 				uint pointer_size) throws Efni.Error {
 			var blob = new Blob (kerncache, byte_order, pointer_size);
 
@@ -45,7 +45,7 @@ namespace Frida.Barebone {
 			return new Layout (modules, symbols);
 		}
 
-		private static Gee.List<ModuleInfo> compute_module_list (Gum.DarwinModule mod, Blob blob, uint64 kernel_base) throws Efni.Error {
+		private static Gee.List<ModuleInfo> compute_module_list (Gum.MachoModule mod, Blob blob, uint64 kernel_base) throws Efni.Error {
 			var fileset = compute_fileset_module_list (blob, mod.source_version);
 			if (fileset != null)
 				return fileset;
@@ -201,7 +201,7 @@ namespace Frida.Barebone {
 			return target - (size_t) (kernel_base & CHAINED_PTR_TARGET_MASK);
 		}
 
-		private static Gee.List<SymbolInfo> compute_symbol_list (Gum.DarwinModule mod) {
+		private static Gee.List<SymbolInfo> compute_symbol_list (Gum.MachoModule mod) {
 			var symbols = new Gee.ArrayList<SymbolInfo> ();
 			mod.enumerate_symbols (s => {
 				symbols.add (new SymbolInfo () {

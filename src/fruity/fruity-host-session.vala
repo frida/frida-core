@@ -1805,7 +1805,7 @@ namespace Frida {
 					var ptrauth_support = (process.cpu_subtype == ARM64E)
 						? Gum.PtrauthSupport.SUPPORTED
 						: Gum.PtrauthSupport.UNSUPPORTED;
-					var module = new Gum.DarwinModule.from_file (path, Gum.CpuType.ARM64, ptrauth_support);
+					var module = new Gum.MachoModule.from_file (path, Gum.CpuType.ARM64, ptrauth_support);
 
 					Fruity.Injector.Transaction transaction =
 						yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, cancellable);
