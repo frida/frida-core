@@ -359,5 +359,11 @@
 	<true/>
 	<key>com.apple.private.amfi.can-execute-cdhash</key>
 	<true/>
+	<key>com.apple.private.FairPlayIOKitUserClient.access</key>
+	<true/>
+	<key>com.apple.security.iokit-user-client-class</key>
+	<array>
+		<string>com_apple_driver_FairPlayIOKitUserClient</string>
+	</array>
 </dict>
 </plist>
