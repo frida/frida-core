@@ -6591,7 +6591,7 @@ FAIL: %s
 			uint64 address;
 			if (image.try_find_symbol (name, out address)) {
 				resolved++;
-				dump.append_printf ("%s 0x%016llx\n", name, address);
+				dump.append_printf ("%s 0x%016" + uint64.FORMAT_MODIFIER + "x\n", name, address);
 			}
 		}
 		printerr ("\n[mine] %s open=%.3fs resolved=%u/%u\n%s", path, elapsed, resolved, wanted.length, dump.str);
