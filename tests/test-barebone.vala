@@ -4967,6 +4967,8 @@ FAIL: %s
 					init = process;
 			}
 			assert_nonnull (init);
+
+			yield manager.close (null);
 		} catch (GLib.Error e) {
 			printerr ("
 FAIL: %s
@@ -4974,8 +4976,6 @@ FAIL: %s
 ", e.message);
 			assert_not_reached ();
 		}
-
-		yield manager.close (null);
 
 		h.done ();
 	}
