@@ -63,7 +63,7 @@ def main(argv: List[str]):
     ranlib_cmd_array = pop_cmd_array_arg(args)
 
     try:
-        mode, config_path = detect_config(
+        mode, config = detect_config(
             go,
             host_os,
             host_os_family,
@@ -80,7 +80,7 @@ def main(argv: List[str]):
         )
         print("ok")
         print(mode)
-        print(config_path)
+        print(json.dumps(config))
     except Exception as e:
         print("error")
         print(str(e).replace("\n", "\\n"))
@@ -114,7 +114,7 @@ def detect_config(
     ar_cmd_array: Optional[List[str]],
     nm_cmd_array: Optional[List[str]],
     ranlib_cmd_array: Optional[List[str]],
-) -> Tuple[str, Path]:
+) -> Tuple[str, dict]:
     source_root = Path(os.environ["MESON_SOURCE_ROOT"])
     build_root = Path(os.environ["MESON_BUILD_ROOT"])
     subdir = Path(os.environ["MESON_SUBDIR"])
@@ -209,10 +209,7 @@ def detect_config(
     if mingw is not None:
         config["mingw"] = mingw
 
-    config_path = work_dir / "go-config.json"
-    config_path.write_text(json.dumps(config), encoding="utf-8")
-
-    return config["mode"], config_path
+    return config["mode"], config
 
 
 class BuildError(Exception):

@@ -595,7 +595,11 @@ if compiler_backend_opt.allowed()
       have_compiler_backend = true
       cdata.set('HAVE_COMPILER_BACKEND', 1)
       compiler_backend_mode = lines[1]
-      go_config = lines[2]
+      go_config = configure_file(
+        input: 'tools' / 'cgo' / 'go-config.json.in',
+        output: 'go-config.json',
+        configuration: {'GO_CONFIG': lines[2]},
+      )
 
       if compiler_backend_mode == 'c-archive'
         vala_flags += '--define=COMPILER_BACKEND_LINKED'
