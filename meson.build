@@ -423,6 +423,9 @@ efni_vapidir = efni_dep.get_variable('vapidir', default_value: '')
 if efni_vapidir != ''
   vala_flags += '--vapidir=' + efni_vapidir
 endif
+foreach pkg : efni_dep.get_variable('vala_packages', default_value: '').split()
+  vala_flags += '--pkg=' + pkg
+endforeach
 libsoup_dep = dependency('libsoup-3.0', default_options: [
   'default_library=static',
   'sqlite:default_library=static',
@@ -746,6 +749,9 @@ if have_fruity_backend
   if idun_vapidir != ''
     vala_flags += '--vapidir=' + idun_vapidir
   endif
+  foreach pkg : idun_dep.get_variable('vala_packages', default_value: '').split()
+    vala_flags += '--pkg=' + pkg
+  endforeach
 endif
 
 if quickjs_dep.found()
