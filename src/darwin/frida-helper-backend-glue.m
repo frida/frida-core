@@ -168,7 +168,7 @@ struct _FridaSpawnInstance
 
   __Request__exception_raise_state_identity_t pending_request;
 
-  GumDarwinModule * dyld;
+  GumMachoModule * dyld;
   size_t dyld_size;
   FridaDyldFlavor dyld_flavor;
 
@@ -364,7 +364,7 @@ struct _FridaAgentEmitContext
   GumThumbWriter tw;
   GumArm64Writer aw;
 #endif
-  GumDarwinMapper * mapper;
+  GumMapper * mapper;
 };
 
 enum _FridaConvertThreadStateDirection
@@ -421,14 +421,15 @@ static void frida_inject_instance_join_posix_thread (FridaInjectInstance * self,
 static void frida_inject_instance_on_posix_thread_dead (void * context);
 
 static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
-    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error);
-static gboolean frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper,
+    mach_vm_address_t payload_base, mach_vm_address_t mapped_base, mach_vm_size_t mapped_size, GumDarwinModuleResolver * resolver,
+    GumMapper * mapper, GError ** error);
+static gboolean frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumMapper * mapper,
     GError ** error);
 
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper);
+    GumMapper * mapper);
 static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper);
+    GumMapper * mapper);
 
 static gboolean frida_convert_thread_state_for_task (mach_port_t task, thread_state_flavor_t flavor, gconstpointer in_state,
     mach_msg_type_number_t in_state_count, gpointer out_state, mach_msg_type_number_t * out_state_count, GError ** error);
@@ -448,9 +449,9 @@ static void frida_set_nth_hardware_breakpoint (gpointer state, guint n, GumAddre
 static void frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifiedThreadState * thread_state, gboolean enabled, GumCpuType cpu_type);
 static gboolean frida_is_hardware_breakpoint_support_working (void);
 
-static gboolean frida_find_restart_with_dyld_in_cache (const GumDarwinSymbolDetails * details, gpointer user_data);
+static gboolean frida_find_restart_with_dyld_in_cache (const GumMachoSymbolDetails * details, gpointer user_data);
 static GumAddress frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddress start);
-static GHashTable * frida_find_modinit_strcmp_checks (mach_port_t task, GumDarwinModule * dyld);
+static GHashTable * frida_find_modinit_strcmp_checks (mach_port_t task, GumMachoModule * dyld);
 static GumAddress frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start, gsize max_size);
 static csh frida_create_capstone (GumCpuType cpu_type, GumAddress start);
 
@@ -1697,17 +1698,17 @@ frida_darwin_helper_backend_is_application_process (guint pid)
 {
   gboolean is_app;
   gchar path[PROC_PIDPATHINFO_MAXSIZE];
-  GumDarwinModule * module;
+  GumMachoModule * module;
 
   if (proc_pidpath (pid, path, sizeof (path)) <= 0)
     return FALSE;
 
-  module = gum_darwin_module_new_from_file (path, GUM_CPU_INVALID, GUM_PTRAUTH_INVALID, GUM_DARWIN_MODULE_FLAGS_HEADER_ONLY, NULL);
+  module = gum_macho_module_new_from_file (path, GUM_CPU_INVALID, GUM_PTRAUTH_INVALID, GUM_MACHO_MODULE_FLAGS_HEADER_ONLY, NULL);
   if (module == NULL)
     return FALSE;
 
   is_app = FALSE;
-  gum_darwin_module_enumerate_dependencies (module, (GumFoundDependencyFunc) frida_find_uikit, &is_app);
+  gum_macho_module_enumerate_dependencies (module, (GumFoundDependencyFunc) frida_find_uikit, &is_app);
 
   g_object_unref (module);
 
@@ -1903,8 +1904,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_",
     "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_",
   };
-  GumDarwinModule * dyld;
-  const GumDarwinSegment * segment;
+  GumMachoModule * dyld;
+  const GumMachoSegment * segment;
   FridaExceptionPortSet * previous_ports;
   dispatch_source_t source;
 
@@ -2030,11 +2031,11 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     g_free (magic);
   }
 
-  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, dyld_header, GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  dyld = gum_macho_module_new_from_memory ("/usr/lib/dyld", task, dyld_header, GUM_MACHO_MODULE_FLAGS_NONE, NULL);
   instance->dyld = dyld;
   instance->dyld_size = 0;
   i = 0;
-  while ((segment = gum_darwin_module_get_nth_segment (dyld, i++)) != NULL)
+  while ((segment = gum_macho_module_get_nth_segment (dyld, i++)) != NULL)
   {
     if (strcmp (segment->name, "__TEXT") == 0)
     {
@@ -2043,26 +2044,26 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     }
   }
 
-  modern_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEv");
+  modern_entry_address = gum_macho_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEv");
   if (modern_entry_address == 0)
-    modern_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE");
+    modern_entry_address = gum_macho_module_resolve_symbol_address (dyld, "__ZN5dyld44APIs19_libdyld_initializeEPKNS_16LibSystemHelpersE");
   instance->dyld_flavor = (modern_entry_address != 0) ? FRIDA_DYLD_V4_PLUS : FRIDA_DYLD_V3_MINUS;
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
-    instance->notify_objc_init = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld412RuntimeState14notifyObjCInitEPKNS_6LoaderE");
+    instance->notify_objc_init = gum_macho_module_resolve_symbol_address (dyld, "__ZN5dyld412RuntimeState14notifyObjCInitEPKNS_6LoaderE");
     if (instance->notify_objc_init != 0)
       modern_entry_address = instance->notify_objc_init;
 
     instance->modern_entry_address = modern_entry_address;
     legacy_entry_address = 0;
 
-    instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12sProcessInfo");
+    instance->info_ptr_address = gum_macho_module_resolve_symbol_address (dyld, "__ZL12sProcessInfo");
     if (instance->info_ptr_address == 0)
     {
-      instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld412gProcessInfoE");
+      instance->info_ptr_address = gum_macho_module_resolve_symbol_address (dyld, "__ZN5dyld412gProcessInfoE");
       if (instance->info_ptr_address == 0)
       {
-        instance->info_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "_gProcessInfo");
+        instance->info_ptr_address = gum_macho_module_resolve_symbol_address (dyld, "_gProcessInfo");
         if (instance->info_ptr_address == 0)
           goto dyld_probe_failed;
       }
@@ -2072,13 +2073,13 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   {
     GumAddress launch_with_closure_address;
 
-    legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
+    legacy_entry_address = gum_macho_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
     modern_entry_address = 0;
 
     launch_with_closure_address = 0;
     for (i = 0; i != G_N_ELEMENTS (launch_with_closure_names) && launch_with_closure_address == 0; i++)
     {
-      launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, launch_with_closure_names[i]);
+      launch_with_closure_address = gum_macho_module_resolve_symbol_address (dyld, launch_with_closure_names[i]);
     }
 
     if (launch_with_closure_address != 0)
@@ -2088,13 +2089,13 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
     instance->modern_entry_address = modern_entry_address;
 
-    instance->dlopen_address = gum_darwin_module_resolve_symbol_address (dyld, "_dlopen");
+    instance->dlopen_address = gum_macho_module_resolve_symbol_address (dyld, "_dlopen");
     if (instance->dlopen_address == 0)
-      instance->dlopen_address = gum_darwin_module_resolve_symbol_address (dyld, "_dlopen_internal");
-    instance->register_helpers_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL21registerThreadHelpersPKN4dyld16LibSystemHelpersE");
-    instance->dlerror_clear_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12dlerrorClearv");
-    instance->info_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld12gProcessInfoE");
-    instance->helpers_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld17gLibSystemHelpersE");
+      instance->dlopen_address = gum_macho_module_resolve_symbol_address (dyld, "_dlopen_internal");
+    instance->register_helpers_address = gum_macho_module_resolve_symbol_address (dyld, "__ZL21registerThreadHelpersPKN4dyld16LibSystemHelpersE");
+    instance->dlerror_clear_address = gum_macho_module_resolve_symbol_address (dyld, "__ZL12dlerrorClearv");
+    instance->info_address = gum_macho_module_resolve_symbol_address (dyld, "__ZN4dyld12gProcessInfoE");
+    instance->helpers_ptr_address = gum_macho_module_resolve_symbol_address (dyld, "__ZN4dyld17gLibSystemHelpersE");
     instance->do_modinit_strcmp_checks = frida_find_modinit_strcmp_checks (task, dyld);
 
     if (legacy_entry_address == 0 || instance->dlopen_address == 0 || instance->register_helpers_address == 0 ||
@@ -2117,7 +2118,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
       instance->ret_gadget |= 1;
   }
 
-  sim_notify_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld4L29sim_notifyMonitorOfMainCalledEv");
+  sim_notify_address = gum_macho_module_resolve_symbol_address (dyld, "__ZN5dyld4L29sim_notifyMonitorOfMainCalledEv");
   instance->sim_notify_address = sim_notify_address;
 
   instance->ret_state = FRIDA_RET_FROM_HELPER;
@@ -2136,7 +2137,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   if (instance->dyld_flavor == FRIDA_DYLD_V4_PLUS)
   {
     GumAddress restart_with_dyld_in_cache = 0;
-    gum_darwin_module_enumerate_symbols (dyld, frida_find_restart_with_dyld_in_cache, &restart_with_dyld_in_cache);
+    gum_macho_module_enumerate_symbols (dyld, frida_find_restart_with_dyld_in_cache, &restart_with_dyld_in_cache);
     if (restart_with_dyld_in_cache != 0)
       frida_spawn_instance_set_nth_breakpoint (instance, i++, restart_with_dyld_in_cache, FRIDA_BREAKPOINT_REPEAT_NEVER);
   }
@@ -2235,7 +2236,8 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   mach_port_t self_task;
   FridaInjectInstance * instance;
   GumDarwinModuleResolver * resolver = NULL;
-  GumDarwinMapper * mapper = NULL;
+  GumMapper * mapper = NULL;
+  GumNativeProcessMemory * target = NULL;
   GError * io_error = NULL;
   FridaDarwinModuleDetails mapped_module;
   FridaAgentDetails details = { 0, };
@@ -2274,17 +2276,20 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 #ifdef HAVE_MAPPER
   if (blob != NULL)
   {
-    mapper = gum_darwin_mapper_new_take_blob (path_or_name,
+    mapper = gum_mapper_new_take_blob (path_or_name,
         g_bytes_new_with_free_func (GSIZE_TO_POINTER (blob->address), blob->size,
             (GDestroyNotify) frida_mapper_library_blob_deallocate, frida_mapped_library_blob_dup (blob)),
-        resolver, &io_error);
+        GUM_MODULE_RESOLVER (resolver), &io_error);
   }
   else
   {
-    mapper = gum_darwin_mapper_new_from_file (path_or_name, resolver, &io_error);
+    mapper = gum_mapper_new_from_file (path_or_name, GUM_MODULE_RESOLVER (resolver), &io_error);
   }
   if (io_error != NULL)
     goto gum_failure;
+
+  target = gum_native_process_memory_new_remote (pid, GSIZE_TO_POINTER (task));
+  gum_mapper_set_target (mapper, GUM_PROCESS_MEMORY (target));
 #else
   (void) frida_mapper_library_blob_deallocate;
 #endif
@@ -2303,13 +2308,28 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   base_payload_size = layout.stack_top_offset;
 
-  instance->payload_size = base_payload_size;
   if (mapper != NULL)
-    instance->payload_size += gum_darwin_mapper_size (mapper);
+  {
+    GumAddress extra_address;
+    const GumMemoryRange * range;
 
-  kr = mach_vm_allocate (task, &payload_address, instance->payload_size, VM_FLAGS_ANYWHERE);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_allocate(payload)");
-  instance->payload_address = payload_address;
+    gum_mapper_map (mapper, base_payload_size, &extra_address, &io_error);
+    if (io_error != NULL)
+      goto gum_failure;
+    payload_address = extra_address;
+
+    range = gum_mapper_get_range (mapper);
+    instance->payload_address = range->base_address;
+    instance->payload_size = range->size;
+  }
+  else
+  {
+    kr = mach_vm_allocate (task, &payload_address, base_payload_size, VM_FLAGS_ANYWHERE);
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_allocate(payload)");
+
+    instance->payload_address = payload_address;
+    instance->payload_size = base_payload_size;
+  }
 
   kr = mach_vm_allocate (self_task, &agent_context_address, layout.data_size, VM_FLAGS_ANYWHERE);
   g_assert (kr == KERN_SUCCESS);
@@ -2324,11 +2344,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   if (mapper != NULL)
   {
-    GumDarwinModule * module;
-
-    gum_darwin_mapper_map (mapper, payload_address + base_payload_size, &io_error);
-    if (io_error != NULL)
-      goto gum_failure;
+    GumMachoModule * module;
 
     g_object_get (mapper, "module", &module, NULL);
     mapped_module._mach_header_address = module->base_address;
@@ -2342,7 +2358,8 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   kr = mach_vm_protect (task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
 
-  if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, resolver, mapper, error))
+  if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_address, instance->payload_size,
+      resolver, mapper, error))
     goto failure;
 
   frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, resolver, mapper);
@@ -2517,6 +2534,7 @@ failure:
 beach:
   {
     g_clear_object (&mapper);
+    g_clear_object (&target);
     g_clear_object (&resolver);
 
     return result;
@@ -3096,7 +3114,7 @@ unexpected_exception:
       g_string_append (message, " ]");
     }
 
-    if (gum_darwin_module_is_address_in_text_section (self->dyld, pc))
+    if (gum_macho_module_is_address_in_text_section (self->dyld, pc))
     {
       g_string_append_printf (message, " at dyld!0x%zx", (size_t) (pc - self->dyld->base_address));
     }
@@ -3431,7 +3449,7 @@ frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self)
   gboolean handled = FALSE;
   GumAddress * info_ptr;
   struct dyld_all_image_infos * info = NULL;
-  GumDarwinModule * dyld = NULL;
+  GumMachoModule * dyld = NULL;
   gssize delta;
 
   info_ptr = (GumAddress *) gum_darwin_read (self->task, self->info_ptr_address, sizeof (GumAddress), NULL);
@@ -3442,8 +3460,8 @@ frida_spawn_instance_handle_dyld_restart (FridaSpawnInstance * self)
   if (info == NULL)
     goto beach;
 
-  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", self->task, GUM_ADDRESS (info->dyldImageLoadAddress),
-      GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  dyld = gum_macho_module_new_from_memory ("/usr/lib/dyld", self->task, GUM_ADDRESS (info->dyldImageLoadAddress),
+      GUM_MACHO_MODULE_FLAGS_NONE, NULL);
   if (dyld == NULL)
     goto beach;
 
@@ -3893,15 +3911,15 @@ static gboolean
 frida_find_cf_initialize (GumModule * module, gpointer user_data)
 {
   FridaSpawnInstance * self = user_data;
-  GumDarwinModule * core_foundation;
+  GumMachoModule * core_foundation;
 
   if (strcmp (gum_module_get_path (module), CORE_FOUNDATION) != 0)
     return TRUE;
 
-  core_foundation = gum_darwin_module_new_from_memory (CORE_FOUNDATION, self->task, gum_module_get_range (module)->base_address,
-      GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  core_foundation = gum_macho_module_new_from_memory (CORE_FOUNDATION, self->task, gum_module_get_range (module)->base_address,
+      GUM_MACHO_MODULE_FLAGS_NONE, NULL);
 
-  self->cf_initialize_address = gum_darwin_module_resolve_symbol_address (core_foundation, "___CFInitialize");
+  self->cf_initialize_address = gum_macho_module_resolve_symbol_address (core_foundation, "___CFInitialize");
 
   if (self->cf_initialize_address != 0 && self->cpu_type == GUM_CPU_ARM)
     self->cf_initialize_address |= 1;
@@ -4258,7 +4276,8 @@ frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance)
 
 static gboolean
 frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
-    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error)
+    mach_vm_address_t payload_base, mach_vm_address_t mapped_base, mach_vm_size_t mapped_size, GumDarwinModuleResolver * resolver,
+    GumMapper * mapper, GError ** error)
 {
   bzero (self, sizeof (FridaAgentContext));
 
@@ -4302,8 +4321,8 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   self->mapped_range = (mapper != NULL)
       ? payload_base + layout->data_offset + G_STRUCT_OFFSET (FridaAgentContext, mapped_range_storage)
       : 0;
-  self->mapped_range_storage.base_address = payload_base;
-  self->mapped_range_storage.size = payload_size;
+  self->mapped_range_storage.base_address = mapped_base;
+  self->mapped_range_storage.size = mapped_size;
 
   return TRUE;
 }
@@ -4320,12 +4339,12 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   self->field##_impl = gum_strip_code_address (gum_darwin_module_resolver_find_export_address (resolver, module, G_STRINGIFY (field)))
 
 static gboolean
-frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error)
+frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumMapper * mapper, GError ** error)
 {
   gboolean success = FALSE;
-  GumDarwinModule * module;
+  GumMachoModule * module;
 
-  module = gum_darwin_module_resolver_find_module_by_name (resolver, "/usr/lib/system/libsystem_kernel.dylib");
+  module = gum_darwin_module_resolver_find_macho_module_by_name (resolver, "/usr/lib/system/libsystem_kernel.dylib");
   if (module == NULL)
     goto no_libc;
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_task_self);
@@ -4337,7 +4356,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
   g_object_unref (module);
   module = NULL;
 
-  module = gum_darwin_module_resolver_find_module_by_name (resolver, "/usr/lib/system/libsystem_pthread.dylib");
+  module = gum_darwin_module_resolver_find_macho_module_by_name (resolver, "/usr/lib/system/libsystem_pthread.dylib");
   if (module == NULL)
     goto no_libc;
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_create_from_mach_thread);
@@ -4353,7 +4372,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
 
   if (mapper == NULL)
   {
-    module = gum_darwin_module_resolver_find_module_by_name (resolver, "/usr/lib/system/libdyld.dylib");
+    module = gum_darwin_module_resolver_find_macho_module_by_name (resolver, "/usr/lib/system/libdyld.dylib");
     if (module == NULL)
       goto no_libc;
     FRIDA_AGENT_CONTEXT_RESOLVE (dlopen);
@@ -4397,7 +4416,7 @@ static void frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self
 
 static void
 frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper)
+    GumMapper * mapper)
 {
   FridaAgentEmitContext ctx;
 
@@ -4414,7 +4433,7 @@ frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code
 
 static void
 frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper)
+    GumMapper * mapper)
 {
   FridaAgentEmitContext ctx;
   guint locals_size;
@@ -4559,14 +4578,14 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
     gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_X86_EAX, GUM_X86_EAX);
     gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_construction, GUM_NO_HINT);
 
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_darwin_mapper_constructor (ctx->mapper));
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_mapper_constructor (ctx->mapper));
     gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_X86_XAX, 0);
     gum_x86_writer_put_mov_reg_u32 (&ctx->cw, GUM_X86_EAX, TRUE);
     EMIT_STORE (constructed, EAX);
 
     gum_x86_writer_put_label (&ctx->cw, skip_construction);
 
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_LOAD (XDI, entrypoint_data);
     EMIT_LOAD_ADDRESS_OF (XSI, unload_policy);
     EMIT_LEA (XDX, XBP, injector_state_offset);
@@ -4614,7 +4633,7 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
 
   if (ctx->mapper != NULL)
   {
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_darwin_mapper_destructor (ctx->mapper));
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_X86_XAX, gum_mapper_destructor (ctx->mapper));
     gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_X86_XAX, 0);
   }
   else
@@ -4647,24 +4666,24 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
  */
 
 static void frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper);
+    GumMapper * mapper);
 static void frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper);
+    GumMapper * mapper);
 static void frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_offset, GumThumbWriter * tw);
 static void frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg reg, GumThumbWriter * tw);
 
 static void frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper);
+    GumMapper * mapper);
 static void frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper);
+    GumMapper * mapper);
 static void frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 
 static void
 frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper)
+    GumMapper * mapper)
 {
   if (resolver->cpu_type == GUM_CPU_ARM)
     frida_agent_context_emit_arm_mach_stub_code (self, code, resolver, mapper);
@@ -4674,7 +4693,7 @@ frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code
 
 static void
 frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper)
+    GumMapper * mapper)
 {
   if (resolver->cpu_type == GUM_CPU_ARM)
     frida_agent_context_emit_arm_pthread_stub_code (self, code, resolver, mapper);
@@ -4689,7 +4708,7 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
 
 static void
 frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper)
+    GumMapper * mapper)
 {
   FridaAgentEmitContext ctx;
 
@@ -4704,7 +4723,7 @@ frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * 
 
 static void
 frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper)
+    GumMapper * mapper)
 {
   FridaAgentEmitContext ctx;
 
@@ -4815,7 +4834,7 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
     EMIT_ARM_LOAD (R0, constructed);
     gum_thumb_writer_put_cbnz_reg_label (&ctx->tw, ARM_REG_R0, skip_construction);
 
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_constructor (ctx->mapper));
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_mapper_constructor (ctx->mapper));
     EMIT_ARM_CALL (R4);
     gum_thumb_writer_put_mov_reg_u8 (&ctx->tw, ARM_REG_R0, TRUE);
     EMIT_ARM_STORE (constructed, R0);
@@ -4825,7 +4844,7 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
     EMIT_ARM_LOAD (R0, entrypoint_data);
     EMIT_ARM_LOAD_ADDRESS_OF (R1, unload_policy);
     EMIT_ARM_MOVE (R2, SP);
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_ARM_CALL (R4);
   }
   else
@@ -4862,7 +4881,7 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
 
   if (ctx->mapper != NULL)
   {
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_destructor (ctx->mapper));
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_mapper_destructor (ctx->mapper));
     EMIT_ARM_CALL (R4);
   }
   else
@@ -4916,7 +4935,7 @@ frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg
 
 static void
 frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper)
+    GumMapper * mapper)
 {
   FridaAgentEmitContext ctx;
 
@@ -4941,7 +4960,7 @@ frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 
 
 static void
 frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinModuleResolver * resolver,
-    GumDarwinMapper * mapper)
+    GumMapper * mapper)
 {
   FridaAgentEmitContext ctx;
 
@@ -5065,7 +5084,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
     gum_arm64_writer_put_cbnz_reg_label (&ctx->aw, ARM64_REG_W0, skip_construction);
 
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8,
-        gum_strip_code_address (gum_darwin_mapper_constructor (ctx->mapper)));
+        gum_strip_code_address (gum_mapper_constructor (ctx->mapper)));
     EMIT_ARM64_CALL (X8);
     gum_arm64_writer_put_ldr_reg_u64 (&ctx->aw, ARM64_REG_X1, TRUE);
     EMIT_ARM64_STORE (constructed, W1);
@@ -5076,7 +5095,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
     EMIT_ARM64_LOAD_ADDRESS_OF (X1, unload_policy);
     EMIT_ARM64_MOVE (X2, SP);
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8,
-        gum_strip_code_address (gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage)));
+        gum_strip_code_address (gum_mapper_resolve (ctx->mapper, self->entrypoint_name_storage)));
     EMIT_ARM64_CALL (X8);
   }
   else
@@ -5115,7 +5134,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
   if (ctx->mapper != NULL)
   {
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8,
-        gum_strip_code_address (gum_darwin_mapper_destructor (ctx->mapper)));
+        gum_strip_code_address (gum_mapper_destructor (ctx->mapper)));
     EMIT_ARM64_CALL (X8);
   }
   else
@@ -5497,7 +5516,7 @@ frida_is_hardware_breakpoint_support_working (void)
 }
 
 static gboolean
-frida_find_restart_with_dyld_in_cache (const GumDarwinSymbolDetails * details, gpointer user_data)
+frida_find_restart_with_dyld_in_cache (const GumMachoSymbolDetails * details, gpointer user_data)
 {
   if (strstr (details->name, "restartWithDyldInCache") != NULL)
   {
@@ -5588,7 +5607,7 @@ frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddr
 }
 
 static GHashTable *
-frida_find_modinit_strcmp_checks (mach_port_t task, GumDarwinModule * dyld)
+frida_find_modinit_strcmp_checks (mach_port_t task, GumMachoModule * dyld)
 {
   GHashTable * checks;
   GumAddress modinit_start, modinit_end, dyld_strcmp;
@@ -5600,9 +5619,9 @@ frida_find_modinit_strcmp_checks (mach_port_t task, GumDarwinModule * dyld)
   cs_insn * insn;
   const uint8_t * code;
 
-  modinit_start = gum_darwin_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE");
-  modinit_end = gum_darwin_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO16doGetDOFSectionsERKN11ImageLoader11LinkContextERNSt3__16vectorINS0_7DOFInfoENS4_9allocatorIS6_EEEE");
-  dyld_strcmp = gum_darwin_module_resolve_symbol_address (dyld, "_strcmp");
+  modinit_start = gum_macho_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE");
+  modinit_end = gum_macho_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO16doGetDOFSectionsERKN11ImageLoader11LinkContextERNSt3__16vectorINS0_7DOFInfoENS4_9allocatorIS6_EEEE");
+  dyld_strcmp = gum_macho_module_resolve_symbol_address (dyld, "_strcmp");
   if (modinit_start == 0 || modinit_end == 0 || modinit_end <= modinit_start || dyld_strcmp == 0)
     return NULL;
   address = modinit_start & ~G_GUINT64_CONSTANT (1);

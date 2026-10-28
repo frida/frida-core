@@ -34,7 +34,7 @@ struct _FridaCreateArgs
 
 static FridaDyldUnwindSections * frida_get_cached_sections (GumAddress range_start, GumAddress range_end);
 static FridaDyldUnwindSections * frida_create_cached_sections (FridaCreateArgs * args);
-static gboolean frida_fill_info (const GumDarwinSectionDetails * details, FridaFillInfoContext * ctx);
+static gboolean frida_fill_info (const GumMachoSectionDetails * details, FridaFillInfoContext * ctx);
 
 void
 _frida_unwind_sitter_fill_unwind_sections (GumAddress invader_start, GumAddress invader_end, void * info)
@@ -70,7 +70,7 @@ frida_create_cached_sections (FridaCreateArgs * args)
   gsize page_size;
   gpointer header;
   GumPageProtection prot;
-  GumDarwinModule * module;
+  GumMachoModule * module;
   FridaFillInfoContext ctx;
 
   page_size = gum_query_page_size ();
@@ -87,14 +87,14 @@ frida_create_cached_sections (FridaCreateArgs * args)
   cached_sections = g_slice_new0 (FridaDyldUnwindSections);
   cached_sections->mh = header;
 
-  module = gum_darwin_module_new_from_memory ("Frida", mach_task_self (), GPOINTER_TO_SIZE (header),
-      GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  module = gum_macho_module_new_from_memory ("Frida", mach_task_self (), GPOINTER_TO_SIZE (header),
+      GUM_MACHO_MODULE_FLAGS_NONE, NULL);
   if (module == NULL)
     return cached_sections;
 
   ctx.info = cached_sections;
   ctx.missing_info = 2;
-  gum_darwin_module_enumerate_sections (module, (GumFoundDarwinSectionFunc) frida_fill_info, &ctx);
+  gum_macho_module_enumerate_sections (module, (GumFoundMachoSectionFunc) frida_fill_info, &ctx);
 
   g_object_unref (module);
 
@@ -102,7 +102,7 @@ frida_create_cached_sections (FridaCreateArgs * args)
 }
 
 static gboolean
-frida_fill_info (const GumDarwinSectionDetails * details, FridaFillInfoContext * ctx)
+frida_fill_info (const GumMachoSectionDetails * details, FridaFillInfoContext * ctx)
 {
   if (strcmp ("__TEXT", details->segment_name) != 0)
     return TRUE;
