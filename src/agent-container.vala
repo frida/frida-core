@@ -11,9 +11,7 @@ namespace Frida {
 		[CCode (has_target = false)]
 		private delegate void AgentMainFunc (string data, ref UnloadPolicy unload_policy, void * injector_state);
 		private AgentMainFunc main_impl;
-#if LINUX
-		private FileDescriptor agent_ctrlfd_for_peer;
-#else
+#if !LINUX
 		private PipeTransport transport;
 #endif
 		private string transport_address;
@@ -40,8 +38,7 @@ namespace Frida {
 			if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, agent_ctrlfds) != 0)
 				throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
 			var agent_ctrlfd = new FileDescriptor (agent_ctrlfds[0]);
-			container.agent_ctrlfd_for_peer = new FileDescriptor (agent_ctrlfds[1]);
-			container.transport_address = "";
+			container.transport_address = "socket:%d".printf (agent_ctrlfds[1]);
 
 			try {
 				Socket socket = new Socket.from_fd (agent_ctrlfd.handle);
@@ -116,18 +113,10 @@ namespace Frida {
 
 		private bool run () {
 			UnloadPolicy unload_policy = IMMEDIATE;
-			void * injector_state = null;
-
-#if LINUX
-			var s = LinuxInjectorState ();
-			s.frida_ctrlfd = -1;
-			s.agent_ctrlfd = agent_ctrlfd_for_peer.steal ();
-			injector_state = &s;
-#endif
 
 			string agent_parameters = transport_address + "|exit-monitor:off|thread-suspend-monitor:off";
 
-			main_impl (agent_parameters, ref unload_policy, injector_state);
+			main_impl (agent_parameters, ref unload_policy, null);
 
 			return true;
 		}
