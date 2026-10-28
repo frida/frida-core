@@ -337,7 +337,7 @@ namespace Frida {
 					if (session.was_group_stopped)
 						backend.suspended_by_inject[pid] = session;
 					else
-						session.close ();
+						close_unless_gone (session);
 					return agent;
 				} catch (Error e) {
 					if (!(e is Error.PERMISSION_DENIED) || !ProcMemInjectSession.is_available ())
@@ -345,6 +345,15 @@ namespace Frida {
 					var session = yield ProcMemInjectSession.open (pid, cancellable);
 					return yield session.inject (spec, cancellable);
 				}
+			}
+		}
+
+		private static void close_unless_gone (SeizeSession session) throws Error {
+			try {
+				session.close ();
+			} catch (Error e) {
+				if (!(e is Error.PROCESS_NOT_FOUND))
+					throw e;
 			}
 		}
 
