@@ -297,6 +297,9 @@ namespace Frida {
 			ctx.agent_data = (string *) (region_base + l.data_offset);
 			ctx.fallback_address = (string *) (region_base + l.fallback_offset);
 			ctx.libc = (HelperLibcApi *) (region_base + l.libc_offset);
+#if HAVE_MAPPER
+			ctx.agent_mapped = 1;
+#endif
 
 			mem.write_memory (region_base + l.context_offset, (uint8[]) &ctx);
 			mem.write_memory (region_base + l.libc_offset, (uint8[]) &libc.table);

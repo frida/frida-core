@@ -23,8 +23,13 @@ typedef size_t FridaBootstrapStatus;
 typedef struct _FridaBootstrapContext FridaBootstrapContext;
 typedef struct _FridaLoaderContext FridaLoaderContext;
 typedef struct _FridaLibcApi FridaLibcApi;
+typedef struct _FridaMappedAgentRequest FridaMappedAgentRequest;
+typedef struct _FridaMappedAgent FridaMappedAgent;
+typedef struct _FridaMappedAgentOp FridaMappedAgentOp;
+typedef uint32_t FridaMappedAgentOpType;
 typedef uint8_t FridaMessageType;
 typedef struct _FridaHelloMessage FridaHelloMessage;
+typedef struct _FridaReservedMessage FridaReservedMessage;
 typedef struct _FridaByeMessage FridaByeMessage;
 typedef int FridaRtldFlavor;
 
@@ -67,6 +72,11 @@ struct _FridaLoaderContext
   pthread_t worker;
   void * agent_handle;
   void (* agent_entrypoint_impl) (const char * data, int * unload_policy, void * injector_state);
+
+  int agent_mapped;
+  void (* agent_destructor) (void);
+  void * agent_base;
+  size_t agent_size;
 };
 
 struct _FridaLibcApi
@@ -74,7 +84,7 @@ struct _FridaLibcApi
   int (* printf) (const char * format, ...);
   int (* sprintf) (char * str, const char * format, ...);
 
-  void * (* mmap) (void * addr, size_t length, int prot, int flags, int fd, off_t offset);
+  void * (* mmap) (void * addr, size_t length, int prot, int flags, int fd, long offset);
   int (* munmap) (void * addr, size_t length);
   int (* socket) (int domain, int type, int protocol);
   int (* socketpair) (int domain, int type, int protocol, int sv[2]);
@@ -94,19 +104,59 @@ struct _FridaLibcApi
   char * (* dlerror) (void);
 };
 
+struct _FridaMappedAgentRequest
+{
+  uint64_t size;
+  uint32_t dependency_count;
+  uint32_t padding;
+};
+
+struct _FridaMappedAgent
+{
+  uint64_t constructor;
+  uint64_t destructor;
+  uint64_t entrypoint;
+  uint32_t op_count;
+  uint32_t padding;
+};
+
+struct _FridaMappedAgentOp
+{
+  FridaMappedAgentOpType type;
+  int32_t prot;
+  uint64_t address;
+  uint64_t size;
+  uint64_t offset;
+};
+
+enum _FridaMappedAgentOpType
+{
+  FRIDA_MAPPED_AGENT_OP_WRITE,
+  FRIDA_MAPPED_AGENT_OP_MAP,
+  FRIDA_MAPPED_AGENT_OP_PROTECT,
+  FRIDA_MAPPED_AGENT_OP_MARK_CODE,
+};
+
 enum _FridaMessageType
 {
   FRIDA_MESSAGE_HELLO,
+  FRIDA_MESSAGE_RESERVED,
   FRIDA_MESSAGE_READY,
   FRIDA_MESSAGE_ACK,
   FRIDA_MESSAGE_BYE,
   FRIDA_MESSAGE_ERROR_DLOPEN,
   FRIDA_MESSAGE_ERROR_DLSYM,
+  FRIDA_MESSAGE_ERROR_MAP,
 };
 
 struct _FridaHelloMessage
 {
   pid_t thread_id;
+};
+
+struct _FridaReservedMessage
+{
+  uint64_t base;
 };
 
 struct _FridaByeMessage

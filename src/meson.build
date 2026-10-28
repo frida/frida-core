@@ -360,6 +360,7 @@ if have_local_backend
       'linux' / 'syscall-tracer.vala',
       'linux' / 'symbol-resolver.vala',
       'linux' / 'proc-maps.vala',
+      'linux' / 'mapped-agent.vala',
       'linux' / 'proc-mem-injector.vala',
       'linux' / 'kernel-injector.vala',
     ]
@@ -411,8 +412,10 @@ if have_local_backend
       ],
     )
     helper_backend_sources += [helper_backend_data]
+    helper_backend_extra_vala_args = []
     helper_backend_extra_deps = []
     if host_os == 'android'
+      helper_backend_extra_vala_args += frida_selinux_vala_args
       helper_backend_extra_deps += [frida_selinux_dep]
     endif
     helper_backend_vala_args = [
@@ -427,6 +430,7 @@ if have_local_backend
         '--pkg=linux',
         '--pkg=frida-linux',
         '--pkg=frida-gum-linux-1.0',
+        helper_backend_extra_vala_args,
       ],
       dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,
     )

@@ -29,6 +29,8 @@ struct _FridaLinuxInjectorState
 {
   int frida_ctrlfd;
   int agent_ctrlfd;
+  uint64_t mapped_base;
+  size_t mapped_size;
 };
 
 union _FridaControlMessage
@@ -39,8 +41,15 @@ union _FridaControlMessage
 
 static void * frida_main (void * user_data);
 
+static bool frida_map_agent (FridaLoaderContext * ctx, int sockfd, const FridaLibcApi * libc);
+static bool frida_load_dependency (int sockfd, const FridaLibcApi * libc);
+static bool frida_apply_mapped_agent_op (const FridaMappedAgentOp * op, int codefd, int sockfd,
+    const FridaLibcApi * libc);
+static void frida_clear_cache (void * address, size_t size);
+
 static int frida_connect (const char * address, const FridaLibcApi * libc);
 static bool frida_send_hello (int sockfd, pid_t thread_id, const FridaLibcApi * libc);
+static bool frida_send_reserved (int sockfd, void * base, const FridaLibcApi * libc);
 static bool frida_send_ready (int sockfd, const FridaLibcApi * libc);
 static bool frida_receive_ack (int sockfd, const FridaLibcApi * libc);
 static bool frida_send_bye (int sockfd, FridaUnloadPolicy unload_policy, const FridaLibcApi * libc);
@@ -103,7 +112,12 @@ frida_main (void * user_data)
       goto beach;
   }
 
-  if (ctx->agent_handle == NULL)
+  if (ctx->agent_handle == NULL && ctx->agent_mapped)
+  {
+    if (!frida_map_agent (ctx, ctrlfd, libc))
+      goto beach;
+  }
+  else if (ctx->agent_handle == NULL)
   {
     char agent_path[32];
     const void * pretend_caller_addr = libc->close;
@@ -147,6 +161,8 @@ frida_main (void * user_data)
 
   injector_state.frida_ctrlfd = ctrlfd;
   injector_state.agent_ctrlfd = agent_ctrlfd;
+  injector_state.mapped_base = (size_t) ctx->agent_base;
+  injector_state.mapped_size = ctx->agent_mapped ? ctx->agent_size : 0;
 
   ctx->agent_entrypoint_impl (ctx->agent_data, &unload_policy, &injector_state);
 
@@ -174,7 +190,17 @@ dlsym_failed:
 beach:
   {
     if (unload_policy == FRIDA_UNLOAD_POLICY_IMMEDIATE && ctx->agent_handle != NULL)
-      libc->dlclose (ctx->agent_handle);
+    {
+      if (ctx->agent_mapped)
+      {
+        ctx->agent_destructor ();
+        libc->munmap (ctx->agent_base, ctx->agent_size);
+      }
+      else
+      {
+        libc->dlclose (ctx->agent_handle);
+      }
+    }
 
     if (unload_policy != FRIDA_UNLOAD_POLICY_DEFERRED)
       libc->pthread_detach (ctx->worker);
@@ -193,6 +219,151 @@ beach:
 
     return NULL;
   }
+}
+
+static bool
+frida_map_agent (FridaLoaderContext * ctx, int sockfd, const FridaLibcApi * libc)
+{
+  bool success = false;
+  int codefd;
+  FridaMappedAgentRequest request;
+  void * base = MAP_FAILED;
+  FridaMappedAgent agent;
+  uint32_t i;
+
+  codefd = frida_receive_fd (sockfd, libc);
+  if (codefd == -1)
+    goto beach;
+
+  if (!frida_receive_chunk (sockfd, &request, sizeof (request), libc))
+    goto beach;
+
+  for (i = 0; i != request.dependency_count; i++)
+  {
+    if (!frida_load_dependency (sockfd, libc))
+      goto beach;
+  }
+
+  base = libc->mmap (NULL, request.size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (base == MAP_FAILED)
+  {
+    frida_send_error (sockfd, FRIDA_MESSAGE_ERROR_MAP, "Unable to reserve memory for agent", libc);
+    goto beach;
+  }
+
+  if (!frida_send_reserved (sockfd, base, libc))
+    goto beach;
+
+  if (!frida_receive_chunk (sockfd, &agent, sizeof (agent), libc))
+    goto beach;
+
+  for (i = 0; i != agent.op_count; i++)
+  {
+    FridaMappedAgentOp op;
+
+    if (!frida_receive_chunk (sockfd, &op, sizeof (op), libc))
+      goto beach;
+
+    if (!frida_apply_mapped_agent_op (&op, codefd, sockfd, libc))
+    {
+      frida_send_error (sockfd, FRIDA_MESSAGE_ERROR_MAP, "Unable to map agent", libc);
+      goto beach;
+    }
+  }
+
+  ctx->agent_handle = base;
+  ctx->agent_entrypoint_impl = (void *) (size_t) agent.entrypoint;
+  ctx->agent_destructor = (void *) (size_t) agent.destructor;
+  ctx->agent_base = base;
+  ctx->agent_size = request.size;
+
+  ((void (*) (void)) (size_t) agent.constructor) ();
+
+  success = true;
+
+beach:
+  if (!success && base != MAP_FAILED)
+    libc->munmap (base, request.size);
+  if (codefd != -1)
+    libc->close (codefd);
+
+  return success;
+}
+
+static bool
+frida_load_dependency (int sockfd, const FridaLibcApi * libc)
+{
+  uint16_t length;
+  char * name;
+
+  if (!frida_receive_chunk (sockfd, &length, sizeof (length), libc))
+    return false;
+
+  name = alloca (length + 1);
+  if (!frida_receive_chunk (sockfd, name, length, libc))
+    return false;
+  name[length] = '\0';
+
+  if (libc->dlopen (name, libc->dlopen_flags, libc->close) == NULL)
+  {
+    frida_send_error (sockfd,
+        FRIDA_MESSAGE_ERROR_DLOPEN,
+        (libc->dlerror != NULL) ? libc->dlerror () : "Unable to load dependency",
+        libc);
+    return false;
+  }
+
+  return true;
+}
+
+static bool
+frida_apply_mapped_agent_op (const FridaMappedAgentOp * op, int codefd, int sockfd, const FridaLibcApi * libc)
+{
+  void * address = (void *) (size_t) op->address;
+
+  switch (op->type)
+  {
+    case FRIDA_MAPPED_AGENT_OP_WRITE:
+      return frida_receive_chunk (sockfd, address, op->size, libc);
+    case FRIDA_MAPPED_AGENT_OP_MAP:
+      return libc->mmap (address, op->size, op->prot, MAP_PRIVATE | MAP_FIXED, codefd, op->offset) == address;
+    case FRIDA_MAPPED_AGENT_OP_PROTECT:
+      return frida_syscall_3 (SYS_mprotect, (size_t) address, op->size, op->prot) == 0;
+    case FRIDA_MAPPED_AGENT_OP_MARK_CODE:
+      if (frida_syscall_3 (SYS_mprotect, (size_t) address, op->size, PROT_READ | PROT_EXEC) != 0)
+        return false;
+      frida_clear_cache (address, op->size);
+      return true;
+    default:
+      return false;
+  }
+}
+
+static void
+frida_clear_cache (void * address, size_t size)
+{
+#if defined (__aarch64__)
+  uint64_t ctr, dline, iline;
+  size_t start = (size_t) address;
+  size_t end = start + size;
+  size_t cursor;
+
+  asm volatile ("mrs %0, ctr_el0" : "=r" (ctr));
+  dline = 4 << ((ctr >> 16) & 0xf);
+  iline = 4 << (ctr & 0xf);
+
+  for (cursor = start & ~(dline - 1); cursor < end; cursor += dline)
+    asm volatile ("dc cvau, %0" : : "r" (cursor) : "memory");
+  asm volatile ("dsb ish" : : : "memory");
+
+  for (cursor = start & ~(iline - 1); cursor < end; cursor += iline)
+    asm volatile ("ic ivau, %0" : : "r" (cursor) : "memory");
+  asm volatile ("dsb ish\n\tisb" : : : "memory");
+#elif defined (__arm__)
+  __builtin___clear_cache (address, (char *) address + size);
+#elif defined (__mips__)
+  frida_syscall_3 (SYS_cacheflush, (size_t) address, size, 3);
+#endif
 }
 
 /* TODO: Handle EINTR. */
@@ -243,6 +414,20 @@ frida_send_hello (int sockfd, pid_t thread_id, const FridaLibcApi * libc)
     return false;
 
   return frida_send_chunk (sockfd, &hello, sizeof (hello), libc);
+}
+
+static bool
+frida_send_reserved (int sockfd, void * base, const FridaLibcApi * libc)
+{
+  FridaMessageType type = FRIDA_MESSAGE_RESERVED;
+  FridaReservedMessage reserved = {
+    .base = (size_t) base,
+  };
+
+  if (!frida_send_chunk (sockfd, &type, sizeof (type), libc))
+    return false;
+
+  return frida_send_chunk (sockfd, &reserved, sizeof (reserved), libc);
 }
 
 static bool

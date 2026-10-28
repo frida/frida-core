@@ -930,6 +930,9 @@ namespace Frida {
 				loader_ctx.agent_data = (string *) (loader_base + loader_layout.agent_data_offset);
 				loader_ctx.fallback_address = (string *) (loader_base + loader_layout.fallback_address_offset);
 				loader_ctx.libc = (HelperLibcApi *) (loader_base + loader_layout.libc_api_offset);
+#if HAVE_MAPPER
+				loader_ctx.agent_mapped = 1;
+#endif
 				write_memory (loader_base + loader_layout.ctx_offset, (uint8[]) &loader_ctx);
 				write_memory (loader_base + loader_layout.libc_api_offset, (uint8[]) &bootstrap_result.libc);
 				write_memory_string (loader_base + loader_layout.agent_entrypoint_offset, spec.entrypoint);
@@ -1543,6 +1546,7 @@ namespace Frida {
 
 		public UnixConnection? _agent_ctrl;
 		private FileDescriptor? agent_ctrlfd_for_peer;
+		private MappedAgent? mapped_agent;
 
 		private Promise<bool>? start_request = new Promise<bool> ();
 		private Promise<bool> cancel_request = new Promise<bool> ();
@@ -1583,18 +1587,21 @@ namespace Frida {
 		internal static async RemoteAgent start (LoaderLaunch launch, InjectSpec spec, uint pid, BootstrapResult bres,
 				UnixConnection frida_ctrl, UnixConnection? agent_ctrl, Cancellable? cancellable) throws Error, IOError {
 			var agent = new RemoteAgent (pid, spec, bres, frida_ctrl, agent_ctrl);
+#if HAVE_MAPPER
+			if (launch == FROM_SCRATCH)
+				agent.mapped_agent = new MappedAgent (pid, spec.library_so);
+#endif
 
 			try {
-				var io_priority = Priority.DEFAULT;
-
 				if (launch == FROM_SCRATCH)
 					frida_ctrl.send_fd (spec.library_so.get_fd (), cancellable);
 
-				if (agent.agent_ctrlfd_for_peer != null) {
-					frida_ctrl.send_fd (agent.agent_ctrlfd_for_peer.handle, cancellable);
-					agent.agent_ctrlfd_for_peer = null;
+				if (agent.mapped_agent != null) {
+					size_t bytes_written;
+					yield frida_ctrl.get_output_stream ().write_all_async (agent.mapped_agent.make_request ().get_data (),
+						Priority.DEFAULT, cancellable, out bytes_written);
 				} else {
-					yield frida_ctrl.get_output_stream ().write_async ({ 0 }, io_priority, cancellable);
+					yield agent.send_agent_ctrlfd (cancellable);
 				}
 			} catch (GLib.Error e) {
 				if (e is IOError.CANCELLED)
@@ -1642,6 +1649,22 @@ namespace Frida {
 
 							break;
 						}
+						case RESERVED: {
+							var m = HelperReservedMessage ();
+							yield input.read_all_async ((uint8[]) &m, io_priority, io_cancellable, out n);
+							if (n == 0)
+								break;
+
+							try {
+								yield send_mapped_agent (m.base_address);
+							} catch (Error e) {
+								pending_start_error = e;
+								done = true;
+								yield frida_ctrl.close_async (io_priority, io_cancellable);
+							}
+
+							break;
+						}
 						case READY: {
 							if (start_request != null) {
 								start_request.resolve (true);
@@ -1661,7 +1684,8 @@ namespace Frida {
 							break;
 						}
 						case ERROR_DLOPEN:
-						case ERROR_DLSYM: {
+						case ERROR_DLSYM:
+						case ERROR_MAP: {
 							uint16 length = 0;
 							yield input.read_all_async ((uint8[]) &length, io_priority, io_cancellable, out n);
 							if (n == 0)
@@ -1712,6 +1736,31 @@ namespace Frida {
 			}
 
 			cancel_request.resolve (true);
+		}
+
+		private async void send_mapped_agent (uint64 base_address) throws Error, IOError {
+			Bytes plan = mapped_agent.map (base_address, inject_spec.entrypoint);
+			mapped_agent = null;
+
+			try {
+				size_t bytes_written;
+				yield frida_ctrl.get_output_stream ().write_all_async (plan.get_data (), Priority.DEFAULT, io_cancellable,
+					out bytes_written);
+				yield send_agent_ctrlfd (io_cancellable);
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+		}
+
+		private async void send_agent_ctrlfd (Cancellable? cancellable) throws GLib.Error {
+			if (agent_ctrlfd_for_peer != null) {
+				frida_ctrl.send_fd (agent_ctrlfd_for_peer.handle, cancellable);
+				agent_ctrlfd_for_peer = null;
+			} else {
+				yield frida_ctrl.get_output_stream ().write_async ({ 0 }, Priority.DEFAULT, cancellable);
+			}
 		}
 
 		public async void demonitor (Cancellable? cancellable) {
@@ -1780,6 +1829,40 @@ namespace Frida {
 		void * worker;
 		void * agent_handle;
 		void * agent_entrypoint_impl;
+
+		int agent_mapped;
+		void * agent_destructor;
+		void * agent_base;
+		size_t agent_size;
+	}
+
+	protected struct HelperMappedAgentRequest {
+		uint64 size;
+		uint32 dependency_count;
+		uint32 padding;
+	}
+
+	protected struct HelperMappedAgent {
+		uint64 constructor;
+		uint64 destructor;
+		uint64 entrypoint;
+		uint32 op_count;
+		uint32 padding;
+	}
+
+	protected struct HelperMappedAgentOp {
+		HelperMappedAgentOpType type;
+		int prot;
+		uint64 address;
+		uint64 size;
+		uint64 offset;
+	}
+
+	protected enum HelperMappedAgentOpType {
+		WRITE,
+		MAP,
+		PROTECT,
+		MARK_CODE,
 	}
 
 	protected struct HelperLibcApi {
@@ -1808,15 +1891,21 @@ namespace Frida {
 
 	protected enum HelperMessageType {
 		HELLO,
+		RESERVED,
 		READY,
 		ACK,
 		BYE,
 		ERROR_DLOPEN,
-		ERROR_DLSYM
+		ERROR_DLSYM,
+		ERROR_MAP
 	}
 
 	protected struct HelperHelloMessage {
 		uint thread_id;
+	}
+
+	protected struct HelperReservedMessage {
+		uint64 base_address;
 	}
 
 	protected struct HelperByeMessage {

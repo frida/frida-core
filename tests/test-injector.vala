@@ -63,11 +63,15 @@ namespace Frida.InjectorTest {
 				assert_true (content_of (logfile) == ">m<>m");
 				break;
 			case Frida.Test.OS.LINUX:
+#if HAVE_MAPPER
+				assert_true (content_of (logfile) == ">m<>m"); // Gum.Mapper
+#else
 				if (Frida.Test.libc () == Frida.Test.Libc.UCLIBC) {
 					assert_true (content_of (logfile) == ">m<>m");
 				} else {
 					assert_true (content_of (logfile) == ">m<>m<");
 				}
+#endif
 				break;
 			default:
 				assert_true (content_of (logfile) == ">m<>m<");

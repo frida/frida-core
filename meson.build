@@ -990,7 +990,7 @@ compile_js_agent = files('tools' / 'compile-js-agent.py')
 
 mapper_opt = get_option('mapper')
 if mapper_opt.auto()
-  have_mapper = host_os_family in ['windows', 'darwin']
+  have_mapper = host_os_family in ['windows', 'darwin', 'linux']
 else
   have_mapper = mapper_opt.enabled()
 endif

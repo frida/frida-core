@@ -145,6 +145,16 @@ namespace Frida.Agent {
 					mapped_range = injector_state.mapped_range;
 #endif
 
+#if LINUX
+				var linux_state = (LinuxInjectorState *) opaque_injector_state;
+				if (linux_state != null && linux_state.mapped_size != 0) {
+					mapped_range = Gum.MemoryRange () {
+						base_address = linux_state.mapped_base,
+						size = linux_state.mapped_size,
+					};
+				}
+#endif
+
 #if PROSPERO
 				var prospero_state = (ProsperoInjectorState *) opaque_injector_state;
 				if (prospero_state != null)

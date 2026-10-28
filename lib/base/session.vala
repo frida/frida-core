@@ -1154,6 +1154,8 @@ namespace Frida {
 	public struct LinuxInjectorState {
 		public int frida_ctrlfd;
 		public int agent_ctrlfd;
+		public uint64 mapped_base;
+		public size_t mapped_size;
 	}
 #endif
 

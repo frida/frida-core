@@ -123,6 +123,15 @@ namespace Frida {
 			return fd;
 		}
 
+		public static FileDescriptor with_size (string name, size_t size) {
+			assert (is_supported ());
+
+			var fd = new FileDescriptor (memfd_create (name, 0));
+			int res = Posix.ftruncate (fd.handle, (Posix.off_t) size);
+			assert (res == 0);
+			return fd;
+		}
+
 		private int memfd_create (string name, uint flags) {
 			return Linux.syscall (LinuxSyscall.MEMFD_CREATE, name, flags);
 		}
