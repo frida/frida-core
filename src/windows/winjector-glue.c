@@ -63,3 +63,48 @@ beach:
     g_free (path_utf16);
   }
 }
+
+void *
+frida_agent_resource_create_section (GBytes * blob, GError ** error)
+{
+  gsize size;
+  gconstpointer data;
+  HANDLE section;
+  gpointer view;
+
+  data = g_bytes_get_data (blob, &size);
+
+  section = CreateFileMappingW (INVALID_HANDLE_VALUE, NULL, PAGE_EXECUTE_READWRITE, (DWORD) ((guint64) size >> 32), (DWORD) size,
+      NULL);
+  if (section == NULL)
+    goto failure;
+
+  view = MapViewOfFile (section, FILE_MAP_WRITE, 0, 0, size);
+  if (view == NULL)
+    goto failure;
+  memcpy (view, data, size);
+  UnmapViewOfFile (view);
+
+  return section;
+
+failure:
+  {
+    DWORD last_error = GetLastError ();
+
+    if (section != NULL)
+      CloseHandle (section);
+
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to create section (0x%08lx)",
+        last_error);
+    return NULL;
+  }
+}
+
+void
+frida_agent_resource_close_section (void * section)
+{
+  CloseHandle (section);
+}

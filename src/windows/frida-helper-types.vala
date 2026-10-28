@@ -6,6 +6,9 @@ namespace Frida {
 
 		public abstract async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
 			string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError;
+
+		public abstract async void inject_library_section (uint pid, uint source_pid, LibrarySection library,
+			LibrarySection[] dependencies, string entrypoint, string data, uint id, Cancellable? cancellable) throws Error, IOError;
 	}
 
 	[DBus (name = "re.frida.Helper")]
@@ -17,6 +20,21 @@ namespace Frida {
 		public abstract async bool can_handle_target (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
 			string[] dependencies, uint id, Cancellable? cancellable) throws GLib.Error;
+
+		public abstract async void inject_library_section (uint pid, uint source_pid, LibrarySection library,
+			LibrarySection[] dependencies, string entrypoint, string data, uint id, Cancellable? cancellable) throws GLib.Error;
+	}
+
+	public struct LibrarySection {
+		public string name;
+		public uint64 section;
+		public uint64 size;
+
+		public LibrarySection (string name, uint64 section, uint64 size) {
+			this.name = name;
+			this.section = section;
+			this.size = size;
+		}
 	}
 
 	public struct PathTemplate {

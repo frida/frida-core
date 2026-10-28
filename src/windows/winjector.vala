@@ -56,6 +56,10 @@ namespace Frida {
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data, Cancellable? cancellable)
 				throws Error, IOError {
+#if HAVE_MAPPER
+			return yield inject_library_section (pid, new AgentResource ("blob.dll", blob),
+				new Gee.ArrayList<AgentResource> (), entrypoint, data, cancellable);
+#else
 			ensure_tempdir_prepared ();
 			var name = "blob%u.dll".printf (next_blob_id++);
 			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), tempdir);
@@ -65,10 +69,16 @@ namespace Frida {
 			blob_file_by_id[id] = file;
 
 			return id;
+#endif
 		}
 
 		public async uint inject_library_resource (uint pid, AgentDescriptor agent, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
+#if HAVE_MAPPER
+			string arch = arch_name_from_pid (pid);
+			return yield inject_library_section (pid, agent.get_agent_for (arch), agent.get_dependencies_for (arch),
+				entrypoint, data, cancellable);
+#else
 			ensure_tempdir_prepared ();
 
 			var dependencies = new Gee.ArrayList<string> ();
@@ -77,7 +87,23 @@ namespace Frida {
 
 			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data,
 				dependencies.to_array (), cancellable);
+#endif
 		}
+
+#if HAVE_MAPPER
+		private async uint inject_library_section (uint pid, AgentResource library, Gee.Collection<AgentResource> dependencies,
+				string entrypoint, string data, Cancellable? cancellable) throws Error, IOError {
+			var dependency_sections = new LibrarySection[0];
+			foreach (AgentResource dependency in dependencies)
+				dependency_sections += dependency.get_library_section ();
+
+			uint id = next_injectee_id++;
+			yield helper.inject_library_section (pid, (uint) Gum.Process.get_id (), library.get_library_section (),
+				dependency_sections, entrypoint, data, id, cancellable);
+			pid_by_id[id] = pid;
+			return id;
+		}
+#endif
 
 		private void ensure_tempdir_prepared () throws Error {
 			if (did_prep_tempdir)
@@ -157,6 +183,24 @@ namespace Frida {
 			);
 		}
 
+		public AgentResource get_agent_for (string arch) {
+			string name = name_template.expand (arch);
+			foreach (AgentResource r in agents) {
+				if (r.name == name)
+					return r;
+			}
+			assert_not_reached ();
+		}
+
+		public Gee.Collection<AgentResource> get_dependencies_for (string arch) {
+			var result = new Gee.ArrayList<AgentResource> ();
+			foreach (AgentResource r in dependencies) {
+				if (r.name.has_prefix (arch + "\\"))
+					result.add (r);
+			}
+			return result;
+		}
+
 		public PathTemplate get_path_template () throws Error {
 			if (cached_path_template == null) {
 				TemporaryDirectory? first_tempdir = null;
@@ -194,9 +238,21 @@ namespace Frida {
 		}
 
 		private TemporaryFile _file;
+		private void * _section;
 
 		public AgentResource (string name, Bytes blob, TemporaryDirectory? tempdir = null) {
 			Object (name: name, blob: blob, tempdir: tempdir);
+		}
+
+		~AgentResource () {
+			if (_section != null)
+				close_section (_section);
+		}
+
+		public LibrarySection get_library_section () throws Error {
+			if (_section == null)
+				_section = create_section (blob);
+			return LibrarySection (name, (uint64) (uintptr) _section, blob.get_size ());
 		}
 
 		public TemporaryFile get_file () throws Error {
@@ -206,5 +262,8 @@ namespace Frida {
 			}
 			return _file;
 		}
+
+		private extern static void * create_section (Bytes blob) throws Error;
+		private extern static void close_section (void * section);
 	}
 }

@@ -1,9 +1,10 @@
 #include "frida-helper-backend.h"
 
 #include <gio/gio.h>
-#include <gum/gum.h>
 #include <gum/arch-arm64/gumarm64writer.h>
 #include <gum/arch-x86/gumx86writer.h>
+#include <gum/gum.h>
+#include <gum/gumwindows.h>
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -31,8 +32,31 @@ struct _FridaInjectInstance
 {
   HANDLE process_handle;
   gpointer free_address;
+  GPtrArray * mappers;
   gpointer stay_resident_address;
 };
+
+#ifdef HAVE_MAPPER
+
+#define FRIDA_MAX_MAPPED_LIBRARIES 3
+
+typedef struct _FridaMapperWorkerContext FridaMapperWorkerContext;
+
+struct _FridaMapperWorkerContext
+{
+  gboolean stay_resident;
+
+  gchar entrypoint_data[MAX_PATH + 1];
+
+  guint num_libraries;
+  gpointer constructors[FRIDA_MAX_MAPPED_LIBRARIES];
+  gpointer entrypoint;
+  gpointer destructors[FRIDA_MAX_MAPPED_LIBRARIES];
+
+  FridaWindowsInjectorState injector_state;
+};
+
+#endif
 
 struct _FridaInjectionDetails
 {
@@ -55,6 +79,8 @@ struct _FridaRemoteWorkerContext
   WCHAR dll_path[MAX_PATH + 1];
   gchar entrypoint_name[256];
   gchar entrypoint_data[MAX_PATH + 1];
+
+  FridaWindowsInjectorState injector_state;
 
   gpointer entrypoint;
   gpointer argument;
@@ -83,6 +109,13 @@ static gboolean frida_remote_worker_context_has_resolved_all_kernel32_functions 
 static gboolean frida_remote_worker_context_collect_kernel32_export (const GumExportDetails * details, gpointer user_data);
 
 static gboolean frida_file_exists_and_is_readable (const WCHAR * filename);
+
+#ifdef HAVE_MAPPER
+static GumMapper * frida_map_library_section (const FridaLibrarySection * library, HANDLE source_process, GumNativeProcessMemory * target,
+    GumModuleResolver * resolver, GError ** error);
+static const gchar * frida_library_section_get_name (const FridaLibrarySection * library);
+static gsize frida_mapper_worker_context_emit_payload (FridaMapperWorkerContext * ctx, gpointer code);
+#endif
 
 void
 _frida_windows_helper_backend_inject_library_file (guint32 pid, const gchar * path, const gchar * entrypoint, const gchar * data,
@@ -139,6 +172,7 @@ _frida_windows_helper_backend_inject_library_file (guint32 pid, const gchar * pa
   instance->process_handle = details.process_handle;
   details.process_handle = NULL;
   instance->free_address = rwc.entrypoint;
+  instance->mappers = NULL;
   instance->stay_resident_address = (guint8 *) rwc.argument + G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident);
   *inject_instance = instance;
 
@@ -229,12 +263,390 @@ _frida_windows_helper_backend_free_inject_instance (void * inject_instance, gboo
     *is_resident = FALSE;
   }
 
+  if (instance->mappers != NULL)
+  {
+    if (!*is_resident)
+      g_ptr_array_foreach (instance->mappers, (GFunc) gum_mapper_unmap, NULL);
+    g_ptr_array_unref (instance->mappers);
+  }
+
   VirtualFreeEx (instance->process_handle, instance->free_address, 0, MEM_RELEASE);
 
   CloseHandle (instance->process_handle);
 
   g_slice_free (FridaInjectInstance, instance);
 }
+
+#ifdef HAVE_MAPPER
+
+void
+_frida_windows_helper_backend_inject_library_section (guint32 pid, guint32 source_pid, FridaLibrarySection * library,
+    FridaLibrarySection * dependencies, gint dependencies_length, const gchar * entrypoint, const gchar * data,
+    void ** inject_instance, void ** waitable_thread_handle, GError ** error)
+{
+  gboolean success = FALSE;
+  const gchar * failed_operation;
+  NTSTATUS nt_status;
+  DWORD desired_access, old_protect;
+  HANDLE source_handle = NULL, process_handle = NULL, thread_handle = NULL;
+  GumNativeProcessMemory * target = NULL;
+  GumWindowsModuleResolver * resolver = NULL;
+  GPtrArray * mappers = NULL;
+  GumMapper * mapper;
+  GError * io_error = NULL;
+  gint i;
+  SIZE_T page_size, alloc_size;
+  guint code_size;
+  gpointer code = NULL, remote_code = NULL, argument;
+  FridaMapperWorkerContext ctx;
+  FridaInjectInstance * instance;
+
+  gum_init ();
+
+  frida_enable_debug_privilege ();
+
+  desired_access =
+      PROCESS_DUP_HANDLE    |
+      PROCESS_VM_OPERATION  |
+      PROCESS_VM_READ       |
+      PROCESS_VM_WRITE      |
+      PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION;
+
+  process_handle = OpenProcess (desired_access, FALSE, pid);
+  CHECK_OS_RESULT (process_handle, !=, NULL, "OpenProcess");
+
+  source_handle = OpenProcess (PROCESS_DUP_HANDLE, FALSE, source_pid);
+  CHECK_OS_RESULT (source_handle, !=, NULL, "OpenProcess");
+
+  target = gum_native_process_memory_new_remote (pid, process_handle);
+  resolver = gum_windows_module_resolver_new (process_handle);
+
+  memset (&ctx, 0, sizeof (ctx));
+
+  mappers = g_ptr_array_new_full (dependencies_length + 1, g_object_unref);
+  for (i = 0; i != dependencies_length; i++)
+  {
+    const gchar * name;
+
+    mapper = frida_map_library_section (&dependencies[i], source_handle, target, GUM_MODULE_RESOLVER (resolver), &io_error);
+    if (mapper == NULL)
+      goto propagate_io_error;
+    g_ptr_array_add (mappers, mapper);
+
+    name = frida_library_section_get_name (&dependencies[i]);
+    if (strcmp (name, "dbghelp.dll") == 0)
+      ctx.injector_state.dbghelp_range = *gum_mapper_get_range (mapper);
+    else if (strcmp (name, "symsrv.dll") == 0)
+      ctx.injector_state.symsrv_range = *gum_mapper_get_range (mapper);
+  }
+
+  mapper = frida_map_library_section (library, source_handle, target, GUM_MODULE_RESOLVER (resolver), &io_error);
+  if (mapper == NULL)
+    goto propagate_io_error;
+  g_ptr_array_add (mappers, mapper);
+
+  page_size = gum_query_page_size ();
+
+  /* Executable so debugger can be used to inspect code */
+  code = gum_memory_allocate (NULL, page_size, page_size, GUM_PAGE_RWX);
+
+  StringCbCopyA (ctx.entrypoint_data, sizeof (ctx.entrypoint_data), data);
+  ctx.num_libraries = mappers->len;
+  for (i = 0; i != (gint) mappers->len; i++)
+  {
+    GumMapper * m = g_ptr_array_index (mappers, i);
+
+    ctx.constructors[i] = GSIZE_TO_POINTER (gum_mapper_constructor (m));
+    ctx.destructors[i] = GSIZE_TO_POINTER (gum_mapper_destructor (m));
+  }
+  ctx.entrypoint = GSIZE_TO_POINTER (gum_mapper_resolve (mapper, entrypoint));
+
+  code_size = frida_mapper_worker_context_emit_payload (&ctx, code);
+  g_assert (code_size <= page_size);
+
+  alloc_size = page_size + sizeof (FridaMapperWorkerContext);
+  remote_code = VirtualAllocEx (process_handle, NULL, alloc_size, MEM_COMMIT, PAGE_READWRITE);
+  CHECK_OS_RESULT (remote_code, !=, NULL, "VirtualAllocEx");
+
+  CHECK_OS_RESULT (WriteProcessMemory (process_handle, remote_code, code, code_size, NULL), !=, 0, "WriteProcessMemory");
+
+  argument = GSIZE_TO_POINTER (GPOINTER_TO_SIZE (remote_code) + page_size);
+  ctx.injector_state.mapped_range = *gum_mapper_get_range (mapper);
+  ctx.injector_state.worker_range.base_address = GUM_ADDRESS (remote_code);
+  ctx.injector_state.worker_range.size = alloc_size;
+  CHECK_OS_RESULT (WriteProcessMemory (process_handle, argument, &ctx, sizeof (ctx), NULL), !=, 0, "WriteProcessMemory");
+
+  CHECK_OS_RESULT (VirtualProtectEx (process_handle, remote_code, page_size, PAGE_EXECUTE_READ, &old_protect), !=, 0, "VirtualProtectEx");
+
+  gum_memory_free (code, page_size);
+  code = NULL;
+
+  thread_handle = CreateRemoteThread (process_handle, NULL, 0, GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, remote_code),
+      argument, 0, NULL);
+  if (thread_handle == NULL)
+  {
+    RtlCreateUserThreadFunc rtl_create_user_thread;
+    RtlClientId client_id;
+
+    rtl_create_user_thread = (RtlCreateUserThreadFunc) GetProcAddress (GetModuleHandleW (L"ntdll.dll"), "RtlCreateUserThread");
+    nt_status = rtl_create_user_thread (process_handle, NULL, FALSE, 0, NULL, NULL,
+        GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, remote_code), argument, &thread_handle, &client_id);
+    CHECK_NT_RESULT (nt_status, ==, 0, "RtlCreateUserThread");
+  }
+
+  instance = g_slice_new (FridaInjectInstance);
+  instance->process_handle = process_handle;
+  process_handle = NULL;
+  instance->free_address = remote_code;
+  remote_code = NULL;
+  instance->mappers = g_steal_pointer (&mappers);
+  instance->stay_resident_address = (guint8 *) argument + G_STRUCT_OFFSET (FridaMapperWorkerContext, stay_resident);
+  *inject_instance = instance;
+
+  *waitable_thread_handle = thread_handle;
+  thread_handle = NULL;
+
+  success = TRUE;
+
+  goto beach;
+
+  /* ERRORS */
+propagate_io_error:
+  {
+    g_propagate_error (error, io_error);
+    goto beach;
+  }
+os_failure:
+  {
+    DWORD os_error = GetLastError ();
+
+    if (process_handle == NULL)
+    {
+      frida_propagate_open_process_error (pid, os_error, error);
+    }
+    else
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          (os_error == ERROR_ACCESS_DENIED) ? FRIDA_ERROR_PERMISSION_DENIED : FRIDA_ERROR_NOT_SUPPORTED,
+          "Unexpected error while attaching to process with pid %u (%s returned 0x%08lx)",
+          pid, failed_operation, os_error);
+    }
+
+    goto beach;
+  }
+nt_failure:
+  {
+    gint code_value;
+
+    if (nt_status == 0xC0000022) /* STATUS_ACCESS_DENIED */
+      code_value = FRIDA_ERROR_PERMISSION_DENIED;
+    else
+      code_value = FRIDA_ERROR_NOT_SUPPORTED;
+
+    g_set_error (error,
+        FRIDA_ERROR,
+        code_value,
+        "Unexpected error while attaching to process with pid %u (%s returned 0x%08lx)",
+        pid, failed_operation, nt_status);
+    goto beach;
+  }
+
+beach:
+  {
+    if (!success && remote_code != NULL)
+      VirtualFreeEx (process_handle, remote_code, 0, MEM_RELEASE);
+    if (!success && mappers != NULL)
+      g_ptr_array_foreach (mappers, (GFunc) gum_mapper_unmap, NULL);
+
+    if (code != NULL)
+      gum_memory_free (code, page_size);
+
+    g_clear_pointer (&mappers, g_ptr_array_unref);
+    g_clear_object (&resolver);
+    g_clear_object (&target);
+
+    if (thread_handle != NULL)
+      CloseHandle (thread_handle);
+    if (source_handle != NULL)
+      CloseHandle (source_handle);
+    if (process_handle != NULL)
+      CloseHandle (process_handle);
+  }
+}
+
+static GumMapper *
+frida_map_library_section (const FridaLibrarySection * library, HANDLE source_process, GumNativeProcessMemory * target,
+    GumModuleResolver * resolver, GError ** error)
+{
+  HANDLE section;
+  GBytes * blob;
+  GumMapper * mapper;
+
+  if (!DuplicateHandle (source_process, GSIZE_TO_POINTER (library->section), GetCurrentProcess (), &section, 0, FALSE,
+      DUPLICATE_SAME_ACCESS))
+  {
+    goto duplicate_failed;
+  }
+
+  blob = gum_windows_bytes_new_from_section (section, 0, library->size, error);
+  CloseHandle (section);
+  if (blob == NULL)
+    return NULL;
+
+  mapper = gum_mapper_new_take_blob (frida_library_section_get_name (library), blob, resolver, error);
+  if (mapper == NULL)
+    return NULL;
+  gum_mapper_set_target (mapper, GUM_PROCESS_MEMORY (target));
+
+  if (!gum_mapper_map (mapper, 0, NULL, error))
+    goto map_failed;
+
+  return mapper;
+
+duplicate_failed:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to duplicate section handle (0x%08lx)",
+        GetLastError ());
+    return NULL;
+  }
+map_failed:
+  {
+    g_object_unref (mapper);
+    return NULL;
+  }
+}
+
+static const gchar *
+frida_library_section_get_name (const FridaLibrarySection * library)
+{
+  const gchar * separator = strrchr (library->name, '\\');
+
+  return (separator != NULL) ? separator + 1 : library->name;
+}
+
+static gsize
+frida_mapper_worker_context_emit_payload (FridaMapperWorkerContext * ctx, gpointer code)
+{
+  gsize code_size;
+  const gchar * skip_destructors = "skip_destructors";
+  guint i;
+#ifdef HAVE_ARM64
+  GumArm64Writer cw;
+
+  gum_arm64_writer_init (&cw, code);
+
+  gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_FP, ARM64_REG_LR);
+  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_FP, ARM64_REG_SP);
+  gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_X19, ARM64_REG_X20);
+
+  /* x19 = (FridaMapperWorkerContext *) lpParameter */
+  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X19, ARM64_REG_X0);
+
+  /* x19->constructors[i] () */
+  for (i = 0; i != ctx->num_libraries; i++)
+  {
+    gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_X8, ARM64_REG_X19,
+        G_STRUCT_OFFSET (FridaMapperWorkerContext, constructors) + (i * sizeof (gpointer)));
+    gum_arm64_writer_put_blr_reg_no_auth (&cw, ARM64_REG_X8);
+  }
+
+  /* x19->entrypoint (&x19->entrypoint_data, &x19->stay_resident, &x19->injector_state) */
+  gum_arm64_writer_put_add_reg_reg_imm (&cw, ARM64_REG_X0, ARM64_REG_X19, G_STRUCT_OFFSET (FridaMapperWorkerContext, entrypoint_data));
+  gum_arm64_writer_put_add_reg_reg_imm (&cw, ARM64_REG_X1, ARM64_REG_X19, G_STRUCT_OFFSET (FridaMapperWorkerContext, stay_resident));
+  gum_arm64_writer_put_add_reg_reg_imm (&cw, ARM64_REG_X2, ARM64_REG_X19, G_STRUCT_OFFSET (FridaMapperWorkerContext, injector_state));
+  gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_X8, ARM64_REG_X19, G_STRUCT_OFFSET (FridaMapperWorkerContext, entrypoint));
+  gum_arm64_writer_put_blr_reg_no_auth (&cw, ARM64_REG_X8);
+
+  /* if (!x19->stay_resident) x19->destructors[i] (), in reverse */
+  gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_W0, ARM64_REG_X19, G_STRUCT_OFFSET (FridaMapperWorkerContext, stay_resident));
+  gum_arm64_writer_put_cbnz_reg_label (&cw, ARM64_REG_W0, skip_destructors);
+  for (i = ctx->num_libraries; i != 0; i--)
+  {
+    gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_X8, ARM64_REG_X19,
+        G_STRUCT_OFFSET (FridaMapperWorkerContext, destructors) + ((i - 1) * sizeof (gpointer)));
+    gum_arm64_writer_put_blr_reg_no_auth (&cw, ARM64_REG_X8);
+  }
+
+  gum_arm64_writer_put_label (&cw, skip_destructors);
+  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X0, ARM64_REG_XZR);
+  gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_X19, ARM64_REG_X20);
+  gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_FP, ARM64_REG_LR);
+  gum_arm64_writer_put_ret (&cw);
+
+  gum_arm64_writer_flush (&cw);
+  code_size = gum_arm64_writer_offset (&cw);
+  gum_arm64_writer_clear (&cw);
+#else
+  GumX86Writer cw;
+
+  gum_x86_writer_init (&cw, code);
+
+  gum_x86_writer_put_push_reg (&cw, GUM_X86_XBX);
+  gum_x86_writer_put_push_reg (&cw, GUM_X86_XSI);
+  gum_x86_writer_put_push_reg (&cw, GUM_X86_XDI); /* Alignment padding */
+
+  /* xbx = (FridaMapperWorkerContext *) lpParameter */
+#if GLIB_SIZEOF_VOID_P == 4
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_X86_EBX, GUM_X86_ESP, (3 + 1) * sizeof (gpointer));
+#else
+  gum_x86_writer_put_mov_reg_reg (&cw, GUM_X86_RBX, GUM_X86_RCX);
+#endif
+
+  /* xbx->constructors[i] () */
+  for (i = 0; i != ctx->num_libraries; i++)
+  {
+    gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_CAPI,
+        GUM_X86_XBX, G_STRUCT_OFFSET (FridaMapperWorkerContext, constructors) + (i * sizeof (gpointer)),
+        0);
+  }
+
+  /* xbx->entrypoint (&xbx->entrypoint_data, &xbx->stay_resident, &xbx->injector_state) */
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XCX,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaMapperWorkerContext, entrypoint_data));
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XDX,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaMapperWorkerContext, stay_resident));
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XSI,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaMapperWorkerContext, injector_state));
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_CAPI,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaMapperWorkerContext, entrypoint),
+      3,
+      GUM_ARG_REGISTER, GUM_X86_XCX,
+      GUM_ARG_REGISTER, GUM_X86_XDX,
+      GUM_ARG_REGISTER, GUM_X86_XSI);
+
+  /* if (!xbx->stay_resident) xbx->destructors[i] (), in reverse */
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_X86_EAX,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaMapperWorkerContext, stay_resident));
+  gum_x86_writer_put_test_reg_reg (&cw, GUM_X86_EAX, GUM_X86_EAX);
+  gum_x86_writer_put_jcc_near_label (&cw, X86_INS_JNE, skip_destructors, GUM_NO_HINT);
+
+  for (i = ctx->num_libraries; i != 0; i--)
+  {
+    gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_CAPI,
+        GUM_X86_XBX, G_STRUCT_OFFSET (FridaMapperWorkerContext, destructors) + ((i - 1) * sizeof (gpointer)),
+        0);
+  }
+
+  gum_x86_writer_put_label (&cw, skip_destructors);
+  gum_x86_writer_put_xor_reg_reg (&cw, GUM_X86_EAX, GUM_X86_EAX);
+  gum_x86_writer_put_pop_reg (&cw, GUM_X86_XDI);
+  gum_x86_writer_put_pop_reg (&cw, GUM_X86_XSI);
+  gum_x86_writer_put_pop_reg (&cw, GUM_X86_XBX);
+  gum_x86_writer_put_ret (&cw);
+
+  gum_x86_writer_flush (&cw);
+  code_size = gum_x86_writer_offset (&cw);
+  gum_x86_writer_clear (&cw);
+#endif
+
+  return code_size;
+}
+
+#endif
 
 static void
 frida_propagate_open_process_error (guint32 pid, DWORD os_error, GError ** error)
@@ -341,6 +753,8 @@ frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjection
     goto write_process_memory_failed;
 
   rwc->argument = GSIZE_TO_POINTER (GPOINTER_TO_SIZE (rwc->entrypoint) + page_size);
+  rwc->injector_state.worker_range.base_address = GUM_ADDRESS (rwc->entrypoint);
+  rwc->injector_state.worker_range.size = alloc_size;
   if (!WriteProcessMemory (details->process_handle, rwc->argument, rwc, sizeof (FridaRemoteWorkerContext), NULL))
     goto write_process_memory_failed;
 
@@ -438,10 +852,10 @@ frida_remote_worker_context_emit_payload (FridaRemoteWorkerContext * rwc, gpoint
   EMIT_ARM64_CALL (X8);
   EMIT_ARM64_MOVE (X8, X0);
 
-  /* x8 (x20->entrypoint_data, &x20->stay_resident, NULL) */
+  /* x8 (x20->entrypoint_data, &x20->stay_resident, &x20->injector_state) */
   EMIT_ARM64_LOAD_ADDRESS_OF (X0, entrypoint_data);
   EMIT_ARM64_LOAD_ADDRESS_OF (X1, stay_resident);
-  EMIT_ARM64_MOVE (X2, XZR);
+  EMIT_ARM64_LOAD_ADDRESS_OF (X2, injector_state);
   EMIT_ARM64_CALL (X8);
 
   /* if (!x20->stay_resident) { */
@@ -510,16 +924,18 @@ frida_remote_worker_context_emit_payload (FridaRemoteWorkerContext * rwc, gpoint
       GUM_ARG_REGISTER, GUM_X86_XSI,
       GUM_ARG_REGISTER, GUM_X86_XDX);
 
-  /* xax (xbx->entrypoint_data, &xbx->stay_resident, NULL) */
+  /* xax (xbx->entrypoint_data, &xbx->stay_resident, &xbx->injector_state) */
   gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XCX,
       GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, entrypoint_data));
   gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XDX,
       GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident));
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_X86_XDI,
+      GUM_X86_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, injector_state));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_X86_XAX,
       3,
       GUM_ARG_REGISTER, GUM_X86_XCX,
       GUM_ARG_REGISTER, GUM_X86_XDX,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+      GUM_ARG_REGISTER, GUM_X86_XDI);
 
   /* if (!xbx->stay_resident) { */
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_X86_EAX,

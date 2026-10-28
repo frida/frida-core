@@ -25,6 +25,9 @@ if build_agent
   if host_os_family != 'windows'
     extra_vala_args += '--pkg=posix'
   endif
+  if host_os_family == 'windows'
+    extra_vala_args += '--pkg=frida-gum-windows-1.0'
+  endif
   if host_os_family == 'darwin'
     extra_vala_args += '--pkg=frida-gum-darwin-1.0'
   endif

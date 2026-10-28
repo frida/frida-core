@@ -95,6 +95,47 @@ namespace Frida {
 			yield elevated_helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
 		}
 
+		public async void inject_library_section (uint pid, uint source_pid, LibrarySection library,
+				LibrarySection[] dependencies, string entrypoint, string data, uint id, Cancellable? cancellable) throws Error, IOError {
+			bool permission_denied = false;
+			try {
+				if (cpu_type_from_pid (pid) == Gum.NATIVE_CPU) {
+					yield inprocess_backend.inject_library_section (pid, source_pid, library, dependencies, entrypoint, data,
+						id, cancellable);
+					return;
+				}
+			} catch (Error e) {
+				if (e is Error.PERMISSION_DENIED)
+					permission_denied = true;
+				else
+					throw e;
+			}
+
+			if (!permission_denied && !_elevated_factory.running) {
+				var normal_factory = get_normal_factory ();
+				var normal_helper = yield normal_factory.obtain (cancellable);
+				try {
+					yield normal_helper.inject_library_section (pid, source_pid, library, dependencies, entrypoint, data,
+						id, cancellable);
+					return;
+				} catch (Error e) {
+					if (!(e is Error.PERMISSION_DENIED))
+						throw e;
+				}
+			}
+
+			var elevated_factory = get_elevated_factory ();
+			HelperInstance elevated_helper;
+			try {
+				elevated_helper = yield elevated_factory.obtain (cancellable);
+			} catch (Error elevate_error) {
+				throw new Error.PERMISSION_DENIED (
+					"Unable to access process with pid %u from the current user account".printf (pid));
+			}
+			yield elevated_helper.inject_library_section (pid, source_pid, library, dependencies, entrypoint, data, id,
+				cancellable);
+		}
+
 		private void on_uninjected (uint id) {
 			uninjected (id);
 		}
@@ -352,6 +393,16 @@ namespace Frida {
 				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
 			try {
 				yield proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
+				injectee_ids.add (id);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async void inject_library_section (uint pid, uint source_pid, LibrarySection library,
+				LibrarySection[] dependencies, string entrypoint, string data, uint id, Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield proxy.inject_library_section (pid, source_pid, library, dependencies, entrypoint, data, id, cancellable);
 				injectee_ids.add (id);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);

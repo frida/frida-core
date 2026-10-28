@@ -1135,6 +1135,15 @@ namespace Frida {
 		}
 	}
 
+#if WINDOWS
+	public struct WindowsInjectorState {
+		public Gum.MemoryRange mapped_range;
+		public Gum.MemoryRange worker_range;
+		public Gum.MemoryRange dbghelp_range;
+		public Gum.MemoryRange symsrv_range;
+	}
+#endif
+
 #if DARWIN
 	public struct DarwinInjectorState {
 		public Gum.MemoryRange? mapped_range;

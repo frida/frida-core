@@ -175,6 +175,22 @@ namespace Frida {
 			}
 		}
 
+		public async void inject_library_section (uint pid, uint source_pid, LibrarySection library,
+				LibrarySection[] dependencies, string entrypoint, string data, uint id, Cancellable? cancellable) throws Error, IOError {
+			try {
+				foreach (var helper in helpers) {
+					if (yield helper.proxy.can_handle_target (pid, cancellable)) {
+						yield helper.proxy.inject_library_section (pid, source_pid, library, dependencies, entrypoint, data,
+							id, cancellable);
+						return;
+					}
+				}
+				throw new Error.NOT_SUPPORTED ("Missing helper able to handle the given target");
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			stop.begin (null);
 		}
@@ -302,6 +318,11 @@ namespace Frida {
 		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
 				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
 			yield backend.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
+		}
+
+		public async void inject_library_section (uint pid, uint source_pid, LibrarySection library,
+				LibrarySection[] dependencies, string entrypoint, string data, uint id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.inject_library_section (pid, source_pid, library, dependencies, entrypoint, data, id, cancellable);
 		}
 
 		private void on_backend_uninjected (uint id) {

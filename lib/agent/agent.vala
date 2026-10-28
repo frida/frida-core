@@ -124,6 +124,21 @@ namespace Frida.Agent {
 			{
 				Gum.MemoryRange? mapped_range = null;
 
+#if WINDOWS
+				var windows_state = (WindowsInjectorState *) opaque_injector_state;
+				if (windows_state != null) {
+					if (windows_state.mapped_range.size != 0)
+						mapped_range = windows_state.mapped_range;
+					Gum.Cloak.add_range (windows_state.worker_range);
+					if (windows_state.dbghelp_range.size != 0) {
+						Gum.Cloak.add_range (windows_state.dbghelp_range);
+						Gum.Cloak.add_range (windows_state.symsrv_range);
+						Gum.Windows.use_dbghelp_modules ((void *) windows_state.dbghelp_range.base_address,
+							(void *) windows_state.symsrv_range.base_address);
+					}
+				}
+#endif
+
 #if DARWIN
 				var injector_state = (DarwinInjectorState *) opaque_injector_state;
 				if (injector_state != null)
@@ -201,6 +216,15 @@ namespace Frida.Agent {
 					return;
 				} else {
 					release_shared_instance ();
+#if WINDOWS
+					if (windows_state != null) {
+						Gum.Cloak.remove_range (windows_state.worker_range);
+						if (windows_state.dbghelp_range.size != 0) {
+							Gum.Cloak.remove_range (windows_state.dbghelp_range);
+							Gum.Cloak.remove_range (windows_state.symsrv_range);
+						}
+					}
+#endif
 				}
 
 				ignore_scope = null;
