@@ -8,7 +8,6 @@ extra_link_args = []
 if host_os in ['ios', 'tvos']
   extra_vala_args += [
     '--pkg=corefoundation',
-    '--pkg=darwin-gcd',
     '--pkg=darwin-systemconfiguration',
   ]
   extra_link_args += '-Wl,-framework,SystemConfiguration'

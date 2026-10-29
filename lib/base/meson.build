@@ -24,10 +24,6 @@ else
   extra_vala_args += '--pkg=posix'
 endif
 
-if host_os == 'macos'
-  base_sources += 'frida-darwin.c'
-endif
-
 if host_os_family == 'darwin'
   base_sources += 'corefoundation.vala'
   extra_vala_args += '--pkg=darwin-xnu'
@@ -86,8 +82,6 @@ endif
 if host_os_family == 'darwin'
   base_vala_args += [
     '--pkg=corefoundation',
-    '--pkg=darwin-gcd',
-    '--pkg=darwin-xpc',
   ]
 endif
 if host_os_family == 'linux'
