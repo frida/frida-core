@@ -11,21 +11,22 @@ how it is told about the kernel around it, and how the host reaches it.
 ## Building
 
 Three things, in order. First an SDK for this kernel -- picolibc, GLib, QuickJS, capstone and the
-rest, built for `macos-arm64-kernel`:
+rest, built for `macos-arm64e-kernel` and published prebuilt:
 
     cd frida-core
-    python3 -m releng.deps build --host macos-arm64-kernel
+    releng/deps.py sync sdk macos-arm64e-kernel ~/sdk-macos-arm64e-kernel
 
-That fetches the same sources every other flavour is built from, six of them pinned to a commit
-that says what a Darwin kernel is not; see below. Then a GumJS devkit against it:
+It is built from the same sources every other flavour is, six of them pinned to a commit that
+says what a Darwin kernel is not; see below. Then a GumJS devkit against it:
 
     cd frida-gum
-    ./configure --host=macos-arm64-kernel --enable-gumjs --disable-v8 --with-devkits=gumjs
+    ./configure --host=macos-arm64e-kernel --enable-gumjs --with-devkits=gumjs \
+        --with-devkit-symbol-scope=original
     make
 
 Then the kext itself:
 
-    make FRIDA_SDK=.../deps/sdk-macos-arm64-kernel \
+    make FRIDA_SDK=~/sdk-macos-arm64e-kernel \
          GUMJS_DEVKIT_DIR=.../frida-gum/build/bindings/gumjs/devkit
 
 which builds the agent as a static library for the kernel's ABI, `frida-kext.c` against the Kernel

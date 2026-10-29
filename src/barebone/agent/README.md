@@ -1,44 +1,36 @@
 ## Getting the SDK and the devkit
 
 The agent is built against the bare soft-float SDK, which carries picolibc and the
-compiler runtime, and against a GumJS devkit built for the same flavor. Which flavor
-is the target's, listed under Targets below; this walks through the XNU one. No
-prebuilt bundles are published for these, so build both:
+compiler runtime, and against a GumJS devkit built for the same machine. Which machine
+is the target's, listed under Targets below; this walks through the XNU one. The SDK
+is published prebuilt, and the devkit is built from frida-gum:
 
-    machine=none-arm64-softfloat_nopic
+    machine=none-arm64-softfloat_pic
 
-    releng/deps.py build --bundle=sdk --host=$machine
-    mkdir -p ~/sdk-$machine
-    tar -C ~/sdk-$machine -xf deps/sdk-$machine.tar.xz
+    sdk=~/sdk-$machine
+    releng/deps.py sync sdk $machine $sdk
 
     gum=~/src/frida-gum
     mkdir -p $gum/build/$machine
     (cd $gum/build/$machine \
-        && FRIDA_DEPS=$HOME/src/frida-core/deps CC=clang CXX=clang++ AR=llvm-ar \
-            RANLIB=llvm-ranlib NM=llvm-nm STRIP=llvm-strip \
-            ../../configure --host=$machine --enable-gumjs \
-                --with-devkits=gumjs \
-        && python3 ../../releng/meson/meson.py configure -Ddevkit_symbol_scope=original \
-        && ninja)
+        && CC=clang CXX=clang++ ../../configure --host=$machine --enable-gumjs \
+            --with-devkits=gumjs --with-devkit-symbol-scope=original \
+        && make)
 
 ## Building
 
-    sdk=~/sdk-$machine
     export GUMJS_DEVKIT_DIR=$gum/build/$machine/bindings/gumjs/devkit
     export CC="clang -I$sdk/include -I$sdk/include/glib-2.0 -I$sdk/lib/glib-2.0/include \
         -I$sdk/include/capstone -I$sdk/include/json-glib-1.0"
     export RUSTFLAGS="-L native=$sdk/lib"
 
     RUSTC_BOOTSTRAP=1 cargo build --release --features xnu \
-        --target aarch64-unknown-none-softfloat --target-dir target-xnu \
-        -Z build-std=core,alloc,compiler_builtins
+        --target ./aarch64-unknown-none-pic.json -Z json-target-spec \
+        --target-dir target-xnu -Z build-std=core,alloc,compiler_builtins
 
-Rust names no bare-metal target for the Windows guests, so the agent spells them
-out and they are asked for by path:
-
-    RUSTC_BOOTSTRAP=1 cargo build --release --features win9x \
-        --target ./i686-unknown-none-pic.json -Z json-target-spec \
-        --target-dir target-win9x -Z build-std=core,alloc,compiler_builtins
+Every flavor names its target by path, as Rust has no built-in one for a
+position-independent bare-metal image. The others differ only in feature, machine
+and target spec, listed under Targets below.
 
 ## Targets
 
@@ -58,7 +50,7 @@ and NT's 64-bit half is called in the Microsoft ABI.
 
 | Flavor  | Machine                           | Rust target                      |
 |---------|-----------------------------------|----------------------------------|
-| `xnu`   | `none-arm64-softfloat_nopic`      | `aarch64-unknown-none-softfloat` |
+| `xnu`   | `none-arm64-softfloat_pic`        | `aarch64-unknown-none-pic.json`  |
 | `win9x` | `none-x86-softfloat_pic`          | `i686-unknown-none-pic.json`     |
 | `winnt` | `none-x86-softfloat_pic`          | `i686-unknown-none-pic.json`     |
 | `winnt` | `none-x86_64-softfloat_pic_msabi` | `x86_64-unknown-none-pic.json`   |
@@ -72,7 +64,9 @@ half of Gum's platform backend (`gum_xnu.rs` / `gum_windows.rs` / `gum_linux.rs`
 ## Development loop
 
     export FRIDA_BAREBONE_CONFIG=$PWD/etc/xnu.json
-    cargo build --release --features xnu --target aarch64-unknown-none-softfloat \
+    RUSTC_BOOTSTRAP=1 cargo build --release --features xnu \
+            --target ./aarch64-unknown-none-pic.json -Z json-target-spec \
+            --target-dir target-xnu -Z build-std=core,alloc,compiler_builtins \
         && make -C ~/src/frida-python \
         && killall -9 qemu-system-aarch64 && sleep 2 \
         && frida -D barebone -p 0
