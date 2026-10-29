@@ -609,6 +609,16 @@ Interceptor.attach(Process.getModuleByName('libsystem_kernel.dylib').getExportBy
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
+		private uint64 allocate_memory (uint pid, uint64 near_address, uint64 max_distance, uint64 size,
+				uint64 alignment, Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+
+		private void protect_memory (uint pid, uint64 address, uint64 size, Gum.PageProtection prot,
+				Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+
 		protected async void post_messages (AgentMessage[] messages, uint batch_id,
 				Cancellable? cancellable) throws Error, IOError {
 			foreach (var m in messages)

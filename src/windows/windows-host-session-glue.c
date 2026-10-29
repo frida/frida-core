@@ -17,6 +17,8 @@
 
 static void frida_child_process_on_death (GPid pid, gint status, gpointer user_data);
 
+static void frida_close_process_handle (HANDLE process);
+
 static WCHAR * frida_argv_to_command_line (gchar ** argv, gint argv_length);
 static WCHAR * frida_envp_to_environment_block (gchar ** envp, gint envp_length);
 
@@ -267,6 +269,35 @@ _frida_windows_host_session_process_is_alive (guint pid)
   CloseHandle (process);
 
   return res == WAIT_TIMEOUT;
+}
+
+GumProcessMemory *
+_frida_windows_host_session_open_process_memory (guint pid, GError ** error)
+{
+  HANDLE process;
+  GumNativeProcessMemory * memory;
+
+  process = OpenProcess (PROCESS_VM_OPERATION, FALSE, pid);
+  if (process == NULL)
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to open process with pid %u: 0x%08lx",
+        pid, GetLastError ());
+    return NULL;
+  }
+
+  memory = gum_native_process_memory_new_remote (pid, process);
+  g_object_set_data_full (G_OBJECT (memory), "frida-process-handle", process, (GDestroyNotify) frida_close_process_handle);
+
+  return GUM_PROCESS_MEMORY (memory);
+}
+
+static void
+frida_close_process_handle (HANDLE process)
+{
+  CloseHandle (process);
 }
 
 void

@@ -80,6 +80,7 @@ namespace Frida.Agent {
 		private ExitMonitor? exit_monitor;
 		private Gum.Interceptor interceptor;
 		private Gum.Exceptor? exceptor;
+		private bool code_memory_delegated = false;
 
 		private uint child_gating_subscriber_count = 0;
 		private ForkMonitor? fork_monitor;
@@ -321,25 +322,12 @@ namespace Frida.Agent {
 		}
 
 		~Runner () {
-			var interceptor = this.interceptor;
-			interceptor.begin_transaction ();
+			remove_instrumentation ();
 
-			disable_child_gating ();
-
-			exceptor = null;
-
-			exit_monitor = null;
-
-			interceptor.end_transaction ();
-
-			interceptor.begin_transaction ();
-
-			thread_suspend_monitor = null;
-			unwind_sitter = null;
+			if (code_memory_delegated)
+				Gum.Memory.set_hooks (null);
 
 			invalidate_dbus_context ();
-
-			interceptor.end_transaction ();
 		}
 
 		private void run (owned FileDescriptorTablePadder padder) throws Error {
@@ -382,24 +370,7 @@ namespace Frida.Agent {
 			if (exceptor_mode != FULL)
 				Gum.Exceptor.set_mode (exceptor_mode);
 
-			{
-				var interceptor = Gum.Interceptor.obtain ();
-				interceptor.begin_transaction ();
-
-				if (enable_exit_monitor)
-					exit_monitor = new ExitMonitor (this, main_context);
-
-				if (enable_thread_suspend_monitor)
-					thread_suspend_monitor = new ThreadSuspendMonitor (this);
-
-				if (enable_unwind_broker)
-					unwind_sitter = new UnwindSitter (this);
-
-				this.interceptor = interceptor;
-				this.exceptor = Gum.Exceptor.obtain ();
-
-				interceptor.end_transaction ();
-			}
+			interceptor = Gum.Interceptor.obtain ();
 
 			try {
 				yield setup_connection_with_transport_uri (transport_uri);
@@ -409,12 +380,84 @@ namespace Frida.Agent {
 				return;
 			}
 
+			if (!can_allocate_code ())
+				delegate_code_memory_to_controller ();
+
+			interceptor.begin_transaction ();
+
+			if (enable_exit_monitor)
+				exit_monitor = new ExitMonitor (this, main_context);
+
+			if (enable_thread_suspend_monitor)
+				thread_suspend_monitor = new ThreadSuspendMonitor (this);
+
+			if (enable_unwind_broker)
+				unwind_sitter = new UnwindSitter (this);
+
+			exceptor = Gum.Exceptor.obtain ();
+
+			interceptor.end_transaction ();
+
 			Gum.ScriptBackend.get_scheduler ().push_job_on_js_thread (Priority.DEFAULT, () => {
 				schedule_idle (start.callback);
 			});
 			yield;
 
 			padder = null;
+		}
+
+		private static bool can_allocate_code () {
+			size_t page_size = Gum.query_page_size ();
+
+			void * page = Gum.Memory.allocate (null, page_size, page_size, READ | EXECUTE);
+			if (page == null)
+				return false;
+
+			Gum.Memory.free (page, page_size);
+
+			return true;
+		}
+
+		private void delegate_code_memory_to_controller () {
+			var hooks = Gum.MemoryHooks () {
+				allocate = allocate_via_controller,
+				protect = protect_via_controller,
+				user_data = this,
+			};
+			Gum.Memory.set_hooks (hooks);
+
+			code_memory_delegated = true;
+		}
+
+		private static void * allocate_via_controller (Gum.AddressSpec? spec, size_t size, size_t alignment,
+				Gum.PageProtection prot, void * user_data) {
+			unowned Runner self = (Runner) user_data;
+
+			uint64 near_address = 0;
+			uint64 max_distance = 0;
+			if (spec != null) {
+				near_address = (uint64) spec.near_address;
+				max_distance = spec.max_distance;
+			}
+
+			try {
+				return (void *) self.controller.allocate_memory (get_process_id (), near_address, max_distance, size,
+					alignment, prot, null);
+			} catch (GLib.Error e) {
+				return null;
+			}
+		}
+
+		private static bool protect_via_controller (void * address, size_t size, Gum.PageProtection prot,
+				void * user_data) {
+			unowned Runner self = (Runner) user_data;
+
+			try {
+				self.controller.protect_memory (get_process_id (), (uint64) address, size, prot, null);
+				return true;
+			} catch (GLib.Error e) {
+				return false;
+			}
 		}
 
 		private void keep_running_eternalized () {
@@ -1078,6 +1121,10 @@ namespace Frida.Agent {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is already unloading");
 			unloading = true;
+
+			if (code_memory_delegated && !is_eternal)
+				yield remove_instrumentation_while_delegated ();
+
 			perform_unload.begin ();
 		}
 
@@ -1121,6 +1168,32 @@ namespace Frida.Agent {
 					return false;
 				});
 			}
+		}
+
+		private async void remove_instrumentation_while_delegated () {
+			yield close_all_sessions ();
+
+			remove_instrumentation ();
+		}
+
+		private void remove_instrumentation () {
+			var interceptor = this.interceptor;
+			interceptor.begin_transaction ();
+
+			disable_child_gating ();
+
+			exceptor = null;
+
+			exit_monitor = null;
+
+			interceptor.end_transaction ();
+
+			interceptor.begin_transaction ();
+
+			thread_suspend_monitor = null;
+			unwind_sitter = null;
+
+			interceptor.end_transaction ();
 		}
 
 		private void ensure_eternalized () {
@@ -1331,7 +1404,7 @@ namespace Frida.Agent {
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = !remote_peer_vanished && error == null;
-			if (!closed_by_us)
+			if (!closed_by_us && !code_memory_delegated)
 				unload.begin (null);
 
 			Promise<bool> operation = null;

@@ -126,6 +126,11 @@ namespace Frida {
 
 		public abstract async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state,
 			Cancellable? cancellable) throws GLib.Error;
+
+		public abstract uint64 allocate_memory (uint pid, uint64 near_address, uint64 max_distance, uint64 size,
+			uint64 alignment, Gum.PageProtection prot, Cancellable? cancellable) throws GLib.Error;
+		public abstract void protect_memory (uint pid, uint64 address, uint64 size, Gum.PageProtection prot,
+			Cancellable? cancellable) throws GLib.Error;
 	}
 
 	[DBus (name = "re.frida.AgentMessageSink17")]

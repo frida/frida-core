@@ -1219,6 +1219,36 @@ namespace Frida {
 			yield request.await (cancellable);
 		}
 
+		public uint64 allocate_memory (uint pid, uint64 near_address, uint64 max_distance, uint64 size,
+				uint64 alignment, Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
+			var memory = open_process_memory (pid);
+
+			Gum.Address address = (max_distance != 0)
+				? memory.alloc_near (near_address, (size_t) max_distance, (size_t) size, (size_t) alignment)
+				: memory.alloc ((size_t) size, (size_t) alignment);
+			if (address == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to allocate memory in target process");
+
+			if (!memory.protect (address, (size_t) size, prot)) {
+				memory.free (address, (size_t) size);
+				throw new Error.PERMISSION_DENIED ("Unable to protect memory in target process");
+			}
+
+			return address;
+		}
+
+		public void protect_memory (uint pid, uint64 address, uint64 size, Gum.PageProtection prot,
+				Cancellable? cancellable) throws Error, IOError {
+			var memory = open_process_memory (pid);
+
+			if (!memory.protect (address, (size_t) size, prot))
+				throw new Error.PERMISSION_DENIED ("Unable to protect memory in target process");
+		}
+
+		protected virtual Gum.ProcessMemory open_process_memory (uint pid) throws Error {
+			throw new Error.NOT_SUPPORTED ("Memory delegation is not supported on this OS");
+		}
+
 		private void add_pending_child (HostChildInfo info) {
 			pending_children[info.pid] = info;
 			child_added (info);

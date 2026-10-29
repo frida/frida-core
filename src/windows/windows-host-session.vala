@@ -269,8 +269,13 @@ namespace Frida {
 			return stream_request;
 		}
 
+		protected override Gum.ProcessMemory open_process_memory (uint pid) throws Error {
+			return _open_process_memory (pid);
+		}
+
 		public extern ChildProcess _spawn (string path, HostSpawnOptions options) throws Error;
 		public extern static bool _process_is_alive (uint pid);
+		public extern static Gum.ProcessMemory _open_process_memory (uint pid) throws Error;
 	}
 
 	public sealed class ChildProcess : Object {
