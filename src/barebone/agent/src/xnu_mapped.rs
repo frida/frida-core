@@ -3,7 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::bindings::{
-    GumDarwinExportDetails, GumDarwinModule, GumMemoryRange, GumModuleRegistry, GumAddress,
+    GumMachoExportDetails, GumMachoModule, GumMemoryRange, GumModuleRegistry, GumAddress,
     gboolean, g_object_unref, gpointer, gsize,
 };
 use crate::gum;
@@ -33,7 +33,7 @@ pub fn enumerate_exports_in_range(from: u64, to: u64,
 
     let mut asking = Asking { found, base: image.base };
     unsafe {
-        crate::bindings::gum_darwin_module_enumerate_exports(module,
+        crate::bindings::gum_macho_module_enumerate_exports(module,
             Some(crate::signed_to_be_called_back(note_an_export, 0)),
             &mut asking as *mut Asking<'_, '_> as gpointer);
         g_object_unref(module as gpointer);
@@ -45,7 +45,7 @@ struct Asking<'a, 'b> {
     base: u64,
 }
 
-unsafe extern "C" fn note_an_export(details: *const GumDarwinExportDetails, asking: gpointer)
+unsafe extern "C" fn note_an_export(details: *const GumMachoExportDetails, asking: gpointer)
     -> gboolean
 {
     let asking = unsafe { &mut *(asking as *mut Asking<'_, '_>) };
@@ -146,10 +146,10 @@ fn where_the_loader_keeps_its_list() -> Option<u64> {
     (list != 0).then_some(list)
 }
 
-fn read_the_image(base: u64, name: &str) -> Option<*mut GumDarwinModule> {
+fn read_the_image(base: u64, name: &str) -> Option<*mut GumMachoModule> {
     let named = alloc::ffi::CString::new(name).ok()?;
     let module = unsafe {
-        crate::bindings::gum_darwin_module_new_from_memory(named.as_ptr(), NO_TASK_TO_ASK,
+        crate::bindings::gum_macho_module_new_from_memory(named.as_ptr(), NO_TASK_TO_ASK,
             base as GumAddress, 0, core::ptr::null_mut())
     };
 
@@ -163,7 +163,7 @@ fn how_much_of_it_there_is(base: u64, name: &str) -> u64 {
 
     let mut size = 0;
     for step in 0.. {
-        let segment = unsafe { crate::bindings::gum_darwin_module_get_nth_segment(module, step) };
+        let segment = unsafe { crate::bindings::gum_macho_module_get_nth_segment(module, step) };
         if segment.is_null() {
             break;
         }
