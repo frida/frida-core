@@ -330,7 +330,6 @@ namespace Frida {
 		}
 
 		public extern static string make_svcname_base ();
-		public extern static string derive_basename ();
 		public extern static string derive_svcname_for_self ();
 	}
 
