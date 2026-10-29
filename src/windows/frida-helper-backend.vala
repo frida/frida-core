@@ -40,8 +40,6 @@ namespace Frida {
 					yield close_request.future.wait_async (cancellable);
 				} catch (Error e) {
 					assert_not_reached ();
-				} catch (Efni.Error e) {
-					assert_not_reached ();
 				}
 			} else {
 				close_request.resolve (true);
