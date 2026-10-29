@@ -19,7 +19,7 @@ import traceback
 from typing import Any, Literal, Mapping, Optional, Sequence, Tuple
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).absolute().parent.parent
 NINJA = os.environ.get("NINJA", "ninja")
 
 
