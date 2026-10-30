@@ -12,6 +12,9 @@ test_sources = [
 if host_os_family == 'darwin'
   test_sources += 'test-host-session-darwin-glue.m'
 endif
+if host_os_family == 'linux'
+  test_sources += 'test-host-session-linux-glue.c'
+endif
 
 test_vala_args = []
 test_depends = []
