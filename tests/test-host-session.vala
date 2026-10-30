@@ -113,6 +113,16 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Linux/spawn-should-not-replace-sigchld-handler", () => {
+			var h = new Harness ((h) => Linux.spawn_should_not_replace_sigchld_handler.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Linux/spawned-process-should-be-reaped-after-sigchld-reset", () => {
+			var h = new Harness ((h) => Linux.spawned_process_should_be_reaped_after_sigchld_reset.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Linux/ChildGating/fork", () => {
 			var h = new Harness ((h) => Linux.fork.begin (h as Harness));
 			h.run ();
@@ -1742,6 +1752,81 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
+		private async void spawn_should_not_replace_sigchld_handler (Harness h) {
+			if (!can_run_sigchld_scenario ()) {
+				h.done ();
+				return;
+			}
+
+			var backend = new LinuxHostSessionBackend ();
+
+			var prov = yield h.setup_local_backend (backend);
+
+			install_sigchld_handler ();
+
+			try {
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
+
+				var pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), HostSpawnOptions (),
+					cancellable);
+				yield host_session.resume (pid, cancellable);
+				assert_true (sigchld_handler_is_installed ());
+
+				yield host_session.kill (pid, cancellable);
+				var reaped = yield wait_until_reaped (pid);
+				assert_true (reaped);
+				assert_true (sigchld_handler_is_installed ());
+			} catch (GLib.Error e) {
+				printerr ("Unexpected error: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			restore_sigchld_handler ();
+
+			yield h.teardown_backend (backend);
+
+			h.done ();
+		}
+
+		private async void spawned_process_should_be_reaped_after_sigchld_reset (Harness h) {
+			if (!can_run_sigchld_scenario ()) {
+				h.done ();
+				return;
+			}
+
+			var backend = new LinuxHostSessionBackend ();
+
+			var prov = yield h.setup_local_backend (backend);
+
+			try {
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
+
+				var pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), HostSpawnOptions (),
+					cancellable);
+				yield host_session.resume (pid, cancellable);
+
+				/* As libuv does once its last child has exited. */
+				reset_sigchld_handler ();
+
+				yield host_session.kill (pid, cancellable);
+				var reaped = yield wait_until_reaped (pid);
+				assert_true (reaped);
+			} catch (GLib.Error e) {
+				printerr ("Unexpected error: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			restore_sigchld_handler ();
+
+			yield h.teardown_backend (backend);
+
+			h.done ();
+		}
+
 		private async void fork (Harness h) {
 			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_executable ("forker"));
 		}
@@ -1757,6 +1842,40 @@ namespace Frida.HostSessionTest {
 		private async void bad_then_good_exec (Harness h) {
 			yield Unix.run_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "spawn-bad-then-good-path", "execv");
 		}
+
+		private bool can_run_sigchld_scenario () {
+			if (!GLib.Test.slow () && (
+						Frida.Test.os () == Frida.Test.OS.ANDROID ||
+						Frida.Test.os_arch_suffix () == "-linux-armbe8" ||
+						Frida.Test.os_arch_suffix () == "-linux-arm64be"
+					)) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				return false;
+			}
+
+			if (!PidFileDescriptor.is_supported ()) {
+				stdout.printf ("<skipping, kernel lacks pidfd support> ");
+				return false;
+			}
+
+			return true;
+		}
+
+		private async bool wait_until_reaped (uint pid) {
+			var timer = new Timer ();
+			while (FileUtils.test ("/proc/%u".printf (pid), EXISTS)) {
+				if (timer.elapsed () >= 5.0)
+					return false;
+				Timeout.add (50, wait_until_reaped.callback);
+				yield;
+			}
+			return true;
+		}
+
+		private extern void install_sigchld_handler ();
+		private extern bool sigchld_handler_is_installed ();
+		private extern void reset_sigchld_handler ();
+		private extern void restore_sigchld_handler ();
 
 		namespace Manual {
 
