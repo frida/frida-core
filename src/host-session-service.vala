@@ -405,6 +405,8 @@ namespace Frida {
 		private Gee.HashMap<uint, Cancellable> pending_establish_ops = new Gee.HashMap<uint, Cancellable> ();
 
 		private Gee.HashMap<uint, Future<AgentEntry>> agent_entries = new Gee.HashMap<uint, Future<AgentEntry>> ();
+		private Gee.Set<AgentEntry> unloading_agent_entries = new Gee.HashSet<AgentEntry> ();
+		private Gee.Set<uint> code_memory_delegating_pids = new Gee.HashSet<uint> ();
 
 		private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
@@ -453,10 +455,16 @@ namespace Frida {
 						entry.resume_request = null;
 					}
 
-					yield destroy (entry, APPLICATION_REQUESTED, cancellable);
+					if (code_memory_delegating_pids.contains (entry.pid))
+						yield unload_and_destroy (entry, APPLICATION_REQUESTED);
+					else
+						yield destroy (entry, APPLICATION_REQUESTED, cancellable);
 				} catch (Error e) {
 				}
 			}
+
+			foreach (var entry in unloading_agent_entries.to_array ())
+				yield entry.wait_until_closed (cancellable);
 
 			io_cancellable.cancel ();
 		}
@@ -922,6 +930,15 @@ namespace Frida {
 			if (!prepare_teardown (entry))
 				return;
 
+			unloading_agent_entries.add (entry);
+			try {
+				yield perform_unload_and_destroy (entry, reason);
+			} finally {
+				unloading_agent_entries.remove (entry);
+			}
+		}
+
+		private async void perform_unload_and_destroy (AgentEntry entry, SessionDetachReason reason) throws IOError {
 			try {
 				yield entry.provider.unload (io_cancellable);
 			} catch (GLib.Error e) {
@@ -975,6 +992,8 @@ namespace Frida {
 			}
 
 			yield entry.close (cancellable);
+
+			code_memory_delegating_pids.remove (entry.pid);
 		}
 
 		protected virtual async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
@@ -1221,7 +1240,7 @@ namespace Frida {
 
 		public uint64 allocate_memory (uint pid, uint64 near_address, uint64 max_distance, uint64 size,
 				uint64 alignment, Gum.PageProtection prot, Cancellable? cancellable) throws Error, IOError {
-			var memory = open_process_memory (pid);
+			var memory = open_delegated_process_memory (pid);
 
 			Gum.Address address = (max_distance != 0)
 				? memory.alloc_near (near_address, (size_t) max_distance, (size_t) size, (size_t) alignment)
@@ -1239,10 +1258,16 @@ namespace Frida {
 
 		public void protect_memory (uint pid, uint64 address, uint64 size, Gum.PageProtection prot,
 				Cancellable? cancellable) throws Error, IOError {
-			var memory = open_process_memory (pid);
+			var memory = open_delegated_process_memory (pid);
 
 			if (!memory.protect (address, (size_t) size, prot))
 				throw new Error.PERMISSION_DENIED ("Unable to protect memory in target process");
+		}
+
+		private Gum.ProcessMemory open_delegated_process_memory (uint pid) throws Error {
+			code_memory_delegating_pids.add (pid);
+
+			return open_process_memory (pid);
 		}
 
 		protected virtual Gum.ProcessMemory open_process_memory (uint pid) throws Error {
