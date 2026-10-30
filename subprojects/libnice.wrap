@@ -1,5 +1,5 @@
 [wrap-git]
-url = https://github.com/frida/libnice.git
+url = https://github.com/frida-forks/libnice.git
 revision = 91e2d02edb2999786d7ac854f99bdfd7832df64f
 depth = 1
 

@@ -1,5 +1,5 @@
 [wrap-git]
-url = https://github.com/frida/ngtcp2.git
+url = https://github.com/frida-forks/ngtcp2.git
 revision = 0009518d5ac5e4ce80343fb5f3c719991ffd47af
 depth = 1
 

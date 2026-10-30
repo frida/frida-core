@@ -1,5 +1,5 @@
 [wrap-git]
-url = https://github.com/frida/brotli.git
+url = https://github.com/frida-forks/brotli.git
 revision = dd581fd4fea06096e3949ad6cb16775538d0ef47
 depth = 1
 

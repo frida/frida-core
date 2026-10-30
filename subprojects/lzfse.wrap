@@ -1,5 +1,5 @@
 [wrap-git]
-url = https://github.com/frida/lzfse.git
+url = https://github.com/frida-forks/lzfse.git
 revision = 5cfb7c86919d3c2c636d0d7552b51855a611ba1c
 depth = 1
 

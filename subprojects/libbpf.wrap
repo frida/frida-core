@@ -1,5 +1,5 @@
 [wrap-git]
-url = https://github.com/frida/libbpf.git
+url = https://github.com/frida-forks/libbpf.git
 revision = 9c4e176810717e27b6990a8722b252fc1967667f
 depth = 1
 

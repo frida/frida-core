@@ -43,7 +43,7 @@ platform-dependent (e.g. `linux-x86_64`).
 ## Build Requirements
 
 - **Vala compiler**: Must be the Frida-optimized fork from
-  https://github.com/frida/vala (checks for `-frida` suffix
+  https://github.com/frida-forks/vala (checks for `-frida` suffix
   in version)
 - **C/C++ standards**: gnu99/c99 for C, c++17 for C++
 - **Go >= 1.24**: Required for compiler backend

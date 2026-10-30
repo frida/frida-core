@@ -1,5 +1,5 @@
 [wrap-git]
-url = https://github.com/frida/nghttp2.git
+url = https://github.com/frida-forks/nghttp2.git
 revision = 3e516202a0df939d6ab6bab47780fa35c5c4662b
 depth = 1
 

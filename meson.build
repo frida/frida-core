@@ -14,7 +14,7 @@ if not meson.get_compiler('vala').version().endswith('-frida')
 Frida currently relies on features not yet upstream. Grab the Frida-optimized
 Vala sources from:
 
-    https://github.com/frida/vala
+    https://github.com/frida-forks/vala
 
 and compile them with Meson.''')
 endif
