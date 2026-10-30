@@ -18,8 +18,10 @@ namespace Frida {
 		private Gee.HashMap<uint, uint> pid_by_id = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, TemporaryFile> blob_file_by_id = new Gee.HashMap<uint, TemporaryFile> ();
 		private uint next_injectee_id = 1;
+#if !HAVE_MAPPER
 		private uint next_blob_id = 1;
 		private bool did_prep_tempdir = false;
+#endif
 
 		public Winjector (WindowsHelper helper, bool close_helper, TemporaryDirectory tempdir) {
 			Object (helper: helper, close_helper: close_helper, tempdir: tempdir);
@@ -105,6 +107,7 @@ namespace Frida {
 		}
 #endif
 
+#if !HAVE_MAPPER
 		private void ensure_tempdir_prepared () throws Error {
 			if (did_prep_tempdir)
 				return;
@@ -114,6 +117,7 @@ namespace Frida {
 
 			did_prep_tempdir = true;
 		}
+#endif
 
 		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
