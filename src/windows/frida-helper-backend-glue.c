@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include <strsafe.h>
+#include <winternl.h>
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
   if (!((n1) cmp (n2))) \
