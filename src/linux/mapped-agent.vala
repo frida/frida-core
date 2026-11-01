@@ -63,11 +63,18 @@ namespace Frida {
 	private sealed class TargetLibraries {
 		private uint pid;
 		private ProcMapsSnapshot maps;
+		private Gee.List<ProcMapsSnapshot.Mapping> library_starts = new Gee.ArrayList<ProcMapsSnapshot.Mapping> ();
 		private Gee.Map<string, Gum.ElfModule> modules = new Gee.HashMap<string, Gum.ElfModule> ();
 
 		public TargetLibraries (uint pid) {
 			this.pid = pid;
 			this.maps = ProcMapsSnapshot.from_pid (pid);
+
+			var paths = new Gee.HashSet<string> ();
+			foreach (ProcMapsSnapshot.Mapping m in maps) {
+				if (is_library_start (m) && paths.add (m.path))
+					library_starts.add (maps.find_module_by_path (m.path));
+			}
 		}
 
 		public Gee.List<string> find_missing (Gum.ElfModule agent) {
@@ -111,14 +118,12 @@ namespace Frida {
 		}
 
 		private ProcMapsSnapshot.Mapping? find (string name) {
-			foreach (ProcMapsSnapshot.Mapping m in maps) {
-				if (is_library_start (m) && library_name_matches (name, Path.get_basename (m.path)))
+			foreach (ProcMapsSnapshot.Mapping m in library_starts) {
+				if (library_name_matches (name, Path.get_basename (m.path)))
 					return m;
 			}
 
-			foreach (ProcMapsSnapshot.Mapping m in maps) {
-				if (!is_library_start (m))
-					continue;
+			foreach (ProcMapsSnapshot.Mapping m in library_starts) {
 				try {
 					if (load (m).soname == name)
 						return m;
