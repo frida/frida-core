@@ -100,6 +100,7 @@ typedef NTSTATUS (WINAPI * RtlCreateUserThreadFunc) (HANDLE process, SECURITY_DE
 
 static void frida_propagate_open_process_error (guint32 pid, DWORD os_error, GError ** error);
 static gboolean frida_enable_debug_privilege (void);
+static gboolean frida_process_is_exiting (HANDLE process);
 
 static gboolean frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjectionDetails * details, GError ** error);
 static gsize frida_remote_worker_context_emit_payload (FridaRemoteWorkerContext * rwc, gpointer code);
@@ -265,7 +266,7 @@ _frida_windows_helper_backend_free_inject_instance (void * inject_instance, gboo
 
   if (instance->mappers != NULL)
   {
-    if (!*is_resident)
+    if (!*is_resident && !frida_process_is_exiting (instance->process_handle))
       g_ptr_array_foreach (instance->mappers, (GFunc) gum_mapper_unmap, NULL);
     g_ptr_array_unref (instance->mappers);
   }
@@ -711,6 +712,14 @@ beach:
     CloseHandle (token);
 
   return success;
+}
+
+static gboolean
+frida_process_is_exiting (HANDLE process)
+{
+  DWORD exit_code;
+
+  return GetExitCodeProcess (process, &exit_code) && exit_code != STILL_ACTIVE;
 }
 
 static gboolean
