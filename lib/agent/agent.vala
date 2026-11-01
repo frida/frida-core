@@ -1194,6 +1194,8 @@ namespace Frida.Agent {
 			unwind_sitter = null;
 
 			interceptor.end_transaction ();
+
+			Gum.shutdown ();
 		}
 
 		private void ensure_eternalized () {
