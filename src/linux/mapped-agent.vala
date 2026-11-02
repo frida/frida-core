@@ -21,7 +21,7 @@ namespace Frida {
 		}
 
 		public Bytes make_request () {
-			Gee.List<string> missing = new TargetLibraries (pid).find_missing (module);
+			Gee.List<string> missing = new TargetLibraries (pid, module).find_missing ();
 
 			var header = HelperMappedAgentRequest ();
 			header.size = capacity;
@@ -40,10 +40,10 @@ namespace Frida {
 
 		public Bytes map (uint64 base_address, string entrypoint) throws Error {
 			try {
-				var libraries = new TargetLibraries (pid);
+				var libraries = new TargetLibraries (pid, module);
 				var memory = new MappedAgentMemory (pid, blob, module, base_address, capacity);
 
-				var mapper = Gum.Mapper.new_take_blob ("frida-agent.so", blob, libraries.make_resolver (module));
+				var mapper = Gum.Mapper.new_take_blob ("frida-agent.so", blob, libraries.make_resolver ());
 				mapper.set_target (memory);
 
 				Gum.Address extra_address;
@@ -61,10 +61,12 @@ namespace Frida {
 	}
 
 	private sealed class TargetLibraries {
+		private Gum.ElfModule agent;
 		private ProcMapsSnapshot maps;
 		private Gee.List<ProcMapsSnapshot.Mapping> library_starts = new Gee.ArrayList<ProcMapsSnapshot.Mapping> ();
 
-		public TargetLibraries (uint pid) {
+		public TargetLibraries (uint pid, Gum.ElfModule agent) {
+			this.agent = agent;
 			this.maps = ProcMapsSnapshot.from_pid (pid);
 
 			foreach (ProcMapsSnapshot.Mapping m in maps) {
@@ -73,7 +75,7 @@ namespace Frida {
 			}
 		}
 
-		public Gee.List<string> find_missing (Gum.ElfModule agent) {
+		public Gee.List<string> find_missing () {
 			var missing = new Gee.ArrayList<string> ();
 			agent.enumerate_dependencies (d => {
 				if (find (d.name) == null)
@@ -83,7 +85,7 @@ namespace Frida {
 			return missing;
 		}
 
-		public Gum.ElfModuleResolver make_resolver (Gum.ElfModule agent) throws Error {
+		public Gum.ElfModuleResolver make_resolver () throws Error {
 			var resolver = new Gum.ElfModuleResolver ();
 
 			var pending = new Gee.ArrayQueue<string> ();
@@ -115,13 +117,13 @@ namespace Frida {
 
 		private ProcMapsSnapshot.Mapping? find (string name) {
 			foreach (ProcMapsSnapshot.Mapping m in library_starts) {
-				if (library_name_matches (name, Path.get_basename (m.path)) && maps.is_image_base (m))
+				if (library_name_matches (name, Path.get_basename (m.path)) && is_compatible_image (m))
 					return m;
 			}
 
 			foreach (ProcMapsSnapshot.Mapping m in library_starts) {
 				try {
-					if (maps.load_image (m).soname == name && maps.is_image_base (m))
+					if (maps.load_image (m).soname == name && is_compatible_image (m))
 						return m;
 				} catch (Error e) {
 				}
@@ -143,6 +145,19 @@ namespace Frida {
 				default:
 					return basename == name;
 			}
+		}
+
+		private bool is_compatible_image (ProcMapsSnapshot.Mapping start) {
+			Gum.ElfModule library;
+			try {
+				library = maps.load_image (start);
+			} catch (Error e) {
+				return false;
+			}
+
+			return library.machine == agent.machine &&
+				library.pointer_size == agent.pointer_size &&
+				maps.is_image_base (start);
 		}
 	}
 
