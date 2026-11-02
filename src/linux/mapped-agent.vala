@@ -61,19 +61,15 @@ namespace Frida {
 	}
 
 	private sealed class TargetLibraries {
-		private uint pid;
 		private ProcMapsSnapshot maps;
 		private Gee.List<ProcMapsSnapshot.Mapping> library_starts = new Gee.ArrayList<ProcMapsSnapshot.Mapping> ();
-		private Gee.Map<string, Gum.ElfModule> modules = new Gee.HashMap<string, Gum.ElfModule> ();
 
 		public TargetLibraries (uint pid) {
-			this.pid = pid;
 			this.maps = ProcMapsSnapshot.from_pid (pid);
 
-			var paths = new Gee.HashSet<string> ();
 			foreach (ProcMapsSnapshot.Mapping m in maps) {
-				if (is_library_start (m) && paths.add (m.path))
-					library_starts.add (maps.find_module_by_path (m.path));
+				if (is_library_start (m))
+					library_starts.add (m);
 			}
 		}
 
@@ -105,7 +101,7 @@ namespace Frida {
 				if (!seen.add (mapping.path))
 					continue;
 
-				Gum.ElfModule library = load (mapping);
+				Gum.ElfModule library = maps.load_image (mapping);
 				resolver.add_module (library, mapping.start);
 
 				library.enumerate_dependencies (d => {
@@ -119,13 +115,13 @@ namespace Frida {
 
 		private ProcMapsSnapshot.Mapping? find (string name) {
 			foreach (ProcMapsSnapshot.Mapping m in library_starts) {
-				if (library_name_matches (name, Path.get_basename (m.path)))
+				if (library_name_matches (name, Path.get_basename (m.path)) && maps.is_image_base (m))
 					return m;
 			}
 
 			foreach (ProcMapsSnapshot.Mapping m in library_starts) {
 				try {
-					if (load (m).soname == name)
+					if (maps.load_image (m).soname == name && maps.is_image_base (m))
 						return m;
 				} catch (Error e) {
 				}
@@ -147,67 +143,6 @@ namespace Frida {
 				default:
 					return basename == name;
 			}
-		}
-
-		private Gum.ElfModule load (ProcMapsSnapshot.Mapping mapping) throws Error {
-			Gum.ElfModule? module = modules[mapping.path];
-			if (module == null) {
-				module = open_mapped_file (mapping);
-				if (module == null)
-					module = copy_from_target (mapping);
-				modules[mapping.path] = module;
-			}
-			return module;
-		}
-
-		private Gum.ElfModule? open_mapped_file (ProcMapsSnapshot.Mapping mapping) {
-			try {
-				return new Gum.ElfModule.from_file (("/proc/%u/map_files/%" + uint64.FORMAT_MODIFIER + "x-%" +
-					uint64.FORMAT_MODIFIER + "x").printf (pid, mapping.start, mapping.end));
-			} catch (Gum.Error e) {
-			}
-
-			string path = "/proc/%u/root%s".printf (pid, mapping.path);
-			Posix.Stat st;
-			if (Posix.stat (path, out st) != 0 || st.st_ino != mapping.inode)
-				return null;
-
-			try {
-				return new Gum.ElfModule.from_file (path);
-			} catch (Gum.Error e) {
-				return null;
-			}
-		}
-
-		private Gum.ElfModule copy_from_target (ProcMapsSnapshot.Mapping first) throws Error {
-			var segments = new Gee.ArrayList<ProcMapsSnapshot.Mapping> ();
-			uint64 end = first.end;
-			foreach (ProcMapsSnapshot.Mapping m in maps) {
-				if (m.path == first.path && m.inode == first.inode && m.readable) {
-					segments.add (m);
-					end = uint64.max (end, m.end);
-				}
-			}
-
-			var image = new uint8[end - first.start];
-			var mem = new FileDescriptor (Posix.open ("/proc/%u/mem".printf (pid), Posix.O_RDONLY));
-			if (mem.handle == -1)
-				throw new Error.PERMISSION_DENIED ("Unable to read memory of process %u", pid);
-			foreach (ProcMapsSnapshot.Mapping m in segments)
-				mem.pread (image[m.start - first.start:m.end - first.start], m.start);
-
-			var blob = new Bytes.take ((owned) image);
-			var module = (Gum.ElfModule) Object.new (typeof (Gum.ElfModule),
-				"base-address", (Gum.Address) first.start,
-				"source-path", first.path,
-				"source-blob", blob,
-				"source-mode", Gum.ElfSourceMode.ONLINE);
-			try {
-				module.load ();
-			} catch (Gum.Error e) {
-				throw new Error.NOT_SUPPORTED ("Unable to parse %s: %s", first.path, e.message);
-			}
-			return module;
 		}
 	}
 

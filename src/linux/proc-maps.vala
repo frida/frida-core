@@ -6,7 +6,9 @@ namespace Frida {
 			default = 1;
 		}
 
+		private uint32 pid;
 		private Gee.List<Mapping> maps = new Gee.ArrayList<Mapping> ();
+		private Gee.Map<string, Gum.ElfModule> images = new Gee.HashMap<string, Gum.ElfModule> ();
 
 		private const uint64 VM_READ   = 1;
 		private const uint64 VM_WRITE  = 2;
@@ -44,6 +46,7 @@ namespace Frida {
 		}
 
 		private void build_from_pid (uint32 pid) {
+			this.pid = pid;
 			maps.clear ();
 
 			var it = ProcMapsIter.for_pid (pid);
@@ -268,76 +271,105 @@ namespace Frida {
 		}
 
 		public Mapping? find_module_by_path_at_gen (string path, uint32 at_gen) {
-			Mapping? best_base = null;
-			int best_score = int.MIN;
+			foreach (Mapping m in maps) {
+				if (m.path == path && m.file_offset == 0 && mapping_alive_at (m, at_gen) && is_image_base_at_gen (m, at_gen))
+					return m;
+			}
 
-			Mapping? cur_base = null;
-			uint cur_total = 0;
-			uint cur_exec = 0;
+			return null;
+		}
 
-#if ANDROID
-			unowned string libc_path = Gum.Process.get_libc_module ().path;
-#endif
+		public bool is_image_base (Mapping start) {
+			return is_image_base_at_gen (start, gen);
+		}
 
-			for (int i = 0; i < maps.size; i++) {
-				var m = maps[i];
-				if (!mapping_alive_at (m, at_gen))
-					continue;
+		private bool is_image_base_at_gen (Mapping start, uint32 at_gen) {
+			Gum.ElfModule image;
+			try {
+				image = load_image (start);
+			} catch (Error e) {
+				return false;
+			}
 
-				unowned string mp = m.path;
+			uint64 page_mask = ~((uint64) Gum.query_page_size () - 1);
+			bool mapped = true;
+			image.enumerate_segments (s => {
+				if (s.file_size == 0 || (s.protection & Gum.PageProtection.EXECUTE) == 0)
+					return true;
 
-				if (mp == "[page size compat]")
-					continue;
+				uint64 address = start.start + ((s.vm_address - image.preferred_address) & page_mask);
+				Mapping? m = find_mapping_at_gen (address, at_gen);
+				mapped = m != null &&
+					m.executable &&
+					!m.shared &&
+					m.inode == start.inode &&
+					m.path == start.path &&
+					m.file_offset + (address - m.start) == (s.file_offset & page_mask);
+				return mapped;
+			});
+			return mapped;
+		}
 
-				if (mp != path) {
-					consider_candidate (ref best_base, ref best_score, cur_base, cur_total, cur_exec);
-					cur_base = null;
-					cur_total = 0;
-					cur_exec = 0;
-					continue;
-				}
+		public Gum.ElfModule load_image (Mapping start) throws Error {
+			Gum.ElfModule? image = images[start.path];
+			if (image == null) {
+				image = open_mapped_file (start);
+				if (image == null)
+					image = copy_from_process (start);
+				images[start.path] = image;
+			}
+			return image;
+		}
 
-#if ANDROID
-				if (mp == libc_path && m.shared)
-					continue;
-#endif
+		private Gum.ElfModule? open_mapped_file (Mapping mapping) {
+			try {
+				return new Gum.ElfModule.from_file (("/proc/%u/map_files/%" + uint64.FORMAT_MODIFIER + "x-%" +
+					uint64.FORMAT_MODIFIER + "x").printf (pid, mapping.start, mapping.end));
+			} catch (Gum.Error e) {
+			}
 
-				if (m.file_offset == 0) {
-					consider_candidate (ref best_base, ref best_score, cur_base, cur_total, cur_exec);
-					cur_base = m;
-					cur_total = 0;
-					cur_exec = 0;
-				}
+			string path = "/proc/%u/root%s".printf (pid, mapping.path);
+			Posix.Stat st;
+			if (Posix.stat (path, out st) != 0 || st.st_ino != mapping.inode)
+				return null;
 
-				if (cur_base != null) {
-					cur_total++;
-					if (m.executable)
-						cur_exec++;
+			try {
+				return new Gum.ElfModule.from_file (path);
+			} catch (Gum.Error e) {
+				return null;
+			}
+		}
+
+		private Gum.ElfModule copy_from_process (Mapping first) throws Error {
+			var segments = new Gee.ArrayList<Mapping> ();
+			uint64 end = first.end;
+			foreach (Mapping m in maps) {
+				if (m.path == first.path && m.inode == first.inode && m.readable && m.start >= first.start &&
+						mapping_alive_at (m, gen)) {
+					segments.add (m);
+					end = uint64.max (end, m.end);
 				}
 			}
 
-			consider_candidate (ref best_base, ref best_score, cur_base, cur_total, cur_exec);
+			var image = new uint8[end - first.start];
+			var mem = new FileDescriptor (Posix.open ("/proc/%u/mem".printf (pid), Posix.O_RDONLY));
+			if (mem.handle == -1)
+				throw new Error.PERMISSION_DENIED ("Unable to read memory of process %u", pid);
+			foreach (Mapping m in segments)
+				mem.pread (image[m.start - first.start:m.end - first.start], m.start);
 
-			return best_base;
-		}
-
-		private static void consider_candidate (ref Mapping? best_base, ref int best_score, Mapping? candidate_base, uint total,
-				uint exec) {
-			if (candidate_base == null)
-				return;
-
-			int score = score_candidate (total, exec);
-			if (score > best_score) {
-				best_score = score;
-				best_base = candidate_base;
+			var blob = new Bytes.take ((owned) image);
+			var module = (Gum.ElfModule) Object.new (typeof (Gum.ElfModule),
+				"base-address", (Gum.Address) first.start,
+				"source-path", first.path,
+				"source-blob", blob,
+				"source-mode", Gum.ElfSourceMode.ONLINE);
+			try {
+				module.load ();
+			} catch (Gum.Error e) {
+				throw new Error.NOT_SUPPORTED ("Unable to parse %s: %s", first.path, e.message);
 			}
-		}
-
-		private static int score_candidate (uint total, uint exec) {
-			int score = (int) total;
-			if (exec == 0)
-				score = -score;
-			return score;
+			return module;
 		}
 	}
 
