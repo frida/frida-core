@@ -133,6 +133,28 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 	}
 
+#if ANDROID
+	[DBus (name = "re.frida.NativeThreadRegistry17")]
+	public interface NativeThreadRegistry : Object {
+		public abstract NativeThreadInfo[] activate (Cancellable? cancellable) throws GLib.Error;
+		public abstract void deactivate (Cancellable? cancellable) throws GLib.Error;
+
+		public signal void thread_added (NativeThreadInfo thread);
+		public signal void thread_removed (uint id);
+		public signal void thread_renamed (uint id, string name);
+	}
+
+	public struct NativeThreadInfo {
+		public uint id;
+		public string name;
+
+		public NativeThreadInfo (uint id, string name) {
+			this.id = id;
+			this.name = name;
+		}
+	}
+#endif
+
 	[DBus (name = "re.frida.AgentMessageSink17")]
 	public interface AgentMessageSink : Object {
 		public abstract async void post_messages (AgentMessage[] messages, uint batch_id,
@@ -2802,6 +2824,7 @@ namespace Frida {
 		public const string AGENT_SESSION_PROVIDER = "/re/frida/AgentSessionProvider";
 		public const string AGENT_SESSION = "/re/frida/AgentSession";
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
+		public const string NATIVE_THREAD_REGISTRY = "/re/frida/NativeThreadRegistry";
 		public const string AGENT_MESSAGE_SINK = "/re/frida/AgentMessageSink";
 		public const string GADGET_SESSION = "/re/frida/GadgetSession";
 		public const string CHANNEL = "/re/frida/Channel";

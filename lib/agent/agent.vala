@@ -350,6 +350,9 @@ namespace Frida.Agent {
 			bool enable_unwind_broker = true;
 			bool enable_exit_monitor = true;
 			bool enable_thread_suspend_monitor = true;
+#if ANDROID && (ARM || ARM64)
+			bool in_emulated_realm = false;
+#endif
 			foreach (unowned string option in tokens[1:]) {
 				if (option == "eternal")
 					ensure_eternalized ();
@@ -365,6 +368,10 @@ namespace Frida.Agent {
 					enable_exit_monitor = false;
 				else if (option == "thread-suspend-monitor:off")
 					enable_thread_suspend_monitor = false;
+#if ANDROID && (ARM || ARM64)
+				else if (option == "realm:emulated")
+					in_emulated_realm = true;
+#endif
 			}
 
 			if (exceptor_mode != FULL)
@@ -374,6 +381,10 @@ namespace Frida.Agent {
 
 			try {
 				yield setup_connection_with_transport_uri (transport_uri);
+#if ANDROID && (ARM || ARM64)
+				if (in_emulated_realm)
+					yield connect_to_native_realm ();
+#endif
 			} catch (Error e) {
 				start_error = e;
 				main_loop.quit ();
@@ -405,6 +416,18 @@ namespace Frida.Agent {
 
 			padder = null;
 		}
+
+#if ANDROID && (ARM || ARM64)
+		private async void connect_to_native_realm () throws Error {
+			try {
+				NativeThreadRegistry registry = yield connection.get_proxy (null, ObjectPath.NATIVE_THREAD_REGISTRY,
+					DO_NOT_LOAD_PROPERTIES, null);
+				Gum.ThreadRegistry.set_provider (new NativeThreadProvider (registry));
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+		}
+#endif
 
 		private static bool can_allocate_code () {
 			size_t page_size = Gum.query_page_size ();
@@ -1478,6 +1501,7 @@ namespace Frida.Agent {
 		private Socket? emulated_socket;
 		private BridgeState? emulated_bridge_state;
 		private Thread<void>? emulated_worker;
+		private NativeThreadRegistryService? native_thread_registry;
 
 		private async AgentSessionProvider? try_get_emulated_provider (Cancellable? cancellable) throws IOError {
 			if (get_emulated_request == null)
@@ -1556,6 +1580,7 @@ namespace Frida.Agent {
 				 * code being discarded, which seems like an edge-case the translator doesn't handle.
 				 */
 				parameters.append ("|exceptor:off|exit-monitor:off");
+				parameters.append ("|realm:emulated");
 
 				emulated_bridge_state = new BridgeState (parameters.str);
 
@@ -1563,6 +1588,10 @@ namespace Frida.Agent {
 
 				var connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
 					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+
+				native_thread_registry = new NativeThreadRegistryService ();
+				connection.register_object (ObjectPath.NATIVE_THREAD_REGISTRY,
+					(NativeThreadRegistry) native_thread_registry);
 
 				AgentSessionProvider provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
 					DO_NOT_LOAD_PROPERTIES, cancellable);
@@ -1609,6 +1638,11 @@ namespace Frida.Agent {
 			if (emulated_worker != null) {
 				emulated_worker.join ();
 				emulated_worker = null;
+			}
+
+			if (native_thread_registry != null) {
+				native_thread_registry.close ();
+				native_thread_registry = null;
 			}
 
 			emulated_socket = null;
@@ -1767,6 +1801,128 @@ namespace Frida.Agent {
 		public BridgeState (string agent_parameters) {
 			this.agent_parameters = agent_parameters;
 			this.unload_policy = IMMEDIATE;
+		}
+	}
+#endif
+
+#if ANDROID && (X86 || X86_64)
+	private sealed class NativeThreadRegistryService : Object, NativeThreadRegistry {
+		private unowned Gum.ThreadRegistry? registry;
+		private ulong added_handler = 0;
+		private ulong removed_handler = 0;
+		private ulong renamed_handler = 0;
+
+		public NativeThreadInfo[] activate (Cancellable? cancellable) {
+			registry = Gum.ThreadRegistry.obtain ();
+
+			NativeThreadInfo[] threads = {};
+
+			registry.lock ();
+
+			added_handler = registry.thread_added.connect (on_thread_added);
+			removed_handler = registry.thread_removed.connect (on_thread_removed);
+			renamed_handler = registry.thread_renamed.connect (on_thread_renamed);
+
+			registry.enumerate_threads (thread => {
+				threads += NativeThreadInfo ((uint) thread.id, thread.name ?? "");
+				return true;
+			});
+
+			registry.unlock ();
+
+			return threads;
+		}
+
+		public void deactivate (Cancellable? cancellable) {
+			close ();
+		}
+
+		public void close () {
+			if (registry == null)
+				return;
+
+			registry.disconnect (added_handler);
+			registry.disconnect (removed_handler);
+			registry.disconnect (renamed_handler);
+			registry = null;
+		}
+
+		private void on_thread_added (Gum.ThreadDetails thread) {
+			thread_added (NativeThreadInfo ((uint) thread.id, thread.name ?? ""));
+		}
+
+		private void on_thread_removed (Gum.ThreadDetails thread) {
+			thread_removed ((uint) thread.id);
+		}
+
+		private void on_thread_renamed (Gum.ThreadDetails thread, string? previous_name) {
+			thread_renamed ((uint) thread.id, thread.name ?? "");
+		}
+	}
+#endif
+
+#if ANDROID && (ARM || ARM64)
+	private sealed class NativeThreadProvider : Object, Gum.ThreadProvider {
+		public NativeThreadRegistry native_registry {
+			get;
+			construct;
+		}
+
+		private unowned Gum.ThreadRegistry registry;
+		private ulong added_handler = 0;
+		private ulong removed_handler = 0;
+		private ulong renamed_handler = 0;
+
+		public NativeThreadProvider (NativeThreadRegistry native_registry) {
+			Object (native_registry: native_registry);
+		}
+
+		public void activate (Gum.ThreadRegistry registry) {
+			this.registry = registry;
+
+			added_handler = native_registry.thread_added.connect (add_thread);
+			removed_handler = native_registry.thread_removed.connect (on_thread_removed);
+			renamed_handler = native_registry.thread_renamed.connect (on_thread_renamed);
+
+			NativeThreadInfo[] threads;
+			try {
+				threads = native_registry.activate (null);
+			} catch (GLib.Error e) {
+				return;
+			}
+
+			foreach (var thread in threads)
+				add_thread (thread);
+		}
+
+		public void deactivate () {
+			native_registry.disconnect (added_handler);
+			native_registry.disconnect (removed_handler);
+			native_registry.disconnect (renamed_handler);
+
+			try {
+				native_registry.deactivate (null);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private void add_thread (NativeThreadInfo thread) {
+			var details = Gum.ThreadDetails ();
+			details.id = thread.id;
+			if (thread.name != "") {
+				details.name = thread.name;
+				details.flags = NAME;
+			}
+
+			registry.register (details);
+		}
+
+		private void on_thread_removed (uint id) {
+			registry.unregister (id);
+		}
+
+		private void on_thread_renamed (uint id, string name) {
+			registry.rename (id, (name != "") ? name : null);
 		}
 	}
 #endif
