@@ -103,6 +103,9 @@ namespace Frida.Agent {
 		private SpawnMonitor? spawn_monitor;
 		private ThreadSuspendMonitor? thread_suspend_monitor;
 		private UnwindSitter? unwind_sitter;
+#if ANDROID && (ARM || ARM64)
+		private NativeCloakMirror? native_cloak_mirror;
+#endif
 
 		private delegate void CompletionNotify ();
 
@@ -420,6 +423,11 @@ namespace Frida.Agent {
 #if ANDROID && (ARM || ARM64)
 		private async void connect_to_native_realm () throws Error {
 			try {
+				NativeCloak cloak = yield connection.get_proxy (null, ObjectPath.NATIVE_CLOAK, DO_NOT_LOAD_PROPERTIES,
+					null);
+				native_cloak_mirror = new NativeCloakMirror (cloak);
+				native_cloak_mirror.activate ();
+
 				NativeThreadRegistry registry = yield connection.get_proxy (null, ObjectPath.NATIVE_THREAD_REGISTRY,
 					DO_NOT_LOAD_PROPERTIES, null);
 				Gum.ThreadRegistry.set_provider (new NativeThreadProvider (registry));
@@ -1501,6 +1509,7 @@ namespace Frida.Agent {
 		private Socket? emulated_socket;
 		private BridgeState? emulated_bridge_state;
 		private Thread<void>? emulated_worker;
+		private NativeCloakService? native_cloak;
 		private NativeThreadRegistryService? native_thread_registry;
 
 		private async AgentSessionProvider? try_get_emulated_provider (Cancellable? cancellable) throws IOError {
@@ -1589,6 +1598,9 @@ namespace Frida.Agent {
 				var connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
 					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
 
+				native_cloak = new NativeCloakService ();
+				connection.register_object (ObjectPath.NATIVE_CLOAK, (NativeCloak) native_cloak);
+
 				native_thread_registry = new NativeThreadRegistryService ();
 				connection.register_object (ObjectPath.NATIVE_THREAD_REGISTRY,
 					(NativeThreadRegistry) native_thread_registry);
@@ -1643,6 +1655,11 @@ namespace Frida.Agent {
 			if (native_thread_registry != null) {
 				native_thread_registry.close ();
 				native_thread_registry = null;
+			}
+
+			if (native_cloak != null) {
+				native_cloak.close ();
+				native_cloak = null;
 			}
 
 			emulated_socket = null;
@@ -1806,6 +1823,51 @@ namespace Frida.Agent {
 #endif
 
 #if ANDROID && (X86 || X86_64)
+	private sealed class NativeCloakService : Object, NativeCloak, Gum.Cloak.Observer {
+		private MainContext main_context = MainContext.ref_thread_default ();
+		private bool observing = false;
+
+		public uint[] activate (Cancellable? cancellable) {
+			Gum.Cloak.add_observer (this);
+			observing = true;
+
+			uint[] threads = {};
+			Gum.Cloak.enumerate_threads (id => {
+				threads += (uint) id;
+				return true;
+			});
+			return threads;
+		}
+
+		public void close () {
+			if (!observing)
+				return;
+
+			Gum.Cloak.remove_observer (this);
+			observing = false;
+		}
+
+		public void thread_added (Gum.ThreadId id) {
+			schedule (() => {
+				thread_cloaked ((uint) id);
+				return Source.REMOVE;
+			});
+		}
+
+		public void thread_removed (Gum.ThreadId id) {
+			schedule (() => {
+				thread_uncloaked ((uint) id);
+				return Source.REMOVE;
+			});
+		}
+
+		private void schedule (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (main_context);
+		}
+	}
+
 	private sealed class NativeThreadRegistryService : Object, NativeThreadRegistry {
 		private unowned Gum.ThreadRegistry? registry;
 		private ulong added_handler = 0;
@@ -1862,6 +1924,34 @@ namespace Frida.Agent {
 #endif
 
 #if ANDROID && (ARM || ARM64)
+	private sealed class NativeCloakMirror : Object {
+		public NativeCloak native_cloak {
+			get;
+			construct;
+		}
+
+		public NativeCloakMirror (NativeCloak native_cloak) {
+			Object (native_cloak: native_cloak);
+		}
+
+		public void activate () throws GLib.Error {
+			native_cloak.thread_cloaked.connect (on_thread_cloaked);
+			native_cloak.thread_uncloaked.connect (on_thread_uncloaked);
+
+			foreach (uint id in native_cloak.activate (null))
+				on_thread_cloaked (id);
+		}
+
+		private void on_thread_cloaked (uint id) {
+			if (!Gum.Cloak.has_thread (id))
+				Gum.Cloak.add_thread (id);
+		}
+
+		private void on_thread_uncloaked (uint id) {
+			Gum.Cloak.remove_thread (id);
+		}
+	}
+
 	private sealed class NativeThreadProvider : Object, Gum.ThreadProvider {
 		public NativeThreadRegistry native_registry {
 			get;

@@ -144,6 +144,14 @@ namespace Frida {
 		public signal void thread_renamed (uint id, string name);
 	}
 
+	[DBus (name = "re.frida.NativeCloak17")]
+	public interface NativeCloak : Object {
+		public abstract uint[] activate (Cancellable? cancellable) throws GLib.Error;
+
+		public signal void thread_cloaked (uint id);
+		public signal void thread_uncloaked (uint id);
+	}
+
 	public struct NativeThreadInfo {
 		public uint id;
 		public string name;
@@ -2825,6 +2833,7 @@ namespace Frida {
 		public const string AGENT_SESSION = "/re/frida/AgentSession";
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
 		public const string NATIVE_THREAD_REGISTRY = "/re/frida/NativeThreadRegistry";
+		public const string NATIVE_CLOAK = "/re/frida/NativeCloak";
 		public const string AGENT_MESSAGE_SINK = "/re/frida/AgentMessageSink";
 		public const string GADGET_SESSION = "/re/frida/GadgetSession";
 		public const string CHANNEL = "/re/frida/Channel";
