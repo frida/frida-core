@@ -1074,7 +1074,9 @@ namespace Frida {
 					lldb_session = new LLDBSession (lldb, process, null, ExceptionHandlingStatus.FULL, device);
 					yield lldb_session.kill (cancellable);
 					yield lldb_session.close (cancellable);
-				} catch (Error e) {
+				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
 					var process_control = yield Idun.ProcessControlService.open (device, cancellable);
 					yield process_control.kill (pid, cancellable);
 				}
