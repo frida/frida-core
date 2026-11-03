@@ -6,6 +6,8 @@ namespace Frida {
 
 		private Gee.Map<ChannelId?, weak IOStream> channels =
 			new Gee.HashMap<ChannelId?, weak IOStream> (ChannelId.hash, ChannelId.equal);
+		private Gee.Map<ChannelId?, IOStream> unlinked_channels =
+			new Gee.HashMap<ChannelId?, IOStream> (ChannelId.hash, ChannelId.equal);
 
 		~ChannelRegistry () {
 			clear ();
@@ -18,25 +20,33 @@ namespace Frida {
 					channel_stream.abandon ();
 			}
 			channels.clear ();
+			unlinked_channels.clear ();
 		}
 
 		public void register (ChannelId id, IOStream stream) {
 			stream.set_data ("channel-registry-entry", new Entry (this, id));
-			lock (channels)
+			lock (channels) {
 				channels[id] = stream;
+				unlinked_channels[id] = stream;
+			}
 		}
 
 		public IOStream link (ChannelId id) throws Error {
 			IOStream? stream;
-			lock (channels)
+			IOStream? unlinked_stream = null;
+			lock (channels) {
 				stream = channels[id];
+				unlinked_channels.unset (id, out unlinked_stream);
+			}
 			if (stream == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid channel ID");
 			return stream;
 		}
 
 		public void unlink (ChannelId id) {
+			IOStream? unlinked_stream = null;
 			lock (channels) {
+				unlinked_channels.unset (id, out unlinked_stream);
 				if (!channels.unset (id))
 					return;
 			}
