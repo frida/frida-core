@@ -1791,7 +1791,11 @@ namespace Frida {
 			}
 
 			MatchInfo info;
-			if (!/^([0-9a-f]+)-([0-9a-f]+) rw-p 00000000 00:00 0 *$/m.match (raw_maps, 0, out info)) {
+			try {
+				var anon_rw_pattern = new Regex ("^([0-9a-f]+)-([0-9a-f]+) rw-p 00000000 00:00 0 *$", MULTILINE | RAW);
+				if (!anon_rw_pattern.match (raw_maps, 0, out info))
+					assert_not_reached ();
+			} catch (RegexError e) {
 				assert_not_reached ();
 			}
 			assert (info != null);
