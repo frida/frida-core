@@ -2894,7 +2894,7 @@ namespace Frida {
 						},
 						module_list => {
 							foreach (var path in module_list)
-								modules.add_value (new Variant.variant (new Variant.tuple ({ path })));
+								modules.add_value (new Variant.variant (new Variant.tuple ({ path.make_valid () })));
 						});
 
 					vardict_add (reply, "modules", modules.end ());
@@ -3111,7 +3111,7 @@ namespace Frida {
 
 			switch (attachment_type) {
 				case SyscallTracer.AttachmentType.STRING:
-					return (string) data;
+					return ((string) data).make_valid ();
 				case SyscallTracer.AttachmentType.BYTES: {
 					if (arg_type != null) {
 						Variant? v = try_decode_timespec (arg_type, data, len);
@@ -3208,7 +3208,7 @@ namespace Frida {
 					if (name_len != 0)
 						Memory.copy (str, path + 1, name_len);
 
-					return new Variant.tuple ({ "unix-abstract", (string) str });
+					return new Variant.tuple ({ "unix-abstract", ((string) str).make_valid () });
 				}
 
 				size_t n = 1;
@@ -3218,7 +3218,7 @@ namespace Frida {
 				var str = new uint8[n + 1];
 				Memory.copy (str, path, n);
 
-				return new Variant.tuple ({ "unix", (string) str });
+				return new Variant.tuple ({ "unix", ((string) str).make_valid () });
 			}
 			default:
 				return null;
