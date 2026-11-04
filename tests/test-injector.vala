@@ -22,6 +22,10 @@ namespace Frida.InjectorTest {
 
 		GLib.Test.add_func ("/Injector/resource-leaks", test_resource_leaks);
 
+#if LINUX
+		GLib.Test.add_func ("/Injector/Linux/inject-with-non-utf8-mapping", test_injection_with_non_utf8_mapping);
+#endif
+
 #if DARWIN
 		GLib.Test.add_func ("/Injector/suspended-injection-current-arch", () => {
 			test_suspended_injection (Frida.Test.Arch.CURRENT);
@@ -149,6 +153,45 @@ namespace Frida.InjectorTest {
 		rat.close ();
 	}
 
+#if LINUX
+	private void test_injection_with_non_utf8_mapping () {
+		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("non-utf8-mapping.log"));
+		try {
+			logfile.delete ();
+		} catch (GLib.Error delete_error) {
+		}
+		var envp = new string[] {
+			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
+		};
+
+		var sleeper = File.new_for_path (Frida.Test.Labrats.path_to_executable ("sleeper"));
+		var sleeper_copy = File.new_for_path (Frida.Test.path_to_temporary_file ("sleeper-\xff"));
+		try {
+			sleeper.copy (sleeper_copy, OVERWRITE);
+		} catch (GLib.Error e) {
+			assert_not_reached ();
+		}
+		FileUtils.chmod (sleeper_copy.get_path (), 0700);
+
+		var rat = new Labrat.from_path (sleeper_copy.get_path (), envp);
+
+		rat.inject ("simple-agent", "");
+		rat.wait_for_uninject ();
+		assert_true (content_of (logfile) == ">m<");
+
+		try {
+			rat.process.kill ();
+
+			logfile.delete ();
+			sleeper_copy.delete ();
+		} catch (GLib.Error e) {
+			assert_not_reached ();
+		}
+
+		rat.close ();
+	}
+#endif
+
 #if DARWIN
 	private void test_suspended_injection (Frida.Test.Arch arch) {
 		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("suspended-injection.log"));
@@ -193,8 +236,12 @@ namespace Frida.InjectorTest {
 		private PendingUninject? pending_uninject;
 
 		public Labrat (string name, string[] envp, Frida.Test.Arch arch = Frida.Test.Arch.CURRENT) {
+			this.from_path (Frida.Test.Labrats.path_to_executable (name), envp, arch);
+		}
+
+		public Labrat.from_path (string path, string[] envp, Frida.Test.Arch arch = Frida.Test.Arch.CURRENT) {
 			try {
-				process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable (name), null, envp, arch);
+				process = Frida.Test.Process.start (path, null, envp, arch);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
