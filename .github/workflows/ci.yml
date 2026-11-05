@@ -451,7 +451,10 @@ jobs:
           cd build
           cp -a tests/frida-tests tests/labrats lib/agent/frida-agent.so /tmp/pkg/
           tar -C /tmp/pkg -cf /tmp/runner.tar .
-          /opt/sabrelite/run.sh /tmp/runner.tar /opt/frida/frida-tests
+          /opt/sabrelite/run.sh /tmp/runner.tar \
+              "cp /opt/frida/frida-tests /opt/frida/frida-agent.so /tmp/ && \
+              ln -sP /opt/frida/labrats /tmp/labrats && \
+              /tmp/frida-tests"
 
   # This job is used to check that the Linux helpers are built correctly for all
   # supported architectures. We do this because the binary artifacts are checked
