@@ -479,6 +479,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
   const gchar * skip_detach = "skip_detach";
 
   gum_arm_writer_init (&cw, code->cur);
+  cw.pc = remote_address;
 
   gum_arm_writer_put_push_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
 
