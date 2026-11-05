@@ -1550,6 +1550,8 @@ namespace Frida.Agent {
 					emulated_agent = nb_api.load_library_ext (emulated_agent_path, RTLD_LAZY, classloader_namespace);
 				} else {
 					emulated_agent = nb_api.load_library (emulated_agent_path, RTLD_LAZY);
+					if (emulated_agent == null && nb_api.load_library_ext != null)
+						emulated_agent = nb_api.load_library_ext (emulated_agent_path, RTLD_LAZY, null);
 				}
 				if (emulated_agent == null)
 					throw new Error.NOT_SUPPORTED ("Process is not using emulation");
