@@ -2482,7 +2482,7 @@ namespace Frida {
 			if (stdout_pipe == null) {
 				try {
 					var process = new Subprocess.newv ({ "logcat", "-b", "crash", "-B" },
-						STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
+						STDOUT_PIPE | STDERR_SILENCE);
 
 					logcat = process;
 					stdout_pipe = process.get_stdout_pipe ();
