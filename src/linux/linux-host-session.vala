@@ -2481,8 +2481,13 @@ namespace Frida {
 
 			if (stdout_pipe == null) {
 				try {
+					/*
+					 * Avoid inheriting stdin: under `adb shell` it is the shell's
+					 * socket, and holding it open makes the shell wait for us after
+					 * we are gone. With no stdin flag the child gets /dev/null.
+					 */
 					var process = new Subprocess.newv ({ "logcat", "-b", "crash", "-B" },
-						STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
+						STDOUT_PIPE | STDERR_SILENCE);
 
 					logcat = process;
 					stdout_pipe = process.get_stdout_pipe ();
