@@ -46,8 +46,24 @@ namespace Frida {
 			}
 #else
 			var libc = Gum.Process.get_libc_module ();
-			foreach (var symbol in apis) {
-				interceptor.attach ((void *) libc.find_export_by_name (symbol), listener);
+			var targets = new Gum.Address[apis.length];
+			for (var i = 0; i != apis.length; i++)
+				targets[i] = libc.find_export_by_name (apis[i]);
+
+			var sizes = new uint[apis.length];
+#if ARM
+			libc.enumerate_symbols (s => {
+				for (var i = 0; i != targets.length; i++) {
+					if (s.address == targets[i] && s.size > 0)
+						sizes[i] = (uint) s.size;
+				}
+				return true;
+			});
+#endif
+			for (var i = 0; i != apis.length; i++) {
+				var options = Gum.AttachOptions ();
+				options.instrumentation.redirect_space_hint = sizes[i];
+				interceptor.attach ((void *) targets[i], listener, options);
 			}
 #endif
 #endif
