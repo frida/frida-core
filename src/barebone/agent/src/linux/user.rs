@@ -459,7 +459,8 @@ unsafe extern "C" {
 
 #[cfg(target_arch = "x86")]
 unsafe fn start_thread(stack: usize, carried: usize) -> isize {
-    let launch = stack - 8;
+    let aligned_argument = stack - 16;
+    let launch = aligned_argument - 4;
     unsafe {
         (launch as *mut usize).write(enter_thread as *const () as usize);
         ((launch + 4) as *mut usize).write(carried);

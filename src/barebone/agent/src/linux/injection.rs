@@ -293,10 +293,6 @@ fn give(destination: usize, source: usize, size: usize) -> Option<()> {
         unsafe { copy_to_user(destination as *mut c_void, source as *const c_void, size) };
     unsafe { close_user_access(opened) };
     if left != 0 {
-        if left == size {
-        } else if left < size {
-        } else {
-        }
         return None;
     }
 
@@ -707,15 +703,25 @@ unsafe fn write_selectors(_registers: usize, _places: &Places) {}
 #[cfg(target_arch = "x86")]
 fn hand_over_argument(stack: usize, arena: usize) -> usize {
     let frame = [0usize, arena];
-    let sp = stack - size_of::<[usize; 2]>();
+    let aligned_argument = stack - 16;
+    let sp = aligned_argument - size_of::<usize>();
 
-    match give(sp, frame.as_ptr() as usize, size_of::<[usize; 2]>()) {
-        Some(()) => sp,
-        None => stack,
-    }
+    give(sp, frame.as_ptr() as usize, size_of::<[usize; 2]>());
+
+    sp
 }
 
-#[cfg(not(target_arch = "x86"))]
+#[cfg(target_arch = "x86_64")]
+fn hand_over_argument(stack: usize, _arena: usize) -> usize {
+    let return_address = 0usize;
+    let sp = stack - size_of::<usize>();
+
+    give(sp, &return_address as *const usize as usize, size_of::<usize>());
+
+    sp
+}
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 fn hand_over_argument(stack: usize, _arena: usize) -> usize {
     stack
 }

@@ -705,6 +705,8 @@ namespace Frida.Barebone {
 
 			uint64 landing_zone = (call_landing_zone != 0) ? call_landing_zone : saved_regs["pc"].get_uint64 ();
 
+			uint64 doubleword_aligned_sp = saved_regs["sp"].get_uint64 () & ~7ULL;
+			regs["sp"] = doubleword_aligned_sp;
 			regs["pc"] = address_from_funcptr (impl);
 			regs["lr"] = landing_zone;
 			regs["cpsr"] = instruction_set_of (impl, saved_regs["cpsr"].get_uint64 ());

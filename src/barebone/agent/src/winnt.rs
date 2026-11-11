@@ -3338,18 +3338,12 @@ const BRANCH_TO_STEP_TARGET: u32 = 0xd61f_0200;
 #[cfg(target_arch = "aarch64")]
 const STATUS_NOT_FOUND: i32 = -1_073_741_275;
 
-// The argument travels in a register here, and the stack only has to be aligned the way a call
-// would have left it.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn seed_stack(_process: *mut c_void, top: u64, _argument: u64) -> u64 {
-    (top - 64) & !15
-}
-
 // A cdecl entry looks for its argument above the return address, thus the stack is laid out
 // before the thread runs, in the process that will read it.
 #[cfg(target_arch = "x86")]
 fn seed_stack(process: *mut c_void, top: u64, argument: u64) -> u64 {
-    let sp = (top - 32) & !15;
+    let aligned_argument = (top - 32) & !15;
+    let sp = aligned_argument - 4;
 
     unsafe {
         let mut apc_state = [0usize; APC_STATE_WORDS];
@@ -3360,6 +3354,19 @@ fn seed_stack(process: *mut c_void, top: u64, argument: u64) -> u64 {
     }
 
     sp
+}
+
+// The argument travels in a register here, and the stack only has to be aligned the way a call
+// would have left it.
+#[cfg(target_arch = "x86_64")]
+fn seed_stack(_process: *mut c_void, top: u64, _argument: u64) -> u64 {
+    let before_call = (top - 64) & !15;
+    before_call - size_of::<u64>() as u64
+}
+
+#[cfg(target_arch = "aarch64")]
+fn seed_stack(_process: *mut c_void, top: u64, _argument: u64) -> u64 {
+    (top - 64) & !15
 }
 
 fn free_in_process(process_handle: *mut c_void, address: u64) {

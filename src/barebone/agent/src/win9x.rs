@@ -1059,7 +1059,9 @@ fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
         0xff, 0xd2,
     ];
     let stack_bottom = stack_top + 0x40 - INJECTION_STACK_SIZE as u32;
-    code[5..9].copy_from_slice(&stack_top.to_le_bytes());
+    let aligned_argument = stack_top - 16;
+    let sp_before_push = aligned_argument + 4;
+    code[5..9].copy_from_slice(&sp_before_push.to_le_bytes());
     code[11..15].copy_from_slice(&entry.to_le_bytes());
     code[32..36].copy_from_slice(&stack_bottom.to_le_bytes());
     code[39..43].copy_from_slice(&kernel32_export(b"ExitThread").to_le_bytes());
