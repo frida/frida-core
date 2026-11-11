@@ -1104,6 +1104,10 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
 		}
 
+		public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Backtrace dumping is not supported by this backend");
+		}
+
 		private void on_agent_session_closed (BareboneAgentSession session) {
 			AgentSessionId id = session.id;
 

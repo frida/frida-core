@@ -1482,6 +1482,11 @@ namespace Frida {
 			public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
 			}
+
+			public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable)
+					throws Error, IOError {
+				throw new Error.NOT_SUPPORTED ("Backtrace dumping is not supported by this backend");
+			}
 		}
 
 		private class BusService : Object, BusSession {

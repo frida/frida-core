@@ -4,8 +4,9 @@ using Idun;
 [CCode (gir_namespace = "FridaFruityInjector", gir_version = "1.0")]
 namespace Frida.Fruity.Injector {
 	public static async Transaction inject (owned Gum.MachoModule module, LLDB.Client lldb, Idun.ChannelProvider channel_provider,
-			Cancellable? cancellable) throws Error, IOError {
+			bool interruptible, Cancellable? cancellable) throws Error, IOError {
 		var session = new Session (module, lldb, channel_provider);
+		session.interruptible = interruptible;
 		return yield session.run (cancellable);
 	}
 
@@ -17,12 +18,23 @@ namespace Frida.Fruity.Injector {
 
 		public string main_thread_id;
 
-		private bool is_early_instrumentation;
+		public bool is_early_instrumentation {
+			get;
+			private set;
+		}
+
+		public bool loaded_gadget {
+			get;
+			private set;
+		}
+
 		private LLDB.Client lldb;
 
-		internal Transaction (GadgetDetails gadget, bool is_early_instrumentation, string main_thread_id, LLDB.Client lldb) {
+		internal Transaction (GadgetDetails gadget, bool loaded_gadget, bool is_early_instrumentation, string main_thread_id,
+				LLDB.Client lldb) {
 			Object (gadget: gadget);
 
+			this.loaded_gadget = loaded_gadget;
 			this.is_early_instrumentation = is_early_instrumentation;
 			this.main_thread_id = main_thread_id;
 			this.lldb = lldb;
@@ -49,8 +61,13 @@ namespace Frida.Fruity.Injector {
 			construct;
 		}
 
-		public GadgetDetails (uint16 port) {
-			Object (port: port);
+		public uint16 interrupt_port {
+			get;
+			construct;
+		}
+
+		public GadgetDetails (uint16 port, uint16 interrupt_port = 0) {
+			Object (port: port, interrupt_port: interrupt_port);
 		}
 	}
 
@@ -102,6 +119,8 @@ namespace Frida.Fruity.Injector {
 
 		private size_t module_size;
 
+		public bool interruptible = false;
+
 		public Session (Gum.MachoModule module, LLDB.Client lldb, Idun.ChannelProvider channel_provider) {
 			Object (
 				module: module,
@@ -117,7 +136,7 @@ namespace Frida.Fruity.Injector {
 				var existing_gadget = yield setup (cancellable);
 				if (existing_gadget != null) {
 					is_early_instrumentation = false;
-					return new Transaction (existing_gadget, is_early_instrumentation, main_thread.id, lldb);
+					return new Transaction (existing_gadget, false, is_early_instrumentation, main_thread.id, lldb);
 				}
 
 				is_early_instrumentation = !libsystem_initialized;
@@ -127,42 +146,40 @@ namespace Frida.Fruity.Injector {
 
 				yield teardown (cancellable);
 
-				return new Transaction (gadget, is_early_instrumentation, main_thread.id, lldb);
+				return new Transaction (gadget, true, is_early_instrumentation, main_thread.id, lldb);
 			} catch (GLib.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
 		private async GadgetDetails? setup (Cancellable? cancellable) throws GLib.Error {
-			GadgetDetails? existing_gadget = null;
+			uint16 existing_port = 0;
+			uint16 existing_interrupt_port = 0;
+			uint64 existing_interrupt_arm_address = 0;
 			yield lldb.enumerate_threads (thread => {
 				if (main_thread == null)
 					main_thread = thread;
 
 				unowned string? name = thread.name;
-				if (name == null)
-					return true;
-
-				MatchInfo info;
-				if (/^frida-gadget-tcp-(\d+)$/.match (name, 0, out info)) {
-					string raw_port = info.fetch (1);
-
-					try {
-						uint64 port;
-						const uint radix = 10;
-						uint64.from_string (raw_port, out port, radix, 1, uint16.MAX);
-
-						existing_gadget = new GadgetDetails ((uint16) port);
-
-						return false;
-					} catch (NumberParserError e) {
+				if (name != null) {
+					uint16 port;
+					uint64 arm_address;
+					if (try_parse_gadget_port (name, out port)) {
+						if (existing_port == 0)
+							existing_port = port;
+					} else if (try_parse_interrupt_listener (name, out port, out arm_address)) {
+						existing_interrupt_port = port;
+						existing_interrupt_arm_address = arm_address;
 					}
 				}
 
 				return true;
 			}, cancellable);
-			if (existing_gadget != null)
-				return existing_gadget;
+			if (existing_port != 0) {
+				if (existing_interrupt_port != 0)
+					yield lldb.write_bool (existing_interrupt_arm_address, true, cancellable);
+				return new GadgetDetails (existing_port, existing_interrupt_port);
+			}
 			yield save_main_thread_state (cancellable);
 
 			jit_page = yield lldb.allocate (page_size, "rx", cancellable);
@@ -243,7 +260,58 @@ namespace Frida.Fruity.Injector {
 			var gadget_port = yield upload (buffer, threaded_items.build (symbols), chained_fixups.build (),
 				new UploadSymbols.from_set (symbols), cancellable);
 
-			return new GadgetDetails (gadget_port);
+			uint16 interrupt_port = 0;
+			if (interruptible) {
+				yield lldb.enumerate_threads (thread => {
+					unowned string? name = thread.name;
+					uint64 arm_address;
+					return name == null || !try_parse_interrupt_listener (name, out interrupt_port, out arm_address);
+				}, cancellable);
+			}
+
+			return new GadgetDetails (gadget_port, interrupt_port);
+		}
+
+		private static bool try_parse_gadget_port (string thread_name, out uint16 port) {
+			port = 0;
+
+			MatchInfo info;
+			if (!/^frida-gadget-tcp-(\d+)$/.match (thread_name, 0, out info))
+				return false;
+
+			return try_parse_port (info.fetch (1), out port);
+		}
+
+		private static bool try_parse_interrupt_listener (string thread_name, out uint16 port, out uint64 arm_address) {
+			port = 0;
+			arm_address = 0;
+
+			MatchInfo info;
+			if (!/^frida-gadget-interrupt-(\d+)-([0-9a-f]+)$/.match (thread_name, 0, out info))
+				return false;
+
+			try {
+				const uint radix = 16;
+				uint64.from_string (info.fetch (2), out arm_address, radix);
+			} catch (NumberParserError e) {
+				return false;
+			}
+
+			return try_parse_port (info.fetch (1), out port);
+		}
+
+		private static bool try_parse_port (string raw_port, out uint16 port) {
+			port = 0;
+
+			try {
+				uint64 val;
+				const uint radix = 10;
+				uint64.from_string (raw_port, out val, radix, 1, uint16.MAX);
+				port = (uint16) val;
+				return true;
+			} catch (NumberParserError e) {
+				return false;
+			}
 		}
 
 		private void perform_rebase_operations (Buffer buffer) throws GLib.Error {
@@ -388,8 +456,13 @@ namespace Frida.Fruity.Injector {
 						.add_string_value ("resume")
 					.end_object ()
 					.set_member_name ("teardown")
-					.add_string_value ("full")
-				.end_object ();
+					.add_string_value ("full");
+			if (interruptible) {
+				config
+					.set_member_name ("interruptible")
+					.add_boolean_value (true);
+			}
+			config.end_object ();
 			string raw_config = Json.to_string (config.get_root (), false);
 			string config_param = "frida_gadget_config=" + Base64.encode (raw_config.data);
 

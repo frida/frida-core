@@ -796,6 +796,15 @@ namespace Frida {
 			}
 		}
 
+		public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var server = yield get_remote_server (cancellable);
+			try {
+				return yield server.session.dump_backtraces (pid, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
 		public async ServiceSession link_service_session (ServiceSessionId id, Cancellable? cancellable) throws Error, IOError {
 			var server = yield get_remote_server (cancellable);
 			ServiceSession session = yield server.connection.get_proxy (null, ObjectPath.for_service_session (id),
