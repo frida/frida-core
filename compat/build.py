@@ -603,9 +603,10 @@ def option_should_be_forwarded(k: "OptionKey",
     from mesonbuild import options
     from mesonbuild.mesonlib import MachineChoice
 
+    subproject = k.subproject or ""
     our_project_id = "frida-core" if role == "subproject" else ""
-    is_for_us = k.subproject == our_project_id
-    is_for_child = k.subproject in subprojects
+    is_for_us = subproject == our_project_id
+    is_for_child = subproject in subprojects
 
     if optstore.is_project_option(k):
         if is_for_us:
@@ -630,9 +631,9 @@ def option_should_be_forwarded(k: "OptionKey",
             return False
         if not str(v.value):
             return False
-        if not is_for_child and role == "subproject" and k.subproject in {"", our_project_id}:
+        if not is_for_child and role == "subproject" and subproject in {"", our_project_id}:
             if not options.BUILTIN_OPTIONS[k.evolve(subproject=None, machine=MachineChoice.HOST)].yielding:
-                return k.subproject == our_project_id
+                return subproject == our_project_id
             return True
 
     if k.get_module_prefix() == "python":
