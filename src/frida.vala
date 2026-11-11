@@ -5821,6 +5821,9 @@ namespace Frida {
 #if COMPILER_BACKEND_INSTALLED_LIBRARY || COMPILER_BACKEND_INSTALLED_EXECUTABLE
 	internal string compiler_backend_path;
 #endif
+#if HAVE_INSTALLED_IDUND
+	internal string idund_path;
+#endif
 
 	public void _init_asset_paths () {
 		var location = AssetLocation.detect ();
@@ -5829,6 +5832,9 @@ namespace Frida {
 #if COMPILER_BACKEND_INSTALLED_LIBRARY || COMPILER_BACKEND_INSTALLED_EXECUTABLE
 		compiler_backend_path = location.derive_plugin_path (Config.FRIDA_COMPILER_BACKEND_NAME);
 #endif
+#if HAVE_INSTALLED_IDUND
+		idund_path = location.derive_plugin_path (Config.FRIDA_IDUND_NAME);
+#endif
 	}
 
 	public void _deinit_asset_paths () {
@@ -5836,6 +5842,9 @@ namespace Frida {
 		agent_path = null;
 #if COMPILER_BACKEND_INSTALLED_LIBRARY || COMPILER_BACKEND_INSTALLED_EXECUTABLE
 		compiler_backend_path = null;
+#endif
+#if HAVE_INSTALLED_IDUND
+		idund_path = null;
 #endif
 	}
 #endif

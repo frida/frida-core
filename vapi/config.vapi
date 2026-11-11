@@ -6,4 +6,5 @@ namespace Config {
 	public const string FRIDA_HELPER_NAME;
 	public const string FRIDA_AGENT_NAME;
 	public const string FRIDA_COMPILER_BACKEND_NAME;
+	public const string FRIDA_IDUND_NAME;
 }

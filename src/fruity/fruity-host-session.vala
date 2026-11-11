@@ -8,7 +8,7 @@ namespace Frida {
 			new Gee.HashMap<Idun.Device, FruityHostSessionProvider> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
-#if HAVE_IDUND_BLOB
+#if HAVE_EMBEDDED_IDUND
 		private TemporaryDirectory daemon_dir = new TemporaryDirectory ();
 		private TemporaryFile? daemon_file;
 
@@ -28,8 +28,10 @@ namespace Frida {
 #if !MACOS
 			migrate_pairing_store ();
 #endif
-#if HAVE_IDUND_BLOB
+#if HAVE_EMBEDDED_IDUND
 			device_monitor.set_daemon_locator (extract_daemon);
+#elif HAVE_INSTALLED_IDUND
+			device_monitor.set_daemon_locator (() => Frida.idund_path);
 #endif
 			try {
 				yield device_monitor.start (cancellable);
@@ -38,7 +40,7 @@ namespace Frida {
 			}
 		}
 
-#if HAVE_IDUND_BLOB
+#if HAVE_EMBEDDED_IDUND
 		private string extract_daemon () throws Efni.Error {
 #if WINDOWS
 			var blob = Frida.Data.Idund.get_idund_exe_blob ();
