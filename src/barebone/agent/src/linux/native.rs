@@ -3,7 +3,9 @@ use core::ptr;
 use core::ptr::read_volatile;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-use core::sync::atomic::{AtomicI32, AtomicUsize, fence};
+use core::sync::atomic::{AtomicI32, fence};
+#[cfg(not(target_arch = "arm"))]
+use core::sync::atomic::AtomicUsize;
 
 use crate::kernel::ThreadEntry;
 
@@ -610,9 +612,12 @@ fn where_the_preempt_count_is() -> Option<usize> {
 
 #[cfg(target_arch = "x86_64")]
 fn where_the_preempt_count_is() -> Option<usize> {
-    let per_cpu = unsafe { ___preempt_count };
+    let standalone = unsafe { ___preempt_count };
+    if standalone != 0 {
+        return Some(standalone);
+    }
 
-    (per_cpu != 0).then_some(per_cpu)
+    hot_per_cpu_place("preempt_count")
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -848,32 +853,63 @@ pub fn current_task() -> u64 {
     task
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn current_task() -> u64 {
-    let task: u64;
-    unsafe {
-        core::arch::asm!("mov {}, gs:[{}]", out(reg) task, in(reg) _current_task, options(nostack));
-    }
-    task
+    let place = per_cpu_place(unsafe { _current_task }, "current_task", &CURRENT_TASK_AT);
+
+    read_per_cpu_word(place) as u64
 }
 
 #[cfg(target_arch = "x86_64")]
 pub fn top_of_stack() -> usize {
-    let top: usize;
-    unsafe {
-        core::arch::asm!("mov {}, gs:[{}]", out(reg) top, in(reg) _cpu_current_top_of_stack, options(nostack));
+    let place = per_cpu_place(unsafe { _cpu_current_top_of_stack }, "top_of_stack", &TOP_OF_STACK_AT);
+
+    read_per_cpu_word(place)
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn per_cpu_place(standalone: usize, hot_member: &str, cache: &AtomicUsize) -> usize {
+    let known = cache.load(Ordering::Relaxed);
+    if known != 0 {
+        return known;
     }
-    top
+
+    let place = if standalone != 0 { standalone } else { hot_per_cpu_place(hot_member).unwrap() };
+    cache.store(place, Ordering::Relaxed);
+
+    place
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn hot_per_cpu_place(member: &str) -> Option<usize> {
+    let hot = unsafe { _pcpu_hot };
+    if hot == 0 {
+        return None;
+    }
+
+    Some(hot + super::layout::field_offset("pcpu_hot", member)?)
+}
+
+#[cfg(target_arch = "x86_64")]
+fn read_per_cpu_word(place: usize) -> usize {
+    let value: usize;
+    unsafe { core::arch::asm!("mov {}, gs:[{}]", out(reg) value, in(reg) place, options(nostack, readonly)) };
+
+    value
 }
 
 #[cfg(target_arch = "x86")]
-pub fn current_task() -> u64 {
-    let task: u32;
-    unsafe {
-        core::arch::asm!("mov {}, fs:[{}]", out(reg) task, in(reg) _current_task as u32, options(nostack));
-    }
-    task as u64
+fn read_per_cpu_word(place: usize) -> usize {
+    let value: usize;
+    unsafe { core::arch::asm!("mov {}, fs:[{}]", out(reg) value, in(reg) place, options(nostack, readonly)) };
+
+    value
 }
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+static CURRENT_TASK_AT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_arch = "x86_64")]
+static TOP_OF_STACK_AT: AtomicUsize = AtomicUsize::new(0);
 
 pub fn get_kernel_base() -> u64 {
     KERNEL_BASE.load(Ordering::Relaxed)
@@ -1304,6 +1340,8 @@ unsafe extern "C" {
     static _cpu_current_top_of_stack: usize;
     #[cfg(target_arch = "x86_64")]
     static ___preempt_count: usize;
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    static _pcpu_hot: usize;
     #[cfg(target_arch = "arm")]
     static ___pv_offset: *const u64;
     #[cfg(target_arch = "arm")]

@@ -258,6 +258,11 @@ static const struct frida_layout_entry frida_kmod_layout[] =
 #ifdef CONFIG_X86_64
   FRIDA_FIELD (task_struct, thread.fsbase),
 #endif
+#ifdef FRIDA_HAVE_PCPU_HOT
+  FRIDA_FIELD (pcpu_hot, current_task),
+  FRIDA_FIELD (pcpu_hot, preempt_count),
+  FRIDA_FIELD (pcpu_hot, top_of_stack),
+#endif
 #ifdef CONFIG_ARM64
   FRIDA_FIELD (task_struct, thread.uw.tp_value),
 #endif

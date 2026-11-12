@@ -97,6 +97,7 @@ SECTIONS {
     _current_task = .; . += 8;
     _cpu_current_top_of_stack = .; . += 8;
     ___preempt_count = .; . += 8;
+    _pcpu_hot = .; . += 8;
     _register_die_notifier = .; . += 8;
     _unregister_die_notifier = .; . += 8;
     _ioremap = .; . += 8;
