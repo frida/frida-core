@@ -17,8 +17,6 @@ namespace Frida {
 						_resource_store = new ResourceStore ();
 					} catch (Error e) {
 						assert_not_reached ();
-					} catch (Efni.Error e) {
-						assert_not_reached ();
 					}
 				}
 				return _resource_store;
@@ -844,7 +842,6 @@ namespace Frida {
 				try {
 					protect_code (load_bias + segment.vm_address, (size_t) round_page (segment.vm_size));
 				} catch (Error e) {
-				} catch (Efni.Error e) {
 				}
 				return true;
 			});
