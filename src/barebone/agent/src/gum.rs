@@ -27,6 +27,10 @@ use crate::bindings::{
 #[cfg(feature = "linux-injected")]
 use crate::gum_modules::enumerate_symbols_in_range;
 #[cfg(any(feature = "win9x", feature = "winnt"))]
+use crate::bindings::{
+    GumPeModule, g_object_unref, gum_pe_module_get_version, gum_pe_module_new_from_memory,
+};
+#[cfg(any(feature = "win9x", feature = "winnt"))]
 use crate::gum_windows::{enumerate_exports_in_range, enumerate_imports_in_module};
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 use crate::bindings::{GumFoundImportFunc, GumImportDetails, GumImportType_GUM_IMPORT_FUNCTION};
@@ -114,6 +118,8 @@ pub struct GumNativeModule {
     version: *mut gchar,
     path: *mut gchar,
     range: GumMemoryRange,
+    #[cfg(any(feature = "win9x", feature = "winnt"))]
+    pe: *mut GumPeModule,
 }
 
 #[repr(C)]
@@ -203,6 +209,10 @@ unsafe extern "C" fn gum_native_module_finalize(object: *mut GObject) {
         let module = object as *mut GumNativeModule;
 
         g_free((*module).path as gpointer);
+        #[cfg(any(feature = "win9x", feature = "winnt"))]
+        if !(*module).pe.is_null() {
+            g_object_unref((*module).pe as gpointer);
+        }
 
         (*GUM_NATIVE_MODULE_PARENT_CLASS).finalize.unwrap()(object);
     }
@@ -228,6 +238,18 @@ pub(crate) fn gum_native_module_new(
     }
 }
 
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+pub(crate) fn gum_native_module_new_with_pe(path: &str, range: &GumMemoryRange) -> *mut GumModule {
+    let module = gum_native_module_new(path, "", range);
+
+    unsafe {
+        (*(module as *mut GumNativeModule)).pe =
+            gum_pe_module_new_from_memory(range.base_address, ptr::null_mut());
+    }
+
+    module
+}
+
 fn version_copied(version: &str) -> *mut gchar {
     if version.is_empty() {
         return ptr::null_mut();
@@ -248,6 +270,10 @@ extern "C" fn gum_native_module_get_name(module: *mut GumModule) -> *const gchar
 extern "C" fn gum_native_module_get_version(module: *mut GumModule) -> *const gchar {
     unsafe {
         let native_module = module as *mut GumNativeModule;
+        #[cfg(any(feature = "win9x", feature = "winnt"))]
+        if !(*native_module).pe.is_null() {
+            return gum_pe_module_get_version((*native_module).pe);
+        }
         (*native_module).version as *const gchar
     }
 }

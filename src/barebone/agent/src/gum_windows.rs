@@ -7,8 +7,9 @@ use crate::{
         GIOErrorEnum_G_IO_ERROR_BROKEN_PIPE, GIOErrorEnum_G_IO_ERROR_FAILED,
         GIOErrorEnum_G_IO_ERROR_INVALID_ARGUMENT, GIOErrorEnum_G_IO_ERROR_NOT_FOUND,
         GIOErrorEnum_G_IO_ERROR_PERMISSION_DENIED, GumBareboneStreamOps, GumMemoryRange,
-        GumModuleRegistry, GumPageProtection, GumRwxSupport, g_free, g_io_error_quark, g_malloc,
-        g_object_unref, g_set_error_literal, g_utf8_to_utf16, g_utf16_to_utf8, gboolean, gchar,
+        GumModule, GumModuleRegistry, GumPageProtection, GumRwxSupport, g_free, g_io_error_quark,
+        g_malloc, g_object_unref, g_set_error_literal, g_utf8_to_utf16, g_utf16_to_utf8, gboolean,
+        gchar,
         gint, gpointer, gsize, gssize, guint, gum_barebone_register_module, gum_mprotect,
         GumFoundRangeFunc, GumFoundThreadFunc, GumModifyThreadFlags, GumModifyThreadFunc,
         GumRangeDetails, GumThreadDetails, GumThreadFlags, GumThreadId, GumThreadRegistry,
@@ -433,7 +434,7 @@ pub(crate) fn module_arrived(base: u64, path: &str) {
         let registry = crate::bindings::gum_module_registry_obtain();
         crate::bindings::gum_module_registry_lock(registry);
 
-        let native = gum::gum_native_module_new(path, "", &range);
+        let native = gum::gum_native_module_new_with_pe(path, &range);
         gum_barebone_register_module(registry, native);
         g_object_unref(native as gpointer);
 
@@ -462,7 +463,7 @@ pub(crate) fn module_arrived(base: u64) {
         let registry = crate::bindings::gum_module_registry_obtain();
         crate::bindings::gum_module_registry_lock(registry);
 
-        let native = gum::gum_native_module_new(&module.path, "", &range);
+        let native = gum::gum_native_module_new_with_pe(&module.path, &range);
         gum_barebone_register_module(registry, native);
         g_object_unref(native as gpointer);
 
@@ -506,37 +507,35 @@ fn register_the_process_modules(registry: *mut GumModuleRegistry) {
     for module in kernel::enumerate_modules() {
         known_mut().insert(module.base);
 
-        register_module(registry, &module.path, "", module.base, module.size);
+        let range = range_of(module.base, module.size);
+        register(registry, gum::gum_native_module_new_with_pe(&module.path, &range));
     }
 }
 
 fn register_the_kernel_modules(registry: *mut GumModuleRegistry) {
     #[cfg(feature = "winnt")]
     for module in crate::winnt::enumerate_kernel_modules() {
-        register_module(registry, &module.path, "", module.base, module.size);
+        let range = range_of(module.base, module.size);
+        register(registry, gum::gum_native_module_new(&module.path, "", &range));
     }
 
     #[cfg(not(feature = "winnt"))]
     for module_info in unsafe { &*core::ptr::addr_of!(crate::MODULE_INFO) }.iter() {
         let path = format!("{}{}", kernel::MODULE_DIRECTORY, module_info.name);
-        register_module(
-            registry,
-            &path,
-            &module_info.version,
-            module_info.offset as u64,
-            module_info.size as u64,
-        );
+        let range = range_of(module_info.offset as u64, module_info.size as u64);
+        register(registry, gum::gum_native_module_new(&path, &module_info.version, &range));
     }
 }
 
-fn register_module(registry: *mut GumModuleRegistry, path: &str, version: &str, base: u64, size: u64) {
-    let range = GumMemoryRange {
+fn range_of(base: u64, size: u64) -> GumMemoryRange {
+    GumMemoryRange {
         base_address: base,
         size: size as gsize,
-    };
+    }
+}
 
+fn register(registry: *mut GumModuleRegistry, module: *mut GumModule) {
     unsafe {
-        let module = gum::gum_native_module_new(path, version, &range);
         gum_barebone_register_module(registry, module);
         g_object_unref(module as gpointer);
     }
