@@ -280,7 +280,6 @@ namespace Frida {
 				try {
 					icons = yield springboard_agent.fetch_application_icons (app_ids, cancellable);
 				} catch (Error e) {
-				} catch (Efni.Error e) {
 				}
 			}
 

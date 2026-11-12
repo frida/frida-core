@@ -109,7 +109,6 @@ namespace Frida {
 					var client = yield get_android_helper_client (cancellable);
 					yield client.transport.close (cancellable);
 				} catch (Error e) {
-				} catch (Efni.Error e) {
 				}
 			}
 #endif
@@ -577,8 +576,6 @@ namespace Frida {
 			try {
 				yield promise.future.wait_async (cancellable);
 			} catch (Error e) {
-				assert_not_reached ();
-			} catch (Efni.Error e) {
 				assert_not_reached ();
 			}
 
@@ -1448,7 +1445,6 @@ namespace Frida {
 						Posix.kill ((Posix.pid_t) pid, Posix.Signal.CONT);
 					}
 				} catch (Error e) {
-				} catch (Efni.Error e) {
 				}
 			}
 			zymbiote_patches.clear ();
@@ -2345,7 +2341,6 @@ namespace Frida {
 					var crash = parse_java_report (entry.message);
 					on_crash_received (crash);
 				} catch (Error e) {
-				} catch (Efni.Error e) {
 				}
 
 				return;
@@ -2386,7 +2381,6 @@ namespace Frida {
 				var crash = parse_native_report (report);
 				on_crash_received (crash);
 			} catch (Error e) {
-			} catch (Efni.Error e) {
 			}
 		}
 
