@@ -2,9 +2,13 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - 'src/barebone/agent/**'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'src/barebone/agent/**'
   workflow_dispatch:
     inputs:
       tag:

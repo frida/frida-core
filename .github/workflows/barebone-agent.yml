@@ -1,0 +1,245 @@
+name: Barebone agent
+
+on:
+  push:
+    paths:
+      - 'src/barebone/agent/**'
+      - '.github/workflows/barebone-agent.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/barebone/agent/**'
+      - '.github/workflows/barebone-agent.yml'
+  workflow_dispatch:
+
+jobs:
+  gum-none:
+    strategy:
+      matrix:
+        machine:
+          - none-x86-softfloat_pic
+          - none-x86_64-softfloat_pic
+          - none-x86_64-softfloat_pic_msabi
+          - none-arm-softfloat_pic
+          - none-arm64-softfloat_pic
+      fail-fast: false
+    runs-on: ubuntu-latest
+    env:
+      FRIDA_DEPS: ${{ github.workspace }}/deps
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Set up C toolchain
+        uses: ./.github/actions/setup-llvm
+      - name: Grab frida-gum
+        run: |
+          python releng/meson/meson.py subprojects download frida-gum
+          git -C subprojects/frida-gum submodule update --init --recursive --depth 1
+      - name: Configure Gum
+        working-directory: subprojects/frida-gum
+        run: >-
+          ./configure
+          --host=${{ matrix.machine }}
+          --enable-gumjs
+          --with-devkits=gumjs
+          --with-devkit-symbol-scope=original
+        env:
+          CC: clang
+          CXX: clang++
+      - name: Compile
+        working-directory: subprojects/frida-gum
+        run: make
+      - name: Upload GumJS devkit
+        uses: actions/upload-artifact@v7
+        with:
+          name: frida-gumjs-devkit-${{ matrix.machine }}
+          path: subprojects/frida-gum/build/bindings/gumjs/devkit/
+      - name: Upload SDK
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-${{ matrix.machine }}
+          path: ${{ env.FRIDA_DEPS }}/sdk-${{ matrix.machine }}/
+
+  gum-macos-kernel:
+    runs-on: macos-latest
+    env:
+      FRIDA_DEPS: ${{ github.workspace }}/deps
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Grab frida-gum
+        run: |
+          python3 releng/meson/meson.py subprojects download frida-gum
+          git -C subprojects/frida-gum submodule update --init --recursive --depth 1
+      - name: Configure Gum
+        working-directory: subprojects/frida-gum
+        run: >-
+          ./configure
+          --host=macos-arm64e-kernel
+          --enable-gumjs
+          --with-devkits=gumjs
+          --with-devkit-symbol-scope=original
+      - name: Compile
+        working-directory: subprojects/frida-gum
+        run: make
+      - name: Upload GumJS devkit
+        uses: actions/upload-artifact@v7
+        with:
+          name: frida-gumjs-devkit-macos-arm64e-kernel
+          path: subprojects/frida-gum/build/bindings/gumjs/devkit/
+      - name: Upload SDK
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-macos-arm64e-kernel
+          path: ${{ env.FRIDA_DEPS }}/sdk-macos-arm64e-kernel/
+
+  blob:
+    needs: gum-none
+    strategy:
+      matrix:
+        include:
+          - flavor: win9x
+            feature: win9x
+            arch: x86
+            machine: none-x86-softfloat_pic
+            rust_target: i686-unknown-none-pic
+          - flavor: winnt
+            feature: winnt
+            arch: x86
+            machine: none-x86-softfloat_pic
+            rust_target: i686-unknown-none-pic
+          - flavor: winnt
+            feature: winnt
+            arch: x86_64
+            machine: none-x86_64-softfloat_pic_msabi
+            rust_target: x86_64-unknown-none-pic
+          - flavor: winnt
+            feature: winnt
+            arch: arm64
+            machine: none-arm64-softfloat_pic
+            rust_target: aarch64-unknown-none-pic
+          - flavor: xnu
+            feature: xnu
+            arch: arm64
+            machine: none-arm64-softfloat_pic
+            rust_target: aarch64-unknown-none-pic
+          - flavor: linux
+            feature: linux-injected
+            arch: x86
+            machine: none-x86-softfloat_pic
+            rust_target: i686-unknown-none-pic
+          - flavor: linux
+            feature: linux-injected
+            arch: x86_64
+            machine: none-x86_64-softfloat_pic
+            rust_target: x86_64-unknown-none-pic
+          - flavor: linux
+            feature: linux-injected
+            arch: arm
+            machine: none-arm-softfloat_pic
+            rust_target: armv7a-unknown-none-pic
+          - flavor: linux
+            feature: linux-injected
+            arch: arm64
+            machine: none-arm64-softfloat_pic
+            rust_target: aarch64-unknown-none-pic
+      fail-fast: false
+    runs-on: ubuntu-latest
+    env:
+      SDK: ${{ github.workspace }}/sdk-${{ matrix.machine }}
+      GUMJS_DEVKIT_DIR: ${{ github.workspace }}/gumjs-devkit
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Detect version
+        run: |
+          version=$(releng/frida_version.py)
+          test -n "$version"
+          echo "FRIDA_VERSION=$version" >> $GITHUB_ENV
+      - name: Set up C toolchain
+        uses: ./.github/actions/setup-llvm
+      - name: Set up Rust
+        run: rustup component add rust-src
+      - name: Download SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: sdk-${{ matrix.machine }}
+          path: ${{ env.SDK }}
+      - name: Download GumJS devkit
+        uses: actions/download-artifact@v8
+        with:
+          name: frida-gumjs-devkit-${{ matrix.machine }}
+          path: ${{ env.GUMJS_DEVKIT_DIR }}
+      - name: Build agent
+        working-directory: src/barebone/agent
+        run: >-
+          cargo build --release
+          --features ${{ matrix.feature }}
+          --target ./${{ matrix.rust_target }}.json -Z json-target-spec
+          -Z build-std=core,alloc,compiler_builtins
+          --target-dir target-${{ matrix.flavor }}
+        env:
+          RUSTC_BOOTSTRAP: 1
+          CC: >-
+            clang
+            -I${{ env.SDK }}/include
+            -I${{ env.SDK }}/include/glib-2.0
+            -I${{ env.SDK }}/lib/glib-2.0/include
+            -I${{ env.SDK }}/include/capstone
+            -I${{ env.SDK }}/include/json-glib-1.0
+          RUSTFLAGS: -L native=${{ env.SDK }}/lib
+      - name: Upload agent
+        uses: actions/upload-artifact@v7
+        with:
+          name: frida-barebone-agent-${{ matrix.flavor }}-${{ matrix.arch }}
+          path: src/barebone/agent/target-${{ matrix.flavor }}/${{ matrix.rust_target }}/release/frida-barebone-agent
+
+  kext:
+    needs: gum-macos-kernel
+    runs-on: macos-latest
+    env:
+      FRIDA_SDK: ${{ github.workspace }}/sdk-macos-arm64e-kernel
+      GUMJS_DEVKIT_DIR: ${{ github.workspace }}/gumjs-devkit
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Detect version
+        run: |
+          version=$(releng/frida_version.py)
+          test -n "$version"
+          echo "FRIDA_VERSION=$version" >> $GITHUB_ENV
+      - name: Set up Rust
+        run: rustup component add rust-src
+      - name: Download SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: sdk-macos-arm64e-kernel
+          path: ${{ env.FRIDA_SDK }}
+      - name: Download GumJS devkit
+        uses: actions/download-artifact@v8
+        with:
+          name: frida-gumjs-devkit-macos-arm64e-kernel
+          path: ${{ env.GUMJS_DEVKIT_DIR }}
+      - name: Build agent
+        working-directory: src/barebone/agent/macos
+        run: make
+      - name: Upload agent
+        uses: actions/upload-artifact@v7
+        with:
+          name: frida-barebone-agent-xnu-kext-arm64e
+          path: src/barebone/agent/macos/frida-agent.kext
