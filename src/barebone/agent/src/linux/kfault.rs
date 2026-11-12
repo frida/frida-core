@@ -557,7 +557,7 @@ unsafe fn recovered(regs: *mut c_void) -> bool {
 extern "C" fn frida_arm64_park() -> ! {
     static mut PARK_TOKEN: u8 = 0;
     loop {
-        crate::kernel::wait(core::ptr::addr_of!(PARK_TOKEN), Some(1_000_000), &mut || false);
+        crate::kernel::wait(core::ptr::addr_of!(PARK_TOKEN), None, &mut || false);
     }
 }
 

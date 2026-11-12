@@ -656,7 +656,7 @@ mod entrypoint_xnu_kext {
             kernel::wake(ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8);
             kernel::wait(
                 ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8,
-                Some(10_000),
+                None,
                 &mut || WORKER_EXITED.load(Ordering::Acquire),
             );
         }

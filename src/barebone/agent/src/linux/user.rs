@@ -125,7 +125,6 @@ fn leave() -> ! {
         syscall(CLOSE, descriptor as usize, 0, 0, 0, 0, 0);
     }
 
-    Arena::at(unsafe { ARENA }).gone();
     syscall(EXIT_GROUP, 0, 0, 0, 0, 0, 0);
 
     loop {}

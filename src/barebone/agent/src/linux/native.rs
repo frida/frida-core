@@ -443,10 +443,8 @@ pub fn free_dma(ptr: *mut u8, size: usize) {
 }
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-    let slice_us = timeout_us.map_or(LONGEST_WAIT_US, |us| us.min(LONGEST_WAIT_US));
-
     if !can_sleep() {
-        spin_until(check, slice_us);
+        spin_until(check, timeout_us);
         return;
     }
 
@@ -455,11 +453,16 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
     let mut waiter = [0usize; WAIT_ENTRY_WORDS];
     let waiter = queue_this_thread(&mut waiter, token);
 
-    unsafe { _prepare_to_wait_event(waiters, waiter, TASK_UNINTERRUPTIBLE) };
+    unsafe { _prepare_to_wait_event(waiters, waiter, TASK_IDLE) };
 
     if !check() {
-        let mut until = (slice_us as i64) * 1000;
-        unsafe { _schedule_hrtimeout_range(&mut until, WAKE_SLACK_NS, HRTIMER_MODE_REL) };
+        match timeout_us {
+            Some(us) => {
+                let mut until = (us as i64) * 1000;
+                unsafe { _schedule_hrtimeout_range(&mut until, WAKE_SLACK_NS, HRTIMER_MODE_REL) };
+            }
+            None => unsafe { _schedule() },
+        }
     }
 
     unsafe { _finish_wait(waiters, waiter) };
@@ -691,10 +694,10 @@ static PREEMPT_COUNT_AT: AtomicUsize = AtomicUsize::new(0);
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 static RCU_DEPTH_AT: AtomicUsize = AtomicUsize::new(0);
 
-fn spin_until(check: &mut dyn FnMut() -> bool, slice_us: u64) {
-    let deadline = monotonic_micros() + slice_us as i64;
+fn spin_until(check: &mut dyn FnMut() -> bool, timeout_us: Option<u64>) {
+    let deadline = timeout_us.map(|us| monotonic_micros() + us as i64);
 
-    while !check() && monotonic_micros() < deadline {
+    while !check() && deadline.is_none_or(|deadline| monotonic_micros() < deadline) {
         core::hint::spin_loop();
     }
 }
@@ -1170,11 +1173,10 @@ const PAGE_SIZE: usize = 4096;
 const TCR_T1SZ_SHIFT: u64 = 16;
 #[cfg(target_arch = "aarch64")]
 const TCR_T1SZ_MASK: u64 = 0x3f;
-const TASK_UNINTERRUPTIBLE: c_uint = 2;
+const TASK_IDLE: c_uint = 0x402;
 const TASK_NORMAL: c_uint = 3;
 const WAKE_EVERY_WAITER: c_int = 0;
 const WAKE_SLACK_NS: u64 = 50_000;
-const LONGEST_WAIT_US: u64 = 1_000_000;
 #[cfg(target_arch = "aarch64")]
 const SPIN_LOCKED: i32 = 1;
 #[cfg(target_arch = "aarch64")]

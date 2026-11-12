@@ -236,7 +236,7 @@ unsafe fn rec_mutex_try_acquire(impl_: &mut RecMutexImpl) -> bool {
 
 unsafe fn rec_mutex_wait(impl_: &mut RecMutexImpl) {
     while impl_.count.load(Ordering::Relaxed) != 0 {
-        wait_on(&impl_.count, &mut || impl_.count.load(Ordering::Relaxed) == 0);
+        wait_on(&impl_.count, None, &mut || impl_.count.load(Ordering::Relaxed) == 0);
     }
 }
 
@@ -361,7 +361,7 @@ unsafe fn rw_lock_reader_try_acquire(impl_: &mut RWLockImpl) -> bool {
 
 unsafe fn rw_lock_wait_for_writers(impl_: &mut RWLockImpl) {
     while impl_.state.load(Ordering::Relaxed) & RW_WRITER_LOCK_BIT != 0 {
-        wait_on(&impl_.state, &mut || {
+        wait_on(&impl_.state, None, &mut || {
             impl_.state.load(Ordering::Relaxed) & RW_WRITER_LOCK_BIT == 0
         });
     }
@@ -369,7 +369,7 @@ unsafe fn rw_lock_wait_for_writers(impl_: &mut RWLockImpl) {
 
 unsafe fn rw_lock_wait_for_all(impl_: &mut RWLockImpl) {
     while impl_.state.load(Ordering::Relaxed) != 0 {
-        wait_on(&impl_.state, &mut || impl_.state.load(Ordering::Relaxed) == 0);
+        wait_on(&impl_.state, None, &mut || impl_.state.load(Ordering::Relaxed) == 0);
     }
 }
 
@@ -395,7 +395,7 @@ pub extern "C" fn g_cond_wait(cond: *mut GCond, mutex: *mut GMutex) {
 
         let impl_ = cond_impl(cond);
         while impl_.generation.load(Ordering::Acquire) == seen {
-            wait_on(&impl_.generation, &mut || {
+            wait_on(&impl_.generation, None, &mut || {
                 impl_.generation.load(Ordering::Acquire) != seen
             });
         }
@@ -431,11 +431,13 @@ pub extern "C" fn g_cond_wait_until(cond: *mut GCond, mutex: *mut GMutex, end_ti
 
         let impl_ = cond_impl(cond);
         let mut signalled = impl_.generation.load(Ordering::Acquire) != seen;
-        while !signalled && crate::kernel::monotonic_micros() < end_time {
-            wait_on(&impl_.generation, &mut || {
+        let mut now = crate::kernel::monotonic_micros();
+        while !signalled && now < end_time {
+            wait_on(&impl_.generation, Some((end_time - now) as u64), &mut || {
                 impl_.generation.load(Ordering::Acquire) != seen
             });
             signalled = impl_.generation.load(Ordering::Acquire) != seen;
+            now = crate::kernel::monotonic_micros();
         }
 
         g_mutex_lock(mutex);
@@ -620,7 +622,7 @@ pub extern "C" fn _g_system_thread_wait(thread: *mut GSystemThread) {
         let system_thread = thread as *mut SystemThreadImpl;
 
         while (*system_thread).thread_id.load(Ordering::Acquire) == 0 {
-            wait_on(&(*system_thread).thread_id, &mut || {
+            wait_on(&(*system_thread).thread_id, None, &mut || {
                 (*system_thread).thread_id.load(Ordering::Acquire) != 0
             });
         }
@@ -645,7 +647,7 @@ unsafe fn cleanup_wrapper_data(wrapper_data: *mut ThreadWrapperData) {
 
 unsafe fn lock_acquire(lock: &AtomicU32) {
     while !unsafe { lock_try_acquire(lock) } {
-        wait_on(lock, &mut || lock.load(Ordering::Relaxed) == 0);
+        wait_on(lock, None, &mut || lock.load(Ordering::Relaxed) == 0);
     }
 }
 
@@ -659,18 +661,11 @@ unsafe fn lock_release(lock: &AtomicU32) {
     wake_waiters(lock);
 }
 
-// Sleeps until `ready` holds or the slice expires, whichever comes first.
-//
-// These used to spin on wfe/sev. A kernel thread that spins never reaches the
-// scheduler, so a lost wakeup — or a genuine deadlock, which is how we found this —
-// starves the CPU it is on until the hardware watchdog takes the machine down. The
-// bounded sleep turns both into a stall that can be observed instead.
-//
 // The address of the word being waited on names the wait channel: XNU pairs
 // assert_wait()/thread_wakeup() on it directly. Every caller re-checks its own
 // condition in a loop, so a spurious wakeup costs nothing either way.
-fn wait_on<T>(word: &T, ready: &mut dyn FnMut() -> bool) {
-    crate::kernel::wait(token_of(word), Some(WAIT_SLICE_US), ready);
+fn wait_on<T>(word: &T, timeout_us: Option<u64>, ready: &mut dyn FnMut() -> bool) {
+    crate::kernel::wait(token_of(word), timeout_us, ready);
 
     // The wait above returns without sleeping whenever `ready` already holds, so on
     // its own it is not enough to keep a contended loop off the CPU: every caller
@@ -687,4 +682,3 @@ fn token_of<T>(word: &T) -> *const u8 {
     word as *const T as *const u8
 }
 
-const WAIT_SLICE_US: u64 = 1000;

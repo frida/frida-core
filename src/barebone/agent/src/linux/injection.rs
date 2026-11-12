@@ -1,6 +1,7 @@
 use core::ffi::{c_int, c_void};
 use core::ptr;
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 
 #[cfg(not(target_arch = "x86"))]
@@ -63,17 +64,28 @@ fn take_what_the_copy_opened(placed: &mut Placement) {
     let copy = COPY_TASK.load(core::sync::atomic::Ordering::Acquire) as *mut c_void;
     placed.says = native::take_the_file_of(copy, says_fd);
     placed.hears = native::take_the_file_of(copy, hears_fd);
-    listen_to_the_copy(placed.says);
+    listen_to_the_copy(placed);
 }
 
-fn listen_to_the_copy(says: *mut c_void) {
-    native::spawn_thread(carry_what_the_copy_says, says);
+fn listen_to_the_copy(placed: &Placement) {
+    let listener = Box::into_raw(Box::new(Listener { says: placed.says, arena: placed.arena }));
+    native::spawn_thread(carry_what_the_copy_says, listener as *mut c_void);
 }
 
 unsafe extern "C" fn carry_what_the_copy_says(argument: *mut c_void, _reason: i32) {
-    while native::wait_for_a_word(argument) {
+    let listener = unsafe { Box::from_raw(argument as *mut Listener) };
+
+    while native::wait_for_a_word(listener.says) {
         crate::nudge_the_loop(crate::glib::wakeup_token());
     }
+
+    Arena::at(listener.arena).gone();
+    crate::nudge_the_loop(crate::glib::wakeup_token());
+}
+
+struct Listener {
+    says: *mut c_void,
+    arena: usize,
 }
 
 struct Placement {
@@ -1070,9 +1082,8 @@ fn ask_it_to_leave(placed: &Placement) {
     arena.tell_it_to_go();
     wake_the_copy(placed);
 
-    let waited_on = &placed.arena as *const usize as *const u8;
     while !arena.has_gone() {
-        native::wait(waited_on, Some(LEAVING_GRACE_US), &mut || arena.has_gone());
+        native::wait(crate::glib::wakeup_token(), None, &mut || arena.has_gone());
     }
 }
 
@@ -1099,7 +1110,6 @@ fn take_back_what_it_was_given(placed: &Placement, memory: *mut c_void) {
     }
 }
 
-const LEAVING_GRACE_US: u64 = 100_000;
 
 pub fn tell_the_copy(id: u32) {
     let Some(placed) = (unsafe { placements() }).get(&id) else {
