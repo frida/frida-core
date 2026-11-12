@@ -510,9 +510,7 @@ def compile(privdir: Path, state: State):
         if not (workdir / "build.ninja").exists():
             if options is None:
                 options = load_meson_options(top_builddir, state.role, set(subprojects.keys()))
-                version_opt = next((opt for opt in options if opt.startswith("-Dfrida_version=")), None)
-                if version_opt is None:
-                    options += [f"-Dfrida_version={state.frida_version}"]
+                options += [f"-D:frida_version={state.frida_version}"]
 
             host_machine = MachineSpec(state.host_os, group.arch, state.host_config, group.triplet)
 
