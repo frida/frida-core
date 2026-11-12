@@ -5,6 +5,7 @@ payload_sources = [
   'script-engine.vala',
   'portal-client.vala',
   'fork-monitor.vala',
+  'fork-monitor-glue.c',
   'spawn-monitor.vala',
   'spawn-monitor-glue.c',
   'thread-suspend-monitor.vala',
