@@ -1246,7 +1246,7 @@ namespace Frida {
 		}
 
 		private static async Json.Reader? try_open_already_installed_manifest (PackageNode node, File dir, Cancellable? cancellable)
-				throws Efni.Error, IOError {
+				throws IOError {
 			try {
 				Json.Reader r = yield load_json (dir.get_child ("package.json"), cancellable);
 
@@ -1263,6 +1263,8 @@ namespace Frida {
 
 				return r;
 			} catch (Error e) {
+				return null;
+			} catch (Efni.Error e) {
 				return null;
 			}
 		}
@@ -2254,6 +2256,8 @@ namespace Frida {
 				try {
 					yield tar_reader.feed (buffer[:n], cancellable);
 				} catch (Error e) {
+					throw new Error.PROTOCOL ("Unable to extract tarball at %s: %s", tarball_url, e.message);
+				} catch (Efni.Error e) {
 					throw new Error.PROTOCOL ("Unable to extract tarball at %s: %s", tarball_url, e.message);
 				}
 				read_total += (size_t) n;
