@@ -1,5 +1,4 @@
 use core::ffi::{c_char, c_int, c_uint, c_void};
-use core::ptr;
 use core::ptr::read_volatile;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -443,7 +442,7 @@ pub fn free_dma(ptr: *mut u8, size: usize) {
     free(ptr, size);
 }
 
-pub fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
     let slice_us = timeout_us.map_or(LONGEST_WAIT_US, |us| us.min(LONGEST_WAIT_US));
 
     if !can_sleep() {
@@ -454,7 +453,7 @@ pub fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() 
     let waiters = waiters();
 
     let mut waiter = [0usize; WAIT_ENTRY_WORDS];
-    let waiter = queue_this_thread(&mut waiter);
+    let waiter = queue_this_thread(&mut waiter, token);
 
     unsafe { _prepare_to_wait_event(waiters, waiter, TASK_UNINTERRUPTIBLE) };
 
@@ -466,18 +465,19 @@ pub fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() 
     unsafe { _finish_wait(waiters, waiter) };
 }
 
-pub fn wake(_token: *const u8) {
-    unsafe { ___wake_up(waiters(), TASK_NORMAL, WAKE_EVERY_WAITER, ptr::null_mut()) };
+pub fn wake(token: *const u8) {
+    unsafe { ___wake_up(waiters(), TASK_NORMAL, WAKE_EVERY_WAITER, token as *mut c_void) };
 }
 
 pub fn poke_loop_wakeup() {}
 
-fn queue_this_thread(entry: &mut [usize; WAIT_ENTRY_WORDS]) -> *mut c_void {
+fn queue_this_thread(entry: &mut [usize; WAIT_ENTRY_WORDS], token: *const u8) -> *mut c_void {
     let entry = entry.as_mut_ptr();
 
     unsafe {
         entry.add(WAIT_ENTRY_THREAD).write(current_task() as usize);
-        entry.add(WAIT_ENTRY_WAKE).write(_autoremove_wake_function as usize);
+        entry.add(WAIT_ENTRY_WAKE).write(waking_function());
+        entry.add(WAIT_ENTRY_TOKEN).write(token as usize);
 
         let queued = entry.add(WAIT_ENTRY_QUEUED);
         queued.write(queued as usize);
@@ -486,6 +486,37 @@ fn queue_this_thread(entry: &mut [usize; WAIT_ENTRY_WORDS]) -> *mut c_void {
 
     entry as *mut c_void
 }
+
+#[cfg(target_arch = "aarch64")]
+fn waking_function() -> usize {
+    let ref_fn = unsafe { _autoremove_wake_function } as usize;
+    kcfi_thunk_cached(&WAKE_THUNK, frida_cb_wake as *const () as usize, Some(ref_fn))
+}
+
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86")))]
+fn waking_function() -> usize {
+    frida_cb_wake as *const () as usize
+}
+
+#[cfg(target_arch = "x86")]
+fn waking_function() -> usize {
+    unsafe { _autoremove_wake_function as usize }
+}
+
+#[cfg(not(target_arch = "x86"))]
+unsafe extern "C" fn frida_cb_wake(entry: *mut c_void, mode: c_uint, flags: c_int, key: *mut c_void) -> c_int {
+    let awaited = unsafe { (entry as *const usize).add(WAIT_ENTRY_TOKEN).read() };
+    if key as usize != awaited {
+        return 0;
+    }
+
+    let wake_this_one: unsafe extern "C" fn(*mut c_void, c_uint, c_int, *mut c_void) -> c_int =
+        unsafe { core::mem::transmute(_autoremove_wake_function) };
+    unsafe { wake_this_one(entry, mode, flags, key) }
+}
+
+#[cfg(target_arch = "aarch64")]
+static WAKE_THUNK: AtomicUsize = AtomicUsize::new(0);
 
 fn waiters() -> *mut c_void {
     let queue = (&raw mut WAITERS) as *mut c_void;
@@ -545,7 +576,7 @@ fn pci_irq_vector() -> Option<unsafe extern "C" fn(*mut c_void, c_uint) -> c_int
 #[cfg(target_arch = "arm")]
 pub fn mmio_interrupt(mmio_base: u64) -> Option<u32> {
     let path = alloc::format!("/virtio_mmio@{:x}\0", mmio_base);
-    let node = unsafe { _of_find_node_opts_by_path(path.as_ptr() as *const c_char, ptr::null_mut()) };
+    let node = unsafe { _of_find_node_opts_by_path(path.as_ptr() as *const c_char, core::ptr::null_mut()) };
     if node.is_null() {
         return None;
     }
@@ -1163,6 +1194,7 @@ const WAIT_ENTRY_WORDS: usize = 8;
 const WAIT_ENTRY_THREAD: usize = 1;
 const WAIT_ENTRY_WAKE: usize = 2;
 const WAIT_ENTRY_QUEUED: usize = 3;
+const WAIT_ENTRY_TOKEN: usize = WAIT_ENTRY_WORDS - 1;
 const WAIT_QUEUE_WORDS: usize = 16;
 const LOCK_KEY_WORDS: usize = 8;
 #[cfg(target_arch = "aarch64")]

@@ -667,9 +667,8 @@ unsafe fn lock_release(lock: &AtomicU32) {
 // bounded sleep turns both into a stall that can be observed instead.
 //
 // The address of the word being waited on names the wait channel: XNU pairs
-// assert_wait()/thread_wakeup() on it directly, while the Linux shim has a single
-// channel and treats it as a hint. Every caller re-checks its own condition in a
-// loop, so a spurious wakeup costs nothing either way.
+// assert_wait()/thread_wakeup() on it directly. Every caller re-checks its own
+// condition in a loop, so a spurious wakeup costs nothing either way.
 fn wait_on<T>(word: &T, ready: &mut dyn FnMut() -> bool) {
     crate::kernel::wait(token_of(word), Some(WAIT_SLICE_US), ready);
 

@@ -940,7 +940,7 @@ pub unsafe extern "C" fn frida_cb_exec(_data: *mut c_void, task: *mut c_void, _w
         ((program as usize + at) as *const *const u8).read()
     });
 
-    native::wake(task as *const u8);
+    native::wake(crate::glib::wakeup_token());
 }
 
 #[cfg(not(target_arch = "x86"))]
@@ -977,7 +977,7 @@ unsafe extern "C" fn frida_replaced_set_task_comm(task: *mut c_void, buf: *const
         if let Some(id) = id_of(task as usize) {
             native::send_signal(STOP, task as usize);
             super::spawn::note_pending_spawn(id, name.to_bytes());
-            native::wake(ptr::null());
+            native::wake(crate::glib::wakeup_token());
         }
     }
 
