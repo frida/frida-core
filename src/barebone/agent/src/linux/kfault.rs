@@ -3,6 +3,8 @@ use core::ffi::{c_int, c_void};
 use core::ffi::c_long;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use core::ptr;
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::bindings::{
     gum_barebone_handle_exception, GumCpuContext,
@@ -322,10 +324,15 @@ pub fn install() {
         _patch_text(addr.add(1) as *mut c_void, frida_arm_fixup as *const () as usize as u32);
         _patch_text(addr as *mut c_void, 0xe51ff004);
     }
+    ACTIVATED.store(true, Ordering::Release);
 }
 
 #[cfg(target_arch = "arm")]
 pub fn uninstall() {
+    if !ACTIVATED.swap(false, Ordering::AcqRel) {
+        return;
+    }
+
     let target = unsafe { _fixup_exception } as *mut u32;
     unsafe {
         _patch_text(target.add(1) as *mut c_void, PROLOGUE[1]);
@@ -437,6 +444,9 @@ unsafe extern "C" {
 #[cfg(target_arch = "aarch64")]
 const PROLOGUE: [u32; 4] = [0xd503233f, 0xa9be7bfd, 0x910003fd, 0xa90153f3];
 
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+static ACTIVATED: AtomicBool = AtomicBool::new(false);
+
 #[cfg(target_arch = "aarch64")]
 #[unsafe(no_mangle)]
 static mut FRIDA_ARM64_ORIGINAL_CONT: u64 = 0;
@@ -452,7 +462,7 @@ pub fn install() {
 
     unsafe { FRIDA_ARM64_ORIGINAL_CONT = target.add(4) as u64 };
 
-    let jump = detour_to(frida_arm64_fixup as *const () as usize);
+    let jump = redirect_to(frida_arm64_fixup as *const () as usize);
     unsafe {
         let addr = target as *mut u32;
         _aarch64_insn_patch_text_nosync(addr.add(2) as *mut c_void, jump[2]);
@@ -460,10 +470,15 @@ pub fn install() {
         _aarch64_insn_patch_text_nosync(addr.add(1) as *mut c_void, jump[1]);
         _aarch64_insn_patch_text_nosync(addr as *mut c_void, jump[0]);
     }
+    ACTIVATED.store(true, Ordering::Release);
 }
 
 #[cfg(target_arch = "aarch64")]
 pub fn uninstall() {
+    if !ACTIVATED.swap(false, Ordering::AcqRel) {
+        return;
+    }
+
     let target = unsafe { _fixup_exception } as *mut u32;
     unsafe {
         for slot in 0..4 {
@@ -473,7 +488,7 @@ pub fn uninstall() {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn detour_to(destination: usize) -> [u32; 4] {
+fn redirect_to(destination: usize) -> [u32; 4] {
     [0x58000050, 0xd61f0200, destination as u32, (destination >> 32) as u32]
 }
 
