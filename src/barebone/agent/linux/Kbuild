@@ -11,5 +11,6 @@ ccflags-y += $(call frida-header-has,include/linux/sched.h,list_head[[:space:]]*
 ccflags-y += $(call frida-header-has,include/linux/sched/signal.h,int[[:space:]]*quick_threads;,FRIDA_HAVE_SIGNAL_QUICK_THREADS)
 ccflags-y += $(call frida-header-has,include/linux/fs_struct.h,spinlock_t[[:space:]]*lock;,FRIDA_HAVE_FS_STRUCT_LOCK)
 ccflags-y += $(call frida-header-has,arch/$(SRCARCH)/include/asm/current.h,struct[[:space:]]*pcpu_hot[[:space:]]*{,FRIDA_HAVE_PCPU_HOT)
+ccflags-y += $(call frida-header-has,arch/$(SRCARCH)/include/asm/processor.h,vl_onexec\[ARM64_VEC_MAX\],FRIDA_HAVE_VECTOR_LENGTHS)
 
 $(obj)/frida-agent-image.o: $(FRIDA_AGENT_IMAGE)

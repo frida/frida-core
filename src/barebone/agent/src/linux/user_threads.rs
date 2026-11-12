@@ -186,11 +186,26 @@ fn adopt_context_of(child: usize, leader: usize, layout: &ThreadGroupLayout) {
             write_word(child + undo.list, undo_list);
         }
     }
+
+    #[cfg(target_arch = "aarch64")]
+    if let Some(lengths) = &layout.vector_lengths {
+        adopt_vector_lengths(child, leader, lengths);
+    }
 }
 
 fn release_cred(cred: usize, layout: &ThreadGroupLayout) {
     if let_go(cred + layout.cred_usage) {
         unsafe { (layout.calls.put_cred)(cred as *mut c_void) };
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn adopt_vector_lengths(child: usize, leader: usize, lengths: &VectorLengthLayout) {
+    for array in [lengths.current, lengths.on_exec] {
+        for kind in 0..VECTOR_KINDS {
+            let at = array + kind * size_of::<u32>();
+            write_i32(child + at, read_i32(leader + at));
+        }
     }
 }
 
@@ -221,6 +236,8 @@ struct ThreadGroupLayout {
     cred_usage: usize,
     nsproxy_count: usize,
     semaphore_undo: Option<SemaphoreUndoLayout>,
+    #[cfg(target_arch = "aarch64")]
+    vector_lengths: Option<VectorLengthLayout>,
 }
 
 struct ThreadGroupCalls {
@@ -276,6 +293,12 @@ struct SemaphoreUndoLayout {
     refcnt: usize,
 }
 
+#[cfg(target_arch = "aarch64")]
+struct VectorLengthLayout {
+    current: usize,
+    on_exec: usize,
+}
+
 fn describe_thread_group() -> Option<ThreadGroupLayout> {
     Some(ThreadGroupLayout {
         calls: unsafe {
@@ -327,6 +350,8 @@ fn describe_thread_group() -> Option<ThreadGroupLayout> {
         cred_usage: field_offset("cred", "usage")?,
         nsproxy_count: field_offset("nsproxy", "count")?,
         semaphore_undo: describe_semaphore_undo(),
+        #[cfg(target_arch = "aarch64")]
+        vector_lengths: describe_vector_lengths(),
     })
 }
 
@@ -337,10 +362,21 @@ fn describe_semaphore_undo() -> Option<SemaphoreUndoLayout> {
     })
 }
 
+#[cfg(target_arch = "aarch64")]
+fn describe_vector_lengths() -> Option<VectorLengthLayout> {
+    Some(VectorLengthLayout {
+        current: field_offset("task_struct", "thread.vl")?,
+        on_exec: field_offset("task_struct", "thread.vl_onexec")?,
+    })
+}
+
 #[cfg(target_arch = "x86_64")]
 const THREAD_POINTER_FIELD: &str = "thread.fsbase";
 #[cfg(target_arch = "aarch64")]
 const THREAD_POINTER_FIELD: &str = "thread.uw.tp_value";
+
+#[cfg(target_arch = "aarch64")]
+const VECTOR_KINDS: usize = 2;
 
 fn read_word(address: usize) -> usize {
     unsafe { (address as *const usize).read() }

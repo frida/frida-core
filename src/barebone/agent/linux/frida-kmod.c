@@ -266,6 +266,10 @@ static const struct frida_layout_entry frida_kmod_layout[] =
 #ifdef CONFIG_ARM64
   FRIDA_FIELD (task_struct, thread.uw.tp_value),
 #endif
+#ifdef FRIDA_HAVE_VECTOR_LENGTHS
+  FRIDA_FIELD (task_struct, thread.vl),
+  FRIDA_FIELD (task_struct, thread.vl_onexec),
+#endif
   FRIDA_FIELD (signal_struct, nr_threads),
 #ifdef FRIDA_HAVE_SIGNAL_QUICK_THREADS
   FRIDA_FIELD (signal_struct, quick_threads),
