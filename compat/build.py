@@ -525,7 +525,7 @@ def compile(privdir: Path, state: State):
                 forwarded_options = [o for o in options if not is_stripped_compat_option(o)]
                 forwarded_options += ["-Ddefault_library=static"]
             else:
-                forwarded_options = [o for o in options if not is_overridden_compat_option(o)]
+                forwarded_options = list(options)
             if state.apple_tls == "enabled":
                 forwarded_options += ["-Dapple_tls=disabled"]
 
@@ -576,15 +576,8 @@ def compile(privdir: Path, state: State):
 
 
 def is_stripped_compat_option(o: str) -> bool:
-    if is_overridden_compat_option(o):
-        return True
     name = o.split("=", 1)[0].removeprefix("-D")
     return name in STRIPPED_COMPAT_OPTIONS or name.endswith(":default_library")
-
-
-def is_overridden_compat_option(o: str) -> bool:
-    name = o.split("=", 1)[0].removeprefix("-D")
-    return name in OVERRIDDEN_COMPAT_OPTIONS
 
 
 def load_meson_options(top_builddir: Path,
@@ -618,7 +611,7 @@ def option_should_be_forwarded(k: "OptionKey",
 
     if optstore.is_project_option(k):
         if is_for_us:
-            if k.name == "compiler_backend":
+            if k.name in {"compiler_backend", "assets"}:
                 return False
             tokens = k.name.split("_")
             if tokens[0] in {"helper", "agent"} and tokens[-1] in {"modern", "legacy"}:
@@ -796,17 +789,6 @@ STRIPPED_COMPAT_OPTIONS = {
     "default_library",
     "frida-gum:gumjs",
     "frida-gum:inspector",
-}
-
-OVERRIDDEN_COMPAT_OPTIONS = {
-    "compiler_backend",
-    "assets",
-    "helper_modern",
-    "helper_legacy",
-    "agent_modern",
-    "agent_legacy",
-    "agent_emulated_modern",
-    "agent_emulated_legacy",
 }
 
 HELPER_TARGET = "frida-helper"
