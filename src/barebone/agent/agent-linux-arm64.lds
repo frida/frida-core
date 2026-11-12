@@ -35,6 +35,12 @@ SECTIONS {
     _modules = .; . += 8;
     _register_module_notifier = .; . += 8;
     _unregister_module_notifier = .; . += 8;
+    _frida_kmod_link_open = .; . += 8;
+    _frida_kmod_link_close = .; . += 8;
+    _frida_kmod_link_send = .; . += 8;
+    _frida_kmod_link_recv = .; . += 8;
+    _frida_kmod_link_pending = .; . += 8;
+    _frida_kmod_exit_worker = .; . += 8;
     _execmem_free = .; . += 8;
     _module_alloc = .; . += 8;
     _module_memfree = .; . += 8;

@@ -658,3 +658,57 @@ frida_kcb_die (void * nb, unsigned long action, void * data)
 {
   return frida_cb_die (nb, action, data);
 }
+
+extern void * _frida_kmod_link_open;
+
+int frida_k_frida_kmod_link_open (void)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (void);
+
+  return ((fn_t) _frida_kmod_link_open) ();
+}
+
+extern void * _frida_kmod_link_close;
+
+void frida_k_frida_kmod_link_close (void)
+{
+  typedef void (__attribute__ ((regparm (3))) * fn_t) (void);
+
+  ((fn_t) _frida_kmod_link_close) ();
+}
+
+extern void * _frida_kmod_link_send;
+
+int frida_k_frida_kmod_link_send (const void * data, unsigned long size)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (const void *, unsigned long);
+
+  return ((fn_t) _frida_kmod_link_send) (data, size);
+}
+
+extern void * _frida_kmod_link_recv;
+
+long frida_k_frida_kmod_link_recv (void * data, unsigned long size)
+{
+  typedef long (__attribute__ ((regparm (3))) * fn_t) (void *, unsigned long);
+
+  return ((fn_t) _frida_kmod_link_recv) (data, size);
+}
+
+extern void * _frida_kmod_link_pending;
+
+_Bool frida_k_frida_kmod_link_pending (void)
+{
+  typedef _Bool (__attribute__ ((regparm (3))) * fn_t) (void);
+
+  return ((fn_t) _frida_kmod_link_pending) ();
+}
+
+extern void * _frida_kmod_exit_worker;
+
+void frida_k_frida_kmod_exit_worker (void)
+{
+  typedef void (__attribute__ ((regparm (3))) * fn_t) (void);
+
+  ((fn_t) _frida_kmod_exit_worker) ();
+}

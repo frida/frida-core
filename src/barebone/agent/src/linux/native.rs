@@ -47,6 +47,12 @@ pub fn release_fault_reporter() {
     super::kfault::uninstall();
 }
 
+pub fn hand_back_to_the_loader() {
+    if unsafe { _frida_kmod_exit_worker } != 0 {
+        unsafe { frida_kmod_exit_worker() };
+    }
+}
+
 pub fn send_signal(signal: c_int, task: usize) {
     unsafe { _send_sig(signal, task as *mut c_void, 1) };
 }
@@ -865,6 +871,19 @@ struct Timespec64 {
 }
 
 type KthreadFn = unsafe extern "C" fn(data: *mut c_void) -> c_int;
+
+unsafe extern "C" {
+    static _frida_kmod_exit_worker: usize;
+    #[cfg(target_arch = "x86")]
+    #[link_name = "frida_k_frida_kmod_exit_worker"]
+    fn frida_kmod_exit_worker() -> !;
+}
+
+#[cfg(not(target_arch = "x86"))]
+unsafe fn frida_kmod_exit_worker() -> ! {
+    let exit: unsafe extern "C" fn() -> ! = unsafe { core::mem::transmute(_frida_kmod_exit_worker) };
+    unsafe { exit() }
+}
 type IrqHandlerFn = unsafe extern "C" fn(irq: c_int, cookie: *mut c_void) -> c_int;
 
 unsafe extern "C" {

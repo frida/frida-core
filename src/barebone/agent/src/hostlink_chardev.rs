@@ -6,6 +6,7 @@
 // stream; whoever opens the device decides how it reaches the host.
 
 use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::ffi::{c_int, c_void};
 
 use alloc::vec::Vec;
@@ -30,6 +31,7 @@ impl Hostlink {
         if unsafe { frida_kmod_link_open() } != 0 {
             return Err(());
         }
+        LINK_OPEN.store(true, Ordering::Release);
 
         Ok(Hostlink {
             state: UnsafeCell::new(Inner {
@@ -97,25 +99,55 @@ impl Hostlink {
 
 impl Drop for Hostlink {
     fn drop(&mut self) {
+        LINK_OPEN.store(false, Ordering::Release);
         unsafe { frida_kmod_link_close() };
     }
 }
 
-#[cfg(feature = "xnu-kext")]
 pub fn a_turn_is_wanted() -> bool {
-    unsafe { frida_kmod_link_pending() }
+    LINK_OPEN.load(Ordering::Acquire) && unsafe { frida_kmod_link_pending() }
 }
+
+static LINK_OPEN: AtomicBool = AtomicBool::new(false);
 
 fn recv_nonblocking(dst: &mut [u8]) -> usize {
     let n = unsafe { frida_kmod_link_recv(dst.as_mut_ptr() as *mut c_void, dst.len()) };
     if n <= 0 { 0 } else { n as usize }
 }
 
+#[cfg(feature = "xnu-kext")]
 unsafe extern "C" {
     fn frida_kmod_link_open() -> c_int;
     fn frida_kmod_link_close();
     fn frida_kmod_link_send(data: *const c_void, size: usize) -> c_int;
     fn frida_kmod_link_recv(data: *mut c_void, size: usize) -> isize;
-    #[cfg(feature = "xnu-kext")]
+    fn frida_kmod_link_pending() -> bool;
+}
+
+#[cfg(all(feature = "linux-injected", not(target_arch = "x86")))]
+unsafe extern "C" {
+    #[link_name = "_frida_kmod_link_open"]
+    static frida_kmod_link_open: unsafe extern "C" fn() -> c_int;
+    #[link_name = "_frida_kmod_link_close"]
+    static frida_kmod_link_close: unsafe extern "C" fn();
+    #[link_name = "_frida_kmod_link_send"]
+    static frida_kmod_link_send: unsafe extern "C" fn(*const c_void, usize) -> c_int;
+    #[link_name = "_frida_kmod_link_recv"]
+    static frida_kmod_link_recv: unsafe extern "C" fn(*mut c_void, usize) -> isize;
+    #[link_name = "_frida_kmod_link_pending"]
+    static frida_kmod_link_pending: unsafe extern "C" fn() -> bool;
+}
+
+#[cfg(all(feature = "linux-injected", target_arch = "x86"))]
+unsafe extern "C" {
+    #[link_name = "frida_k_frida_kmod_link_open"]
+    fn frida_kmod_link_open() -> c_int;
+    #[link_name = "frida_k_frida_kmod_link_close"]
+    fn frida_kmod_link_close();
+    #[link_name = "frida_k_frida_kmod_link_send"]
+    fn frida_kmod_link_send(data: *const c_void, size: usize) -> c_int;
+    #[link_name = "frida_k_frida_kmod_link_recv"]
+    fn frida_kmod_link_recv(data: *mut c_void, size: usize) -> isize;
+    #[link_name = "frida_k_frida_kmod_link_pending"]
     fn frida_kmod_link_pending() -> bool;
 }

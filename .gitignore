@@ -6,7 +6,7 @@
 /src/barebone/agent/linux/*.mod
 /src/barebone/agent/linux/*.mod.c
 /src/barebone/agent/linux/*.o
-/src/barebone/agent/linux/*.o.bin
+/src/barebone/agent/linux/frida-agent.elf
 /src/barebone/agent/linux/.*.cmd
 /src/barebone/agent/linux/Module.symvers
 /src/barebone/agent/linux/modules.order

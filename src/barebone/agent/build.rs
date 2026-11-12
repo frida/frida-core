@@ -47,8 +47,6 @@ fn main() {
         .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings");
 
-    // The Linux flavour is a staticlib: kbuild owns the final link, so it — not
-    // us — decides where the devkit and libc archives come from.
     if env::var("CARGO_FEATURE_BLOB").is_ok() {
         println!(
             "cargo:rustc-link-search=native={}",
@@ -89,6 +87,10 @@ fn main() {
         // references the entrypoint the host calls; keep the linker from
         // dropping it along with the rest of the unreferenced archive members.
         println!("cargo:rustc-link-arg=--undefined=_start");
+        if env::var("CARGO_FEATURE_LINUX_INJECTED").is_ok() {
+            println!("cargo:rustc-link-arg=--undefined=frida_agent_wake");
+            println!("cargo:rustc-link-arg=--undefined=frida_agent_stop");
+        }
 
         let note = compile_version_note(&out_dir, cc, &cc_args, arch);
         println!("cargo:rustc-link-arg={}", note.to_string_lossy());

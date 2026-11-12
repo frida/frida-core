@@ -4,15 +4,11 @@
     feature = "xnu-core",
     feature = "win9x",
     feature = "winnt",
-    feature = "linux",
     feature = "linux-injected"
 )))]
 compile_error!(
-    "pick a flavor: --features xnu, --features win9x, --features winnt, --features linux or --features linux-injected"
+    "pick a flavor: --features xnu, --features win9x, --features winnt or --features linux-injected"
 );
-
-#[cfg(all(feature = "blob", feature = "linux"))]
-compile_error!("pick one flavour, not both");
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -58,17 +54,15 @@ mod ring;
 
 pub mod kernel;
 
-#[cfg(feature = "linux")]
-mod gum_linux;
 #[cfg(feature = "linux-injected")]
 mod gum_btf;
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 mod gum_modules;
-#[cfg(any(feature = "linux", feature = "xnu-kext"))]
+#[cfg(any(feature = "linux-injected", feature = "xnu-kext"))]
 mod hostlink_chardev;
 #[cfg(any(feature = "linux-injected", feature = "xnu-core"))]
 mod heap;
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 mod linux;
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
@@ -269,6 +263,19 @@ mod entrypoint_blob {
         unsafe { enter(config_data, config_size) }
     }
 
+    #[cfg(feature = "linux-injected")]
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frida_agent_wake() {
+        nudge_the_loop(ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8);
+    }
+
+    #[cfg(feature = "linux-injected")]
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frida_agent_stop() {
+        STOP_REQUESTED.store(true, Ordering::Release);
+        frida_agent_wake();
+    }
+
     unsafe fn enter(config_data: *const u8, config_size: usize) {
         unsafe {
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
@@ -342,6 +349,10 @@ mod entrypoint_blob {
                     linux::hostlink_pipe_goldfish::Hostlink::init(&path, Some(on_frame_from_host), wake_token)
                         .unwrap(),
                 ),
+                #[cfg(feature = "linux-injected")]
+                TransportConfig::CharDevice => Transport::CharDevice(
+                    hostlink_chardev::Hostlink::init(Some(on_frame_from_host)).unwrap(),
+                ),
                 #[cfg(feature = "xnu-core")]
                 TransportConfig::Vsock { host_port } => Transport::Vsock(
                     hostlink_vsock::Hostlink::init(host_port, Some(on_frame_from_host), wake_token)
@@ -384,6 +395,8 @@ mod entrypoint_blob {
 
             (&raw mut frida_agent_left).write_volatile(1);
 
+            #[cfg(feature = "linux-injected")]
+            kernel::hand_back_to_the_loader();
         }
     }
 
@@ -474,6 +487,12 @@ mod entrypoint_blob {
                     }
                     #[cfg(not(feature = "linux-injected"))]
                     { panic!("pipe-goldfish is linux-injected's") }
+                }
+                6 => {
+                    #[cfg(feature = "linux-injected")]
+                    { TransportConfig::CharDevice }
+                    #[cfg(not(feature = "linux-injected"))]
+                    { panic!("the character device is linux-injected's") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -678,94 +697,6 @@ mod entrypoint_xnu_kext {
     }
 }
 
-#[cfg(feature = "linux")]
-mod entrypoint_linux {
-    use super::*;
-    use core::ffi::c_int;
-    use core::sync::atomic::AtomicBool;
-
-    static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
-    static WORKER_EXITED: AtomicBool = AtomicBool::new(false);
-
-    /// Called from the module's init path. Everything interesting happens on our
-    /// own kernel thread: `insmod` runs with the module mutex held, and bringing
-    /// up Gum plus connecting to the host both block.
-    #[unsafe(no_mangle)]
-    pub extern "C" fn frida_agent_start(own_base: u64, own_size: u64) -> c_int {
-        kernel::log("frida: agent starting\n\0");
-
-        unsafe {
-            OWN_RANGE = GumMemoryRange {
-                base_address: own_base,
-                size: own_size as gsize,
-            };
-        }
-
-        if kernel::spawn_thread(worker, ptr::null_mut()) != 0 {
-            kernel::log("frida: failed to spawn worker\n\0");
-            return -1;
-        }
-
-        0
-    }
-
-    /// Called from the module's exit path, which must not return until the worker
-    /// is off our text — the module's pages go away right after.
-    #[unsafe(no_mangle)]
-    pub extern "C" fn frida_agent_stop() {
-        kernel::log("frida: agent stopping\n\0");
-
-        STOP_REQUESTED.store(true, Ordering::Release);
-
-        while !WORKER_EXITED.load(Ordering::Acquire) {
-            kernel::wake(ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8);
-            kernel::wait(
-                ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8,
-                Some(10_000),
-                &mut || WORKER_EXITED.load(Ordering::Acquire),
-            );
-        }
-
-        kernel::log("frida: agent stopped\n\0");
-    }
-
-    pub fn stop_requested() -> bool {
-        STOP_REQUESTED.load(Ordering::Acquire)
-    }
-
-    unsafe extern "C" fn worker(_parameter: *mut c_void, _wait_result: i32) {
-        unsafe {
-            kernel::log("frida: worker entry\n\0");
-
-            crate::run_constructors();
-            init_gum();
-
-            kernel::install_hooks();
-
-            match hostlink_chardev::Hostlink::init(Some(on_frame_from_host)) {
-                Ok(hostlink) => transport_set(Transport::CharDevice(hostlink)),
-                Err(_) => {
-                    kernel::log("frida: failed to connect to peer\n\0");
-                    WORKER_EXITED.store(true, Ordering::Release);
-                    return;
-                }
-            }
-
-            let main_context = adopt_js_context();
-
-            run_main_loop(main_context);
-
-            destroy_all_scripts(main_context);
-            transport_teardown();
-
-            WORKER_EXITED.store(true, Ordering::Release);
-            kernel::wake(ptr::addr_of!(glib::WAKEUP_TOKEN) as *const u8);
-        }
-    }
-}
-
-#[cfg(feature = "linux")]
-pub use entrypoint_linux::{frida_agent_start, frida_agent_stop};
 #[cfg(feature = "xnu-kext")]
 pub use entrypoint_xnu_kext::{frida_agent_start, frida_agent_stop, frida_agent_wake};
 #[cfg(feature = "blob")]
@@ -782,7 +713,7 @@ pub enum Transport {
     PipeVsock(linux::hostlink_pipe_vsock::Hostlink),
     #[cfg(feature = "linux-injected")]
     PipeGoldfish(linux::hostlink_pipe_goldfish::Hostlink),
-    #[cfg(any(feature = "linux", feature = "xnu-kext"))]
+    #[cfg(any(feature = "linux-injected", feature = "xnu-kext"))]
     CharDevice(hostlink_chardev::Hostlink),
 }
 
@@ -799,7 +730,7 @@ impl Transport {
             Transport::PipeVsock(h) => h.send(payload),
             #[cfg(feature = "linux-injected")]
             Transport::PipeGoldfish(h) => h.send(payload),
-            #[cfg(any(feature = "linux", feature = "xnu-kext"))]
+            #[cfg(any(feature = "linux-injected", feature = "xnu-kext"))]
             Transport::CharDevice(h) => h.send(payload),
         }
     }
@@ -816,7 +747,7 @@ impl Transport {
             Transport::PipeVsock(h) => h.shutdown(),
             #[cfg(feature = "linux-injected")]
             Transport::PipeGoldfish(h) => h.shutdown(),
-            #[cfg(any(feature = "linux", feature = "xnu-kext"))]
+            #[cfg(any(feature = "linux-injected", feature = "xnu-kext"))]
             Transport::CharDevice(_) => {}
         }
     }
@@ -833,7 +764,7 @@ impl Transport {
             Transport::PipeVsock(h) => h.process(),
             #[cfg(feature = "linux-injected")]
             Transport::PipeGoldfish(h) => h.process(),
-            #[cfg(any(feature = "linux", feature = "xnu-kext"))]
+            #[cfg(any(feature = "linux-injected", feature = "xnu-kext"))]
             Transport::CharDevice(h) => h.process(),
         }
     }
@@ -872,6 +803,8 @@ pub enum TransportConfig {
     PipeVsock { path: alloc::string::String },
     #[cfg(feature = "linux-injected")]
     PipeGoldfish { path: alloc::string::String },
+    #[cfg(feature = "linux-injected")]
+    CharDevice,
 }
 
 static mut TRANSPORT_DRIVER: *mut Transport = core::ptr::null_mut();
@@ -1262,11 +1195,6 @@ fn run_main_loop(main_context: *mut GMainContext) {
             #[cfg(not(any(feature = "blob", feature = "xnu-core")))]
             transport_get_unchecked().process();
 
-            #[cfg(feature = "linux")]
-            if entrypoint_linux::stop_requested() {
-                return;
-            }
-
             if stop_requested() {
                 return;
             }
@@ -1298,7 +1226,7 @@ fn kernel_half_has_work() -> bool {
         return true;
     }
 
-    #[cfg(feature = "xnu-kext")]
+    #[cfg(any(feature = "linux-injected", feature = "xnu-kext"))]
     if hostlink_chardev::a_turn_is_wanted() {
         return true;
     }
@@ -1528,7 +1456,7 @@ unsafe extern "C" fn on_script_unloaded(
 
 static UNLOADS_IN_FLIGHT: AtomicU32 = AtomicU32::new(0);
 
-#[cfg(any(feature = "linux", feature = "xnu-kext"))]
+#[cfg(feature = "xnu-kext")]
 fn transport_teardown() {
     unsafe {
         let driver = TRANSPORT_DRIVER;

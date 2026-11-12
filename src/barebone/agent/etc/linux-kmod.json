@@ -1,5 +1,6 @@
 {
   "agent": {
+    "type": "resident",
     "transport": {
       "type": "device",
       "path": "/dev/frida"

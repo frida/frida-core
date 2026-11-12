@@ -19,14 +19,12 @@ use alloc::vec::Vec;
 use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-#[cfg(feature = "linux")]
-use crate::gum_linux::enumerate_exports_in_range;
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 use crate::bindings::{
     GumFoundSymbolFunc, GumSymbolDetails, GumSymbolType_GUM_SYMBOL_FUNCTION,
     GumSymbolType_GUM_SYMBOL_OBJECT, GumSymbolType_GUM_SYMBOL_UNKNOWN, gboolean, gssize,
 };
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 use crate::gum_modules::enumerate_symbols_in_range;
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 use crate::gum_windows::{enumerate_exports_in_range, enumerate_imports_in_module};
@@ -192,7 +190,7 @@ extern "C" fn gum_native_module_iface_init(g_iface: gpointer, _iface_data: gpoin
                 Some(crate::signed_to_be_called_back(gum_native_module_enumerate_imports, 0));
         }
         (*iface).find_export_by_name = Some(crate::signed_to_be_called_back(gum_native_module_find_export_by_name, 0));
-        #[cfg(any(feature = "linux", feature = "linux-injected"))]
+        #[cfg(feature = "linux-injected")]
         {
             (*iface).enumerate_symbols =
                 Some(crate::signed_to_be_called_back(gum_native_module_enumerate_symbols, 0));
@@ -350,7 +348,7 @@ unsafe extern "C" fn gum_native_module_enumerate_imports(
     }
 }
 
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 unsafe extern "C" fn gum_native_module_enumerate_symbols(
     self_: *mut GumModule,
     func: GumFoundSymbolFunc,
@@ -388,12 +386,12 @@ unsafe extern "C" fn gum_native_module_enumerate_symbols(
 /// What the backends implement for `gum_native_module_enumerate_symbols`: call
 /// `callback` for every symbol in `[start, end)`, stopping early when it returns
 /// false.
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 pub(crate) type FoundSymbolCallback<'a> = dyn FnMut(*const gchar, u64, u64, u8, bool) -> bool + 'a;
 
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 const SYMBOL_IS_OBJECT: u8 = 1;
-#[cfg(any(feature = "linux", feature = "linux-injected"))]
+#[cfg(feature = "linux-injected")]
 const SYMBOL_IS_FUNCTION: u8 = 2;
 
 /// What the backends implement for `gum_native_module_enumerate_exports`: call

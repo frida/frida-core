@@ -50,7 +50,7 @@ pub extern "C" fn sysconf(_name: i32) -> isize {
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {}
 
-#[cfg(all(target_arch = "arm", not(any(feature = "linux", feature = "linux-injected"))))]
+#[cfg(all(target_arch = "arm", not(feature = "linux-injected")))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
     unsafe {
@@ -68,7 +68,7 @@ pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
     }
 }
 
-#[cfg(all(target_arch = "arm", any(feature = "linux", feature = "linux-injected")))]
+#[cfg(all(target_arch = "arm", feature = "linux-injected"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
     unsafe {
