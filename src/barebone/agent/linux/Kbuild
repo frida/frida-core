@@ -6,4 +6,9 @@ $(MODULE_NAME)-y := frida-kmod.o frida-agent-image.o
 
 AFLAGS_frida-agent-image.o := -DFRIDA_AGENT_IMAGE='"$(FRIDA_AGENT_IMAGE)"'
 
+frida-header-has = $(if $(shell grep -l '$(2)' $(srctree)/include/$(1)),-D$(3))
+ccflags-y += $(call frida-header-has,linux/sched.h,list_head[[:space:]]*thread_group;,FRIDA_HAVE_TASK_THREAD_GROUP)
+ccflags-y += $(call frida-header-has,linux/sched/signal.h,int[[:space:]]*quick_threads;,FRIDA_HAVE_SIGNAL_QUICK_THREADS)
+ccflags-y += $(call frida-header-has,linux/fs_struct.h,spinlock_t[[:space:]]*lock;,FRIDA_HAVE_FS_STRUCT_LOCK)
+
 $(obj)/frida-agent-image.o: $(FRIDA_AGENT_IMAGE)

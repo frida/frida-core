@@ -625,6 +625,24 @@ int frida_k_unregister_module_notifier (void * a0)
   return ((fn_t) _unregister_module_notifier) (a0);
 }
 
+extern void * _mutex_lock;
+
+void frida_k_mutex_lock (void * a0)
+{
+  typedef void (__attribute__ ((regparm (3))) * fn_t) (void *);
+
+  ((fn_t) _mutex_lock) (a0);
+}
+
+extern void * _mutex_unlock;
+
+void frida_k_mutex_unlock (void * a0)
+{
+  typedef void (__attribute__ ((regparm (3))) * fn_t) (void *);
+
+  ((fn_t) _mutex_unlock) (a0);
+}
+
 extern int frida_cb_module_state (void * nb, unsigned long action, void * data);
 
 __attribute__ ((regparm (3))) int

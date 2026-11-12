@@ -116,6 +116,11 @@ pub extern "C" fn gum_memory_try_remap_writable_pages(
         return remap_agent_pages(first_page, n_pages);
     }
 
+    #[cfg(feature = "linux-injected")]
+    if let Some(alias) = kernel::remap_writable(first_page as u64, n_pages) {
+        return alias as gpointer;
+    }
+
     #[cfg(all(feature = "linux-injected", not(target_arch = "arm")))]
     if writable_in_place(first_page, n_pages) {
         return first_page;
@@ -268,6 +273,11 @@ pub extern "C" fn gum_memory_dispose_writable_pages(writable: gpointer, _n_pages
     if let Some(base) = crate::xnu::the_page_behind(writable as u64) {
         let size = _n_pages as usize * unsafe { gum_query_page_size() } as usize;
         libc::__clear_cache(base as *const u8, (base + size as u64) as *const u8);
+        return;
+    }
+
+    #[cfg(feature = "linux-injected")]
+    if kernel::unmap_writable(writable as *mut core::ffi::c_void) {
         return;
     }
 
@@ -591,7 +601,7 @@ pub extern "C" fn gum_memory_allocate(
     #[cfg(all(not(feature = "xnu-core"), not(feature = "linux-injected")))]
     let ptr = kernel::alloc_code(size as usize);
     #[cfg(feature = "linux-injected")]
-    let ptr = kernel::alloc_heap(size as usize);
+    let ptr = kernel::alloc_code(size as usize);
     #[cfg(not(feature = "xnu-core"))]
     let _ = address;
     #[cfg(not(feature = "xnu-kext"))]

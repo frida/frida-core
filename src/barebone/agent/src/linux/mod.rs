@@ -43,6 +43,14 @@ mod threads;
 pub(crate) mod user;
 #[cfg(feature = "linux-injected")]
 mod processes;
+#[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod cloak;
+#[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod control;
+#[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod process_memory;
+#[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod user_threads;
 
 #[cfg(feature = "linux-injected")]
 pub use self::injection::*;
@@ -53,16 +61,22 @@ pub use self::facade::*;
 #[cfg(feature = "linux-injected")]
 pub use self::native::{
     alloc_dma, free_dma, get_kernel_base, get_kernel_size, hand_back_to_the_loader,
-    install_interrupt_handler, map_io, map_pages, mmio_interrupt, pci_interrupt,
-    release_fault_reporter, release_interrupt, run_when_ready, patch_text, set_kernel_base,
-    set_protection, virt_to_phys,
+    install_interrupt_handler, loaded_from_the_inside, map_io, map_pages, mmio_interrupt, pci_interrupt,
+    release_fault_reporter, release_interrupt, remap_writable, run_when_ready, patch_text,
+    set_kernel_base, set_protection, unmap_writable, virt_to_phys,
 };
+#[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub use self::native::learn_when_to_sleep;
 #[cfg(feature = "linux-injected")]
 pub use self::mapped::*;
 #[cfg(feature = "linux-injected")]
 pub use self::modules::*;
 #[cfg(feature = "linux-injected")]
 pub use self::processes::*;
+#[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub use self::control::{
+    an_operation_waits, carry_out_operations, close as close_control_channel, open as open_control_channel,
+};
 #[cfg(feature = "linux-injected")]
 pub use self::spawn::*;
 #[cfg(feature = "linux-injected")]

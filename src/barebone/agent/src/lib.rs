@@ -319,6 +319,12 @@ mod entrypoint_blob {
             #[cfg(feature = "linux-injected")]
             crate::gum_btf::publish();
 
+            #[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+            {
+                kernel::learn_when_to_sleep();
+                kernel::open_control_channel();
+            }
+
             let wake_token = ptr::addr_of_mut!(glib::WAKEUP_TOKEN) as *const u8;
             // Install this before the loop waits the first time, thus a copy placed in a process later
             // can receive a handle to the same event.
@@ -371,6 +377,9 @@ mod entrypoint_blob {
             run_main_loop(context);
 
             destroy_all_scripts(context);
+
+            #[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+            kernel::close_control_channel();
 
             #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected",
                 feature = "xnu-core"))]
@@ -1265,6 +1274,11 @@ fn kernel_half_has_work() -> bool {
         return true;
     }
 
+    #[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    if kernel::an_operation_waits() {
+        return true;
+    }
+
     kernel::injected_arenas()
         .iter()
         .any(|arena| kernel::holds_a_frame_from_target(*arena))
@@ -1297,6 +1311,9 @@ fn serve_the_kernel_half() {
 
     #[cfg(feature = "linux-injected")]
     kernel::report_what_the_copies_hit();
+
+    #[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    kernel::carry_out_operations();
 
     relay_frames_from_targets();
 }
@@ -2175,7 +2192,6 @@ fn text_or_empty(text: *const u8) -> *const core::ffi::c_char {
 }
 
 fn send_command_reply(request_id: u16, response: HandlerResponse) {
-
     unsafe {
         let message = g_variant_new(
             c"(yquv)".as_ptr(),
@@ -2361,8 +2377,13 @@ fn handle_stop() -> HandlerResponse {
         kernel::show_our_threads_again();
     }
 
-    #[cfg(feature = "blob")]
+    #[cfg(all(feature = "blob", not(feature = "linux-injected")))]
     STOP_REQUESTED.store(true, Ordering::Release);
+
+    #[cfg(feature = "linux-injected")]
+    if !kernel::loaded_from_the_inside() {
+        STOP_REQUESTED.store(true, Ordering::Release);
+    }
 
     HandlerResponse::success(unsafe { g_variant_new_uint32(0) })
 }

@@ -362,23 +362,25 @@ pub unsafe extern "C" fn frida_cb_user(argument: *mut c_void) -> c_int {
 
     COPY_TASK.store(native::current_task() as usize, core::sync::atomic::Ordering::Release);
 
+    hand_userland_to(bootstrap, hand_over_argument(stack, arena), arena);
+
+    0
+}
+
+pub(crate) fn hand_userland_to(pc: usize, stack: usize, first_argument: usize) {
     let Some(places) = describe_registers() else {
-        return 0;
+        return;
     };
     let registers = registers_of_this_task(&places);
 
-    let stack = hand_over_argument(stack, arena);
-
     unsafe {
-        ((registers + places.pc) as *mut usize).write(bootstrap & !THUMB_BIT);
+        ((registers + places.pc) as *mut usize).write(pc & !THUMB_BIT);
         ((registers + places.stack) as *mut usize).write(stack);
         ((registers + places.flags) as *mut usize).write(
-            USER_EXECUTION | (bootstrap & THUMB_BIT) * THUMB_STATE);
-        ((registers + places.first) as *mut usize).write(arena);
+            USER_EXECUTION | (pc & THUMB_BIT) * THUMB_STATE);
+        ((registers + places.first) as *mut usize).write(first_argument);
         write_selectors(registers, &places);
     }
-
-    0
 }
 
 // What a task starts with in userland is at the top of the kernel stack it was given.
@@ -390,7 +392,7 @@ fn registers_of_this_task(places: &Places) -> usize {
 fn registers_of_task(task: usize, places: &Places) -> usize {
     let stack = unsafe { ((task + places.stack_of_task) as *const usize).read() };
 
-    stack + STACK_SPAN - TOP_OF_STACK_PADDING - places.size
+    stack + places.stack_span - TOP_OF_STACK_PADDING - places.size
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -684,6 +686,7 @@ unsafe fn write_selectors(registers: usize, _places: &Places) {
     unsafe {
         ((registers + 136) as *mut usize).write(0x33);
         ((registers + 160) as *mut usize).write(0x2b);
+        ((registers + 120) as *mut isize).write(-1);
     }
 }
 
@@ -733,6 +736,7 @@ struct Places {
     pc: usize,
     flags: usize,
     stack_of_task: usize,
+    stack_span: usize,
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -744,6 +748,7 @@ fn describe_registers() -> Option<Places> {
         pc: field_offset("user_pt_regs", "pc")?,
         flags: field_offset("user_pt_regs", "pstate")?,
         stack_of_task: field_offset("task_struct", "stack")?,
+        stack_span: struct_size("thread_union").unwrap_or(STACK_SPAN),
     })
 }
 
@@ -756,6 +761,7 @@ fn describe_registers() -> Option<Places> {
         pc: 15 * 4,
         flags: 16 * 4,
         stack_of_task: 0,
+        stack_span: STACK_SPAN,
     })
 }
 
@@ -768,6 +774,7 @@ fn describe_registers() -> Option<Places> {
         pc: 48,
         flags: 56,
         stack_of_task: 0,
+        stack_span: STACK_SPAN,
     })
 }
 
@@ -780,6 +787,7 @@ fn describe_registers() -> Option<Places> {
         pc: 128,
         flags: 144,
         stack_of_task: 0,
+        stack_span: STACK_SPAN,
     })
 }
 
@@ -1289,7 +1297,6 @@ const EXEC_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, c_int, *mut c_v
 #[cfg(not(target_arch = "x86"))]
 const EXEC_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, c_int, *mut c_void) =
     frida_cb_exec;
-
 
 #[cfg(target_arch = "x86")]
 const THREAD_APPEARED_PROBE: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =

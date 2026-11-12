@@ -9,6 +9,7 @@ use crate::bindings::{g_free, gsize, gum_memory_read};
 use super::{LoadedModule, ModuleEvent};
 
 pub fn enumerate_modules() -> Vec<LoadedModule> {
+    let _held = ModuleListLock::take();
     let Some(layout) = module_layout() else {
         return Vec::new();
     };
@@ -38,6 +39,7 @@ pub fn enumerate_module_symbols(
     base: u64,
     on_symbol: &mut dyn FnMut(*const c_char, u64, u64, u8, bool) -> bool,
 ) -> bool {
+    let _held = ModuleListLock::take();
     let Some(layout) = module_layout() else {
         return false;
     };
@@ -87,6 +89,7 @@ pub fn enumerate_module_exports(
     base: u64,
     on_export: &mut dyn FnMut(*const c_char, u64) -> bool,
 ) -> bool {
+    let _held = ModuleListLock::take();
     let Some(layout) = module_layout() else {
         return false;
     };
@@ -150,6 +153,52 @@ fn relative_target(at: usize) -> usize {
     let offset = unsafe { (at as *const i32).read_volatile() };
 
     at.wrapping_add_signed(offset as isize)
+}
+
+struct ModuleListLock {
+    mutex: *mut c_void,
+}
+
+impl ModuleListLock {
+    fn take() -> Self {
+        let mutex = unsafe { _module_mutex } as *mut c_void;
+        let lockable = !mutex.is_null() && unsafe { _mutex_lock.is_some() && _mutex_unlock.is_some() };
+        if !lockable {
+            return Self { mutex: ptr::null_mut() };
+        }
+
+        unsafe { lock_mutex(mutex) };
+
+        Self { mutex }
+    }
+}
+
+impl Drop for ModuleListLock {
+    fn drop(&mut self) {
+        if !self.mutex.is_null() {
+            unsafe { unlock_mutex(self.mutex) };
+        }
+    }
+}
+
+#[cfg(not(target_arch = "x86"))]
+unsafe fn lock_mutex(mutex: *mut c_void) {
+    unsafe { _mutex_lock.unwrap()(mutex) };
+}
+
+#[cfg(not(target_arch = "x86"))]
+unsafe fn unlock_mutex(mutex: *mut c_void) {
+    unsafe { _mutex_unlock.unwrap()(mutex) };
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn lock_mutex(mutex: *mut c_void) {
+    unsafe { frida_k_mutex_lock(mutex) };
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn unlock_mutex(mutex: *mut c_void) {
+    unsafe { frida_k_mutex_unlock(mutex) };
 }
 
 pub fn watch_modules(on_event: fn(ModuleEvent, LoadedModule)) {
@@ -778,10 +827,15 @@ unsafe extern "C" {
     ) -> c_int;
     fn frida_k_register_module_notifier(block: *mut c_void) -> c_int;
     fn frida_k_unregister_module_notifier(block: *mut c_void) -> c_int;
+    fn frida_k_mutex_lock(mutex: *mut c_void);
+    fn frida_k_mutex_unlock(mutex: *mut c_void);
 }
 
 unsafe extern "C" {
     static _modules: *const c_void;
+    static _module_mutex: *const c_void;
+    static _mutex_lock: Option<unsafe extern "C" fn(*mut c_void)>;
+    static _mutex_unlock: Option<unsafe extern "C" fn(*mut c_void)>;
     static _register_module_notifier: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
     #[allow(dead_code)]
     static _unregister_module_notifier: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;

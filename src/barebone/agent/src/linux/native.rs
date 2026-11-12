@@ -1,15 +1,9 @@
-// The agent injected from the outside: the host resolves the kernel functions
-// below and patches their addresses into .kernel_addrs, the same way it does
-// for XNU and Windows. Everything the kernel would otherwise have to lend us --
-// its symbol table, its module list, the right to write to its pages -- comes
-// from the host instead, over the hostlink.
-
 use core::ffi::{c_char, c_int, c_uint, c_void};
 use core::ptr;
 use core::ptr::read_volatile;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(target_arch = "aarch64")]
-use core::sync::atomic::AtomicUsize;
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use core::sync::atomic::{AtomicI32, AtomicUsize, fence};
 
 use crate::kernel::ThreadEntry;
 
@@ -47,8 +41,12 @@ pub fn release_fault_reporter() {
     super::kfault::uninstall();
 }
 
+pub fn loaded_from_the_inside() -> bool {
+    unsafe { _frida_kmod_exit_worker != 0 }
+}
+
 pub fn hand_back_to_the_loader() {
-    if unsafe { _frida_kmod_exit_worker } != 0 {
+    if loaded_from_the_inside() {
         unsafe { frida_kmod_exit_worker() };
     }
 }
@@ -159,6 +157,17 @@ pub(crate) fn kcfi_thunk(callback: usize, _type_ref: Option<usize>) -> usize {
 }
 
 #[cfg(target_arch = "aarch64")]
+pub(crate) fn kernel_thread_function(cache: &AtomicUsize, callback: KthreadFn) -> KthreadFn {
+    let ref_fn = unsafe { _kthread_worker_fn.map(|f| f as usize) };
+    unsafe { core::mem::transmute(kcfi_thunk_cached(cache, callback as usize, ref_fn)) }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn kernel_thread_function(_cache: &AtomicUsize, callback: KthreadFn) -> KthreadFn {
+    callback
+}
+
+#[cfg(target_arch = "aarch64")]
 fn kcfi_thunk_cached(cache: &AtomicUsize, callback: usize, type_ref: Option<usize>) -> usize {
     let existing = cache.load(Ordering::Acquire);
     if existing != 0 {
@@ -218,20 +227,26 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
 
 #[cfg(target_arch = "x86")]
 pub fn alloc(size: usize) -> *mut u8 {
-    unsafe { frida_k_alloc(size, GFP_KERNEL as usize) }
+    unsafe { frida_k_alloc(size, allocation_flags() as usize) }
 }
 
 #[cfg(not(target_arch = "x86"))]
 pub fn alloc(size: usize) -> *mut u8 {
+    let flags = allocation_flags();
+
     unsafe {
         if let Some(f) = ___kmalloc_noprof {
-            f(size, GFP_KERNEL)
+            f(size, flags)
         } else if let Some(f) = _kmalloc {
-            f(size, GFP_KERNEL)
+            f(size, flags)
         } else {
-            ___kmalloc.unwrap()(size, GFP_KERNEL)
+            ___kmalloc.unwrap()(size, flags)
         }
     }
+}
+
+fn allocation_flags() -> u32 {
+    if can_sleep() { GFP_KERNEL } else { GFP_ATOMIC }
 }
 
 pub fn free(ptr: *mut u8, _size: usize) {
@@ -240,6 +255,10 @@ pub fn free(ptr: *mut u8, _size: usize) {
 
 pub fn alloc_heap(size: usize) -> *mut u8 {
     unsafe {
+        #[cfg(not(target_arch = "x86"))]
+        if let Some(f) = _vmalloc_noprof {
+            return f(size);
+        }
         if let Some(f) = _vmalloc {
             return f(size);
         }
@@ -247,7 +266,6 @@ pub fn alloc_heap(size: usize) -> *mut u8 {
 
     alloc(size)
 }
-
 
 #[cfg(target_arch = "x86")]
 pub fn alloc_code(size: usize) -> *mut u8 {
@@ -259,7 +277,9 @@ pub fn alloc_code(size: usize) -> *mut u8 {
 #[cfg(not(target_arch = "x86"))]
 pub fn alloc_code(size: usize) -> *mut u8 {
     unsafe {
-        let code = if let Some(f) = _execmem_alloc {
+        let code = if let Some(f) = _execmem_alloc_rw {
+            f(EXECMEM_MODULE_TEXT, size)
+        } else if let Some(f) = _execmem_alloc {
             f(EXECMEM_MODULE_TEXT, size)
         } else {
             _module_alloc.unwrap()(size)
@@ -287,6 +307,29 @@ pub fn free_code(ptr: *mut u8, _size: usize) {
             _module_memfree.unwrap()(ptr);
         }
     }
+}
+
+#[cfg(not(target_arch = "x86"))]
+pub fn remap_writable(first_page: u64, n_pages: u32) -> Option<*mut c_void> {
+    let remap = unsafe { _frida_kmod_remap_writable }?;
+    let alias = unsafe { remap(first_page, n_pages) };
+
+    (!alias.is_null()).then_some(alias)
+}
+
+#[cfg(target_arch = "x86")]
+pub fn remap_writable(_first_page: u64, _n_pages: u32) -> Option<*mut c_void> {
+    None
+}
+
+#[cfg(not(target_arch = "x86"))]
+pub fn unmap_writable(alias: *mut c_void) -> bool {
+    unsafe { _frida_kmod_unmap_writable }.is_some_and(|unmap| unsafe { unmap(alias) })
+}
+
+#[cfg(target_arch = "x86")]
+pub fn unmap_writable(_alias: *mut c_void) -> bool {
+    false
 }
 
 pub fn page_size() -> usize {
@@ -399,21 +442,23 @@ pub fn free_dma(ptr: *mut u8, size: usize) {
 }
 
 pub fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    let slice_us = timeout_us.map_or(LONGEST_WAIT_US, |us| us.min(LONGEST_WAIT_US));
+
+    if !can_sleep() {
+        spin_until(check, slice_us);
+        return;
+    }
+
     let waiters = waiters();
 
     let mut waiter = [0usize; WAIT_ENTRY_WORDS];
     let waiter = queue_this_thread(&mut waiter);
 
-    unsafe { _prepare_to_wait_event(waiters, waiter, TASK_INTERRUPTIBLE) };
+    unsafe { _prepare_to_wait_event(waiters, waiter, TASK_UNINTERRUPTIBLE) };
 
     if !check() {
-        match timeout_us {
-            Some(us) => {
-                let mut until = (us as i64) * 1000;
-                unsafe { _schedule_hrtimeout_range(&mut until, WAKE_SLACK_NS, HRTIMER_MODE_REL) };
-            }
-            None => unsafe { _schedule() },
-        }
+        let mut until = (slice_us as i64) * 1000;
+        unsafe { _schedule_hrtimeout_range(&mut until, WAKE_SLACK_NS, HRTIMER_MODE_REL) };
     }
 
     unsafe { _finish_wait(waiters, waiter) };
@@ -519,7 +564,237 @@ pub fn mmio_interrupt(_mmio_base: u64) -> Option<u32> {
 }
 
 pub fn yield_now() {
-    unsafe { _schedule() };
+    if can_sleep() {
+        unsafe { _schedule() };
+    } else {
+        core::hint::spin_loop();
+    }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+pub fn learn_when_to_sleep() {
+    let above = |found: Option<usize>| found.map_or(usize::MAX, |at| at + 1);
+    RCU_DEPTH_AT.store(above(super::layout::field_offset("task_struct", "rcu_read_lock_nesting")), Ordering::Relaxed);
+    PREEMPT_COUNT_AT.store(above(where_the_preempt_count_is()), Ordering::Release);
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn can_sleep() -> bool {
+    let Some(places) = sleeping_places() else {
+        return true;
+    };
+    let rcu_depth = places.rcu_read_lock_nesting
+        .map_or(0, |at| unsafe { ((current_task() as usize + at) as *const i32).read_volatile() });
+
+    current_preempt_count(places.preempt_count) == 0 && !interrupts_masked() && rcu_depth == 0
+}
+
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+fn can_sleep() -> bool {
+    true
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn sleeping_places() -> Option<SleepingPlaces> {
+    let found = |at: usize| (at != 0 && at != usize::MAX).then(|| at - 1);
+    Some(SleepingPlaces {
+        preempt_count: found(PREEMPT_COUNT_AT.load(Ordering::Acquire))?,
+        rcu_read_lock_nesting: found(RCU_DEPTH_AT.load(Ordering::Relaxed)),
+    })
+}
+
+#[cfg(target_arch = "aarch64")]
+fn where_the_preempt_count_is() -> Option<usize> {
+    super::layout::field_offset("task_struct", "thread_info.preempt_count")
+}
+
+#[cfg(target_arch = "x86_64")]
+fn where_the_preempt_count_is() -> Option<usize> {
+    let per_cpu = unsafe { ___preempt_count };
+
+    (per_cpu != 0).then_some(per_cpu)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn current_preempt_count(at: usize) -> u32 {
+    unsafe { ((current_task() as usize + at) as *const u32).read_volatile() }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn current_preempt_count(at: usize) -> u32 {
+    let count: u32;
+    unsafe { core::arch::asm!("mov {:e}, gs:[{}]", out(reg) count, in(reg) at, options(nostack, readonly)) };
+
+    count & !PREEMPT_NEED_RESCHED
+}
+
+#[cfg(target_arch = "aarch64")]
+fn interrupts_masked() -> bool {
+    let daif: usize;
+    unsafe { core::arch::asm!("mrs {}, daif", out(reg) daif, options(nomem, nostack)) };
+
+    daif & DAIF_IRQ_MASKED != 0
+}
+
+#[cfg(target_arch = "x86_64")]
+fn interrupts_masked() -> bool {
+    let flags: usize;
+    unsafe { core::arch::asm!("pushfq", "pop {}", out(reg) flags, options(nomem, preserves_flags)) };
+
+    flags & RFLAGS_IF == 0
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+struct SleepingPlaces {
+    preempt_count: usize,
+    rcu_read_lock_nesting: Option<usize>,
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+static PREEMPT_COUNT_AT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+static RCU_DEPTH_AT: AtomicUsize = AtomicUsize::new(0);
+
+fn spin_until(check: &mut dyn FnMut() -> bool, slice_us: u64) {
+    let deadline = monotonic_micros() + slice_us as i64;
+
+    while !check() && monotonic_micros() < deadline {
+        core::hint::spin_loop();
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn lock_spinlock(lock: usize) {
+    unsafe { __raw_spin_lock.unwrap()(lock as *mut c_void) };
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn unlock_spinlock(lock: usize) {
+    unsafe { __raw_spin_unlock.unwrap()(lock as *mut c_void) };
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn lock_spinlock(lock: usize) {
+    if let Some(lock_it) = unsafe { __raw_spin_lock } {
+        return unsafe { lock_it(lock as *mut c_void) };
+    }
+
+    disable_preemption();
+    if let Err(seen) = counter_at(lock).compare_exchange(0, SPIN_LOCKED, Ordering::Acquire, Ordering::Relaxed) {
+        unsafe { _queued_spin_lock_slowpath(lock as *mut c_void, seen as u32) };
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn unlock_spinlock(lock: usize) {
+    if let Some(unlock_it) = unsafe { __raw_spin_unlock } {
+        return unsafe { unlock_it(lock as *mut c_void) };
+    }
+
+    unsafe { core::sync::atomic::AtomicU8::from_ptr(lock as *mut u8) }.store(0, Ordering::Release);
+    enable_preemption();
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn read_lock_irqsave(lock: usize) -> usize {
+    let flags = mask_interrupts();
+    disable_preemption();
+    if counter_at(lock).fetch_add(READER_BIAS, Ordering::Acquire) & WRITER_MASK != 0 {
+        unsafe { _queued_read_lock_slowpath(lock as *mut c_void) };
+    }
+    flags
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn read_unlock_irqrestore(lock: usize, flags: usize) {
+    counter_at(lock).fetch_sub(READER_BIAS, Ordering::Release);
+    enable_preemption();
+    restore_interrupts(flags);
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn write_lock_irqsave(lock: usize) -> usize {
+    let flags = mask_interrupts();
+    disable_preemption();
+    if counter_at(lock).compare_exchange(0, WRITER_LOCKED, Ordering::Acquire, Ordering::Relaxed).is_err() {
+        unsafe { _queued_write_lock_slowpath(lock as *mut c_void) };
+    }
+    flags
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn write_unlock_irqrestore(lock: usize, flags: usize) {
+    unsafe { core::sync::atomic::AtomicU8::from_ptr(lock as *mut u8) }.store(0, Ordering::Release);
+    enable_preemption();
+    restore_interrupts(flags);
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn disable_preemption() {
+    let count = preempt_count();
+    unsafe { count.write_volatile(count.read_volatile() + 1) };
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn enable_preemption() {
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+    let count = preempt_count();
+    unsafe { count.write_volatile(count.read_volatile() - 1) };
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn disable_preemption() {
+    let at = sleeping_places().unwrap().preempt_count;
+    unsafe { core::arch::asm!("add dword ptr gs:[{}], 1", in(reg) at, options(nostack)) };
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn enable_preemption() {
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+    let at = sleeping_places().unwrap().preempt_count;
+    unsafe { core::arch::asm!("sub dword ptr gs:[{}], 1", in(reg) at, options(nostack)) };
+}
+
+#[cfg(target_arch = "aarch64")]
+fn preempt_count() -> *mut u32 {
+    let at = sleeping_places().unwrap().preempt_count;
+    (current_task() as usize + at) as *mut u32
+}
+
+#[cfg(target_arch = "aarch64")]
+fn mask_interrupts() -> usize {
+    let flags: usize;
+    unsafe {
+        core::arch::asm!("mrs {}, daif", "msr daifset, #3", out(reg) flags, options(nostack));
+    }
+    flags
+}
+
+#[cfg(target_arch = "aarch64")]
+fn restore_interrupts(flags: usize) {
+    unsafe { core::arch::asm!("msr daif, {}", in(reg) flags, options(nostack)) };
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub(crate) fn hold(counter: usize) {
+    counter_at(counter).fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub(crate) fn let_go(counter: usize) -> bool {
+    if counter_at(counter).fetch_sub(1, Ordering::Release) != 1 {
+        return false;
+    }
+
+    fence(Ordering::Acquire);
+    true
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn counter_at(address: usize) -> &'static AtomicI32 {
+    unsafe { AtomicI32::from_ptr(address as *mut i32) }
 }
 
 pub fn monotonic_micros() -> i64 {
@@ -820,17 +1095,33 @@ const KERNEL_PROCESS: u32 = 0;
 const JS_SAFE_THREAD_ID_MASK: u64 = (1 << 48) - 1;
 
 const GFP_KERNEL: u32 = 0xcc0;
+const GFP_ATOMIC: u32 = 0x820;
 const NUMA_NO_NODE: c_int = -1;
-const EXECMEM_MODULE_TEXT: u32 = 1;
+const EXECMEM_MODULE_TEXT: u32 = 0;
 const PAGE_SIZE: usize = 4096;
 #[cfg(target_arch = "aarch64")]
 const TCR_T1SZ_SHIFT: u64 = 16;
 #[cfg(target_arch = "aarch64")]
 const TCR_T1SZ_MASK: u64 = 0x3f;
-const TASK_INTERRUPTIBLE: c_uint = 1;
+const TASK_UNINTERRUPTIBLE: c_uint = 2;
 const TASK_NORMAL: c_uint = 3;
 const WAKE_EVERY_WAITER: c_int = 0;
 const WAKE_SLACK_NS: u64 = 50_000;
+const LONGEST_WAIT_US: u64 = 1_000_000;
+#[cfg(target_arch = "aarch64")]
+const SPIN_LOCKED: i32 = 1;
+#[cfg(target_arch = "aarch64")]
+const READER_BIAS: i32 = 1 << 9;
+#[cfg(target_arch = "aarch64")]
+const WRITER_LOCKED: i32 = 0xff;
+#[cfg(target_arch = "aarch64")]
+const WRITER_MASK: i32 = 0x1ff;
+#[cfg(target_arch = "aarch64")]
+const DAIF_IRQ_MASKED: usize = 1 << 7;
+#[cfg(target_arch = "x86_64")]
+const PREEMPT_NEED_RESCHED: u32 = 1 << 31;
+#[cfg(target_arch = "x86_64")]
+const RFLAGS_IF: usize = 1 << 9;
 const HRTIMER_MODE_REL: c_int = 1;
 const WAIT_ENTRY_WORDS: usize = 8;
 const WAIT_ENTRY_THREAD: usize = 1;
@@ -870,7 +1161,20 @@ struct Timespec64 {
     tv_nsec: i64,
 }
 
-type KthreadFn = unsafe extern "C" fn(data: *mut c_void) -> c_int;
+pub(crate) type KthreadFn = unsafe extern "C" fn(data: *mut c_void) -> c_int;
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+unsafe extern "C" {
+    static __raw_spin_lock: Option<unsafe extern "C" fn(*mut c_void)>;
+    static __raw_spin_unlock: Option<unsafe extern "C" fn(*mut c_void)>;
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" {
+    static _queued_spin_lock_slowpath: unsafe extern "C" fn(*mut c_void, u32);
+    static _queued_read_lock_slowpath: unsafe extern "C" fn(*mut c_void);
+    static _queued_write_lock_slowpath: unsafe extern "C" fn(*mut c_void);
+}
 
 unsafe extern "C" {
     static _frida_kmod_exit_worker: usize;
@@ -919,6 +1223,14 @@ unsafe extern "C" {
     static _vmalloc: Option<unsafe extern "C" fn(usize) -> *mut u8>;
     // Executable memory moved out of the module loader in 6.12.
     static _execmem_alloc: Option<unsafe extern "C" fn(u32, usize) -> *mut u8>;
+    #[cfg(not(target_arch = "x86"))]
+    static _execmem_alloc_rw: Option<unsafe extern "C" fn(u32, usize) -> *mut u8>;
+    #[cfg(not(target_arch = "x86"))]
+    static _vmalloc_noprof: Option<unsafe extern "C" fn(usize) -> *mut u8>;
+    #[cfg(not(target_arch = "x86"))]
+    static _frida_kmod_remap_writable: Option<unsafe extern "C" fn(u64, u32) -> *mut c_void>;
+    #[cfg(not(target_arch = "x86"))]
+    static _frida_kmod_unmap_writable: Option<unsafe extern "C" fn(*mut c_void) -> bool>;
     static _set_memory_rw: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
     static _set_memory_ro: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
     static _set_memory_x: Option<unsafe extern "C" fn(usize, c_int) -> c_int>;
@@ -990,6 +1302,8 @@ unsafe extern "C" {
     static _current_task: usize;
     #[cfg(target_arch = "x86_64")]
     static _cpu_current_top_of_stack: usize;
+    #[cfg(target_arch = "x86_64")]
+    static ___preempt_count: usize;
     #[cfg(target_arch = "arm")]
     static ___pv_offset: *const u64;
     #[cfg(target_arch = "arm")]

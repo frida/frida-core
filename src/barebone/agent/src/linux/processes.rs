@@ -72,6 +72,53 @@ pub unsafe fn let_go_of(file: *mut c_void) {
     unsafe { _fput(file) };
 }
 
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub(crate) struct HeldTask(usize);
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+impl HeldTask {
+    pub(crate) fn with_id(id: u32) -> Option<Self> {
+        let task = unsafe { _find_get_task_by_vpid(id as c_int) } as usize;
+        (task != 0).then(|| Self(task))
+    }
+
+    pub(crate) fn leader(&self) -> Option<Self> {
+        let group_leader = super::layout::field_offset("task_struct", "group_leader")?;
+        let usage = super::layout::field_offset("task_struct", "usage")?;
+
+        let flags = lock_tasklist();
+        let leader = unsafe { ((self.0 + group_leader) as *const usize).read() };
+        super::native::hold(leader + usage);
+        unlock_tasklist(flags);
+
+        Some(Self(leader))
+    }
+
+    pub(crate) fn address(&self) -> usize {
+        self.0
+    }
+
+    pub(crate) fn into_address(self) -> usize {
+        let task = self.0;
+        core::mem::forget(self);
+        task
+    }
+
+    pub(crate) unsafe fn from_address(task: usize) -> Self {
+        Self(task)
+    }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+impl Drop for HeldTask {
+    fn drop(&mut self) {
+        let usage = super::layout::field_offset("task_struct", "usage").unwrap();
+        if super::native::let_go(self.0 + usage) {
+            unsafe { ___put_task_struct(self.0 as *mut c_void) };
+        }
+    }
+}
+
 pub fn task_with_id(id: u32) -> Option<usize> {
     let layout = task_layout()?;
 
@@ -573,12 +620,16 @@ fn lock_tasklist() -> usize {
 #[cfg(not(target_arch = "x86"))]
 fn lock_tasklist() -> usize {
     unsafe {
-        match (__raw_read_lock_irqsave, __raw_read_unlock_irqrestore) {
-            (Some(lock), Some(_)) => lock(_tasklist_lock),
-            _ => {
-                __raw_read_lock.unwrap()(_tasklist_lock);
+        match (__raw_read_lock_irqsave, __raw_read_unlock_irqrestore, __raw_read_lock) {
+            (Some(lock), Some(_), _) => lock(_tasklist_lock),
+            (_, _, Some(lock)) => {
+                lock(_tasklist_lock);
                 0
             }
+            #[cfg(target_arch = "aarch64")]
+            _ => super::native::read_lock_irqsave(_tasklist_lock as usize),
+            #[cfg(not(target_arch = "aarch64"))]
+            _ => panic!("no way to lock the task list"),
         }
     }
 }
@@ -591,9 +642,13 @@ fn unlock_tasklist(flags: usize) {
 #[cfg(not(target_arch = "x86"))]
 fn unlock_tasklist(flags: usize) {
     unsafe {
-        match (__raw_read_lock_irqsave, __raw_read_unlock_irqrestore) {
-            (Some(_), Some(unlock)) => unlock(_tasklist_lock, flags),
-            _ => __raw_read_unlock.unwrap()(_tasklist_lock),
+        match (__raw_read_lock_irqsave, __raw_read_unlock_irqrestore, __raw_read_unlock) {
+            (Some(_), Some(unlock), _) => unlock(_tasklist_lock, flags),
+            (_, _, Some(unlock)) => unlock(_tasklist_lock),
+            #[cfg(target_arch = "aarch64")]
+            _ => super::native::read_unlock_irqrestore(_tasklist_lock as usize, flags),
+            #[cfg(not(target_arch = "aarch64"))]
+            _ => panic!("no way to unlock the task list"),
         }
     }
 }
@@ -602,10 +657,6 @@ const PIDTYPE_TGID: c_int = 1;
 const PIDTYPE_MAX: usize = 4;
 
 pub fn cloak_task(task: *mut c_void) {
-    // detach_pid's arity differs across kernels (the classic detach_pid(task, type)
-    // versus the batched detach_pid(pids, task, type) paired with free_pids); calling
-    // the wrong one drives a UBSAN/CFI trap on hardened kernels. Leave the thread
-    // visible rather than risk it.
     if true {
         let _ = task;
         return;
@@ -638,8 +689,17 @@ unsafe fn detach_pid(pids: *mut *mut c_void, task: *mut c_void, kind: c_int) {
 }
 
 #[cfg(not(target_arch = "x86"))]
-unsafe fn detach_pid(pids: *mut *mut c_void, task: *mut c_void, kind: c_int) {
-    unsafe { _detach_pid(pids, task, kind) };
+pub(crate) unsafe fn detach_pid(pids: *mut *mut c_void, task: *mut c_void, kind: c_int) {
+    type ReleasingDetachPid = unsafe extern "C" fn(*mut c_void, c_int);
+
+    unsafe {
+        if _free_pids.is_some() {
+            _detach_pid(pids, task, kind);
+        } else {
+            let releasing: ReleasingDetachPid = core::mem::transmute(_detach_pid);
+            releasing(task, kind);
+        }
+    }
 }
 
 #[cfg(target_arch = "x86")]
@@ -648,11 +708,13 @@ unsafe fn free_pids(pids: *mut *mut c_void) {
 }
 
 #[cfg(not(target_arch = "x86"))]
-unsafe fn free_pids(pids: *mut *mut c_void) {
-    unsafe { _free_pids(pids) };
+pub(crate) unsafe fn free_pids(pids: *mut *mut c_void) {
+    if let Some(free) = unsafe { _free_pids } {
+        unsafe { free(pids) };
+    }
 }
 
-unsafe fn unlink(node: usize) {
+pub(crate) unsafe fn unlink(node: usize) {
     let next = unsafe { (node as *const usize).read() };
     let prev = unsafe { ((node + WORD_SIZE) as *const usize).read() };
     unsafe {
@@ -664,34 +726,64 @@ unsafe fn unlink(node: usize) {
 }
 
 #[cfg(target_arch = "x86")]
-fn write_lock_tasklist() -> usize {
+pub(crate) fn write_lock_tasklist() -> usize {
     unsafe { frida_k_write_lock_tasklist() }
 }
 
-#[cfg(not(target_arch = "x86"))]
-fn write_lock_tasklist() -> usize {
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub(crate) unsafe fn unlink_for_readers(node: usize) {
+    let next = unsafe { (node as *const usize).read() };
+    let prev = unsafe { ((node + WORD_SIZE) as *const usize).read() };
     unsafe {
-        match (__raw_write_lock_irqsave, __raw_write_unlock_irqrestore) {
-            (Some(lock), Some(_)) => lock(_tasklist_lock),
-            _ => {
-                __raw_write_lock.unwrap()(_tasklist_lock);
+        ((next + WORD_SIZE) as *mut usize).write(prev);
+        (prev as *mut usize).write(next);
+    }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub(crate) unsafe fn append_for_readers(node: usize, head: usize) {
+    let prev = unsafe { ((head + WORD_SIZE) as *const usize).read() };
+    unsafe {
+        (node as *mut usize).write(head);
+        ((node + WORD_SIZE) as *mut usize).write(prev);
+        core::sync::atomic::AtomicUsize::from_ptr(prev as *mut usize)
+            .store(node, core::sync::atomic::Ordering::Release);
+        ((head + WORD_SIZE) as *mut usize).write(node);
+    }
+}
+
+#[cfg(not(target_arch = "x86"))]
+pub(crate) fn write_lock_tasklist() -> usize {
+    unsafe {
+        match (__raw_write_lock_irqsave, __raw_write_unlock_irqrestore, __raw_write_lock) {
+            (Some(lock), Some(_), _) => lock(_tasklist_lock),
+            (_, _, Some(lock)) => {
+                lock(_tasklist_lock);
                 0
             }
+            #[cfg(target_arch = "aarch64")]
+            _ => super::native::write_lock_irqsave(_tasklist_lock as usize),
+            #[cfg(not(target_arch = "aarch64"))]
+            _ => panic!("no way to lock the task list"),
         }
     }
 }
 
 #[cfg(target_arch = "x86")]
-fn write_unlock_tasklist(flags: usize) {
+pub(crate) fn write_unlock_tasklist(flags: usize) {
     unsafe { frida_k_write_unlock_tasklist(flags) };
 }
 
 #[cfg(not(target_arch = "x86"))]
-fn write_unlock_tasklist(flags: usize) {
+pub(crate) fn write_unlock_tasklist(flags: usize) {
     unsafe {
-        match (__raw_write_lock_irqsave, __raw_write_unlock_irqrestore) {
-            (Some(_), Some(unlock)) => unlock(_tasklist_lock, flags),
-            _ => __raw_write_unlock.unwrap()(_tasklist_lock),
+        match (__raw_write_lock_irqsave, __raw_write_unlock_irqrestore, __raw_write_unlock) {
+            (Some(_), Some(unlock), _) => unlock(_tasklist_lock, flags),
+            (_, _, Some(unlock)) => unlock(_tasklist_lock),
+            #[cfg(target_arch = "aarch64")]
+            _ => super::native::write_unlock_irqrestore(_tasklist_lock as usize, flags),
+            #[cfg(not(target_arch = "aarch64"))]
+            _ => panic!("no way to unlock the task list"),
         }
     }
 }
@@ -728,7 +820,11 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _detach_pid: unsafe extern "C" fn(*mut *mut c_void, *mut c_void, c_int);
     #[cfg(not(target_arch = "x86"))]
-    static _free_pids: unsafe extern "C" fn(*mut *mut c_void);
+    static _free_pids: Option<unsafe extern "C" fn(*mut *mut c_void)>;
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    static _find_get_task_by_vpid: unsafe extern "C" fn(c_int) -> *mut c_void;
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    static ___put_task_struct: unsafe extern "C" fn(*mut c_void);
     #[cfg(not(target_arch = "x86"))]
     static __raw_write_lock: Option<unsafe extern "C" fn(*mut c_void)>;
     #[cfg(not(target_arch = "x86"))]

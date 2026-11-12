@@ -1,13 +1,17 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::ffi::c_void;
+use core::ffi::{CStr, c_char, c_void};
 
 pub fn field_offset(container: &str, field: &str) -> Option<usize> {
+    if let Some(told) = told_by_the_loader(container, field) {
+        return Some(told);
+    }
+
     let types = described_types()?;
     let described = types.named(container)?;
 
-    types.offset_of(&described, field).map(|bits| bits / 8)
+    types.offset_of_path(&described, field).map(|bits| bits / 8)
 }
 
 pub fn resolve_struct(container: &str) -> Option<usize> {
@@ -96,9 +100,41 @@ pub fn types_are_described() -> bool {
 }
 
 pub fn struct_size(container: &str) -> Option<usize> {
+    if let Some(told) = told_by_the_loader(container, "") {
+        return Some(told);
+    }
+
     let types = described_types()?;
 
     Some(types.named(container)?.size as usize)
+}
+
+fn told_by_the_loader(container: &str, field: &str) -> Option<usize> {
+    let mut entry = unsafe { _frida_kmod_layout } as *const ToldLayout;
+    if entry.is_null() {
+        return None;
+    }
+
+    unsafe {
+        while !(*entry).container.is_null() {
+            let told = &*entry;
+            if CStr::from_ptr(told.container).to_bytes() == container.as_bytes()
+                && CStr::from_ptr(told.field).to_bytes() == field.as_bytes()
+            {
+                return Some(told.value);
+            }
+            entry = entry.add(1);
+        }
+    }
+
+    None
+}
+
+#[repr(C)]
+struct ToldLayout {
+    container: *const c_char,
+    field: *const c_char,
+    value: usize,
 }
 
 struct DescribedTypes {
@@ -437,6 +473,25 @@ impl DescribedTypes {
         described.kind == KIND_ENUM || described.kind == KIND_WIDE_ENUM
     }
 
+    fn offset_of_path(&self, described: &Described, path: &str) -> Option<usize> {
+        let Some((member, rest)) = path.split_once('.') else {
+            return self.offset_of(described, path);
+        };
+
+        let (placement, type_id) = self.member_named(described, member)?;
+        let within = self.with_id(type_id)?;
+
+        Some(placement + self.offset_of_path(&within, rest)?)
+    }
+
+    fn member_named(&self, described: &Described, wanted: &str) -> Option<(usize, u32)> {
+        (0..described.members).find_map(|index| {
+            let member = described.body + (index * MEMBER_SIZE);
+            (self.name_of(word_at(self.types, member)) == wanted)
+                .then(|| (self.placement_of(described, member), word_at(self.types, member + 4)))
+        })
+    }
+
     // A structure the kernel lays out itself keeps its fields in a member with no name of its
     // own, so a field is looked for through those as well, and answers where it sits in the
     // structure the question was asked about.
@@ -619,4 +674,5 @@ const MAX_DEPTH: usize = 8;
 unsafe extern "C" {
     static ___start_BTF: *const c_void;
     static ___stop_BTF: *const c_void;
+    static _frida_kmod_layout: usize;
 }

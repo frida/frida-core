@@ -33,6 +33,9 @@ SECTIONS {
     _set_memory_x = .; . += 4;
     _set_memory_nx = .; . += 4;
     _modules = .; . += 4;
+    _module_mutex = .; . += 4;
+    _mutex_lock = .; . += 4;
+    _mutex_unlock = .; . += 4;
     _register_module_notifier = .; . += 4;
     _unregister_module_notifier = .; . += 4;
     _frida_kmod_link_open = .; . += 4;
@@ -41,6 +44,11 @@ SECTIONS {
     _frida_kmod_link_recv = .; . += 4;
     _frida_kmod_link_pending = .; . += 4;
     _frida_kmod_exit_worker = .; . += 4;
+    _frida_kmod_layout = .; . += 4;
+    _frida_kmod_remap_writable = .; . += 4;
+    _frida_kmod_unmap_writable = .; . += 4;
+    _execmem_alloc_rw = .; . += 4;
+    _vmalloc_noprof = .; . += 4;
     _execmem_free = .; . += 4;
     _module_alloc = .; . += 4;
     _module_memfree = .; . += 4;

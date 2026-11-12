@@ -1,6 +1,9 @@
 #include <linux/completion.h>
+#include <linux/cred.h>
 #include <linux/elf.h>
 #include <linux/err.h>
+#include <linux/fdtable.h>
+#include <linux/fs_struct.h>
 #include <linux/init.h>
 #include <linux/kallsyms.h>
 #include <linux/kasan.h>
@@ -10,7 +13,11 @@
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/nsproxy.h>
 #include <linux/poll.h>
+#include <linux/sched.h>
+#include <linux/sched/signal.h>
+#include <linux/seq_file.h>
 #include <linux/set_memory.h>
 #include <linux/slab.h>
 #include <linux/sort.h>
@@ -81,7 +88,27 @@ struct frida_elf
 struct frida_loader_export
 {
   const char * name;
-  void * address;
+  const void * address;
+};
+
+struct frida_layout_entry
+{
+  const char * container;
+  const char * field;
+  unsigned long value;
+};
+
+#ifdef CONFIG_SYSVIPC
+struct sem_undo_list
+{
+  refcount_t refcnt;
+};
+#endif
+
+struct fd_data
+{
+  fmode_t mode;
+  unsigned int fd;
 };
 
 struct frida_kernel_symbol
@@ -100,6 +127,14 @@ struct frida_symbol_census
   char * names;
 };
 
+struct frida_writable_alias
+{
+  struct list_head node;
+  void * mapping;
+  unsigned long first_page;
+  unsigned int n_pages;
+};
+
 struct frida_config_writer
 {
   u8 * data;
@@ -111,6 +146,8 @@ void frida_kmod_link_close (void);
 int frida_kmod_link_send (const void * data, size_t size);
 long frida_kmod_link_recv (void * data, size_t size);
 bool frida_kmod_link_pending (void);
+void * frida_kmod_remap_writable (unsigned long first_page, unsigned int n_pages);
+bool frida_kmod_unmap_writable (void * mapping);
 void frida_kmod_exit_worker (void);
 
 static int frida_load_agent (struct frida_agent * agent);
@@ -133,20 +170,20 @@ static size_t frida_measure_text (const struct frida_elf * elf);
 static int frida_take_symbol_census (struct frida_symbol_census * census);
 static void frida_release_symbol_census (struct frida_symbol_census * census);
 static size_t frida_measure_symbol_table (const struct frida_symbol_census * census);
-static void frida_write_symbol_table (struct frida_symbol_census * census, u8 * table);
-static void frida_store_u16 (u8 * destination, u16 value);
-static void frida_store_u32 (u8 * destination, u32 value);
-static void frida_store_u64 (u8 * destination, u64 value);
-static int frida_compare_symbol_names (const void * a, const void * b);
-static int frida_compare_symbol_offsets (const void * a, const void * b);
 static size_t frida_measure_config (size_t symbol_table_size, unsigned int * offset_size);
 static void frida_write_modules (struct frida_config_writer * writer);
-static void frida_write_u8 (struct frida_config_writer * writer, u8 value);
+static void frida_write_symbol_table (struct frida_symbol_census * census, u8 * table);
+static int frida_compare_symbol_names (const void * a, const void * b);
+static void frida_store_u32 (u8 * destination, u32 value);
+static void frida_store_u64 (u8 * destination, u64 value);
+static void frida_store_u16 (u8 * destination, u16 value);
+static int frida_compare_symbol_offsets (const void * a, const void * b);
+static unsigned int frida_framing_offset_size (size_t body_size, unsigned int n_offsets);
 static void frida_write_u64 (struct frida_config_writer * writer, u64 value);
+static void frida_write_u8 (struct frida_config_writer * writer, u8 value);
+static void frida_align_writer (struct frida_config_writer * writer, size_t alignment);
 static void frida_write_bytes (struct frida_config_writer * writer, const void * data, size_t size);
 static void frida_write_offset (struct frida_config_writer * writer, size_t value, unsigned int size);
-static void frida_align_writer (struct frida_config_writer * writer, size_t alignment);
-static unsigned int frida_framing_offset_size (size_t body_size, unsigned int n_offsets);
 static void frida_resolve_kallsyms (void);
 static void frida_resolve_kernel_range (void);
 static void frida_resolve_memory_protection (void);
@@ -159,6 +196,9 @@ static void * frida_alloc_code (size_t size);
 static void frida_free_code (void * ptr);
 static void frida_protect_text (const struct frida_agent * agent);
 static void frida_unprotect_text (const struct frida_agent * agent);
+static struct page * frida_page_for_virtual (unsigned long address);
+static bool frida_is_vmalloc_or_module_addr (const void * x);
+static void frida_flush_icache_range (unsigned long start, unsigned long size);
 static int frida_dev_open (struct inode * inode, struct file * file);
 static int frida_dev_release (struct inode * inode, struct file * file);
 static ssize_t frida_dev_read (struct file * file, char __user * buffer, size_t size,
@@ -179,6 +219,95 @@ static int frida_record_symbol (void * data, const char * name, struct module * 
 extern const u8 frida_agent_image_start[];
 extern const u8 frida_agent_image_end[];
 
+#define FRIDA_FIELD(container, field) { #container, #field, offsetof (struct container, field) }
+
+static const struct frida_layout_entry frida_kmod_layout[] =
+{
+  FRIDA_FIELD (task_struct, usage),
+  FRIDA_FIELD (task_struct, pid),
+  FRIDA_FIELD (task_struct, tgid),
+  FRIDA_FIELD (task_struct, mm),
+  FRIDA_FIELD (task_struct, stack),
+  FRIDA_FIELD (task_struct, real_parent),
+  FRIDA_FIELD (task_struct, parent),
+  FRIDA_FIELD (task_struct, group_leader),
+  FRIDA_FIELD (task_struct, exit_signal),
+  FRIDA_FIELD (task_struct, signal),
+  FRIDA_FIELD (task_struct, sighand),
+  FRIDA_FIELD (task_struct, tasks),
+  FRIDA_FIELD (task_struct, sibling),
+  FRIDA_FIELD (task_struct, thread_node),
+#ifdef FRIDA_HAVE_TASK_THREAD_GROUP
+  FRIDA_FIELD (task_struct, thread_group),
+#endif
+  FRIDA_FIELD (task_struct, files),
+  FRIDA_FIELD (task_struct, fs),
+  FRIDA_FIELD (task_struct, cred),
+  FRIDA_FIELD (task_struct, real_cred),
+  FRIDA_FIELD (task_struct, nsproxy),
+#ifdef CONFIG_SYSVIPC
+  FRIDA_FIELD (task_struct, sysvsem.undo_list),
+#endif
+  FRIDA_FIELD (task_struct, alloc_lock),
+#ifdef CONFIG_ARM64
+  FRIDA_FIELD (task_struct, thread_info.preempt_count),
+#endif
+#ifdef CONFIG_PREEMPT_RCU
+  FRIDA_FIELD (task_struct, rcu_read_lock_nesting),
+#endif
+#ifdef CONFIG_X86_64
+  FRIDA_FIELD (task_struct, thread.fsbase),
+#endif
+#ifdef CONFIG_ARM64
+  FRIDA_FIELD (task_struct, thread.uw.tp_value),
+#endif
+  FRIDA_FIELD (signal_struct, nr_threads),
+#ifdef FRIDA_HAVE_SIGNAL_QUICK_THREADS
+  FRIDA_FIELD (signal_struct, quick_threads),
+#endif
+  FRIDA_FIELD (signal_struct, live),
+  FRIDA_FIELD (signal_struct, sigcnt),
+  FRIDA_FIELD (signal_struct, thread_head),
+  FRIDA_FIELD (sighand_struct, count),
+  FRIDA_FIELD (sighand_struct, siglock),
+  FRIDA_FIELD (files_struct, count),
+  FRIDA_FIELD (fs_struct, users),
+#ifdef FRIDA_HAVE_FS_STRUCT_LOCK
+  FRIDA_FIELD (fs_struct, lock),
+#else
+  { "fs_struct", "lock", offsetof (struct fs_struct, seq.lock) },
+#endif
+  FRIDA_FIELD (cred, usage),
+  FRIDA_FIELD (nsproxy, count),
+#ifdef CONFIG_SYSVIPC
+  FRIDA_FIELD (sem_undo_list, refcnt),
+#endif
+  FRIDA_FIELD (fd_data, fd),
+  FRIDA_FIELD (vm_area_struct, vm_mm),
+  FRIDA_FIELD (vm_area_struct, vm_start),
+  FRIDA_FIELD (vm_area_struct, vm_end),
+  FRIDA_FIELD (seq_file, buf),
+  FRIDA_FIELD (seq_file, size),
+  FRIDA_FIELD (seq_file, count),
+#ifdef CONFIG_X86_64
+  FRIDA_FIELD (pt_regs, di),
+  FRIDA_FIELD (pt_regs, si),
+  FRIDA_FIELD (pt_regs, dx),
+  FRIDA_FIELD (pt_regs, r10),
+  FRIDA_FIELD (pt_regs, r8),
+#endif
+#ifdef CONFIG_ARM64
+  FRIDA_FIELD (pt_regs, regs),
+  FRIDA_FIELD (user_pt_regs, regs),
+  FRIDA_FIELD (user_pt_regs, sp),
+  FRIDA_FIELD (user_pt_regs, pc),
+  FRIDA_FIELD (user_pt_regs, pstate),
+#endif
+  { "pt_regs", "", sizeof (struct pt_regs) },
+  { "thread_union", "", sizeof (union thread_union) },
+  { NULL, NULL, 0 }
+};
+
 static const struct frida_loader_export frida_loader_exports[] =
 {
   { "frida_kmod_link_open", frida_kmod_link_open },
@@ -186,7 +315,10 @@ static const struct frida_loader_export frida_loader_exports[] =
   { "frida_kmod_link_send", frida_kmod_link_send },
   { "frida_kmod_link_recv", frida_kmod_link_recv },
   { "frida_kmod_link_pending", frida_kmod_link_pending },
+  { "frida_kmod_remap_writable", frida_kmod_remap_writable },
+  { "frida_kmod_unmap_writable", frida_kmod_unmap_writable },
   { "frida_kmod_exit_worker", frida_kmod_exit_worker },
+  { "frida_kmod_layout", frida_kmod_layout },
 };
 
 static struct frida_agent frida_agent;
@@ -209,6 +341,9 @@ static typeof (&set_memory_nx) frida_set_memory_nx_impl;
 static FridaExecmemAllocRwFunc frida_execmem_alloc_rw_impl;
 static FridaExecmemFreeFunc frida_execmem_free_impl;
 #endif
+
+static LIST_HEAD (frida_writable_aliases);
+static DEFINE_MUTEX (frida_writable_aliases_mutex);
 
 static DECLARE_KFIFO_PTR (frida_to_client, u8);
 static DECLARE_KFIFO_PTR (frida_from_client, u8);
@@ -691,104 +826,6 @@ frida_measure_symbol_table (const struct frida_symbol_census * census)
   return size;
 }
 
-static void
-frida_write_symbol_table (struct frida_symbol_census * census,
-                          u8 * table)
-{
-  u8 * name_index, * address_index;
-  size_t offset;
-  unsigned int i;
-
-  sort (census->symbols, census->n_symbols, sizeof (struct frida_kernel_symbol),
-      frida_compare_symbol_names, NULL);
-
-  frida_store_u32 (table, census->n_symbols);
-  name_index = table + sizeof (u32);
-  address_index = name_index + census->n_symbols * sizeof (u32);
-
-  offset = sizeof (u32) + 2 * census->n_symbols * sizeof (u32);
-  for (i = 0; i != census->n_symbols; i++)
-    {
-      struct frida_kernel_symbol * symbol = &census->symbols[i];
-      size_t name_size = strlen (symbol->name) + 1;
-      u8 * entry;
-
-      offset = ALIGN (offset, 8);
-      entry = table + offset;
-      symbol->entry_offset = offset;
-      frida_store_u32 (name_index + i * sizeof (u32), offset);
-
-      frida_store_u64 (entry, symbol->offset);
-      entry[8] = FRIDA_SYMBOL_TYPE;
-      entry[9] = FRIDA_SYMBOL_SECTION;
-      frida_store_u16 (entry + 10, 0);
-      memcpy (entry + 12, symbol->name, name_size);
-
-      offset += 12 + name_size;
-    }
-
-  sort (census->symbols, census->n_symbols, sizeof (struct frida_kernel_symbol),
-      frida_compare_symbol_offsets, NULL);
-
-  for (i = 0; i != census->n_symbols; i++)
-    frida_store_u32 (address_index + i * sizeof (u32), census->symbols[i].entry_offset);
-}
-
-static void
-frida_store_u16 (u8 * destination,
-                 u16 value)
-{
-  __le16 encoded = cpu_to_le16 (value);
-
-  memcpy (destination, &encoded, sizeof (encoded));
-}
-
-static void
-frida_store_u32 (u8 * destination,
-                 u32 value)
-{
-  __le32 encoded = cpu_to_le32 (value);
-
-  memcpy (destination, &encoded, sizeof (encoded));
-}
-
-static void
-frida_store_u64 (u8 * destination,
-                 u64 value)
-{
-  __le64 encoded = cpu_to_le64 (value);
-
-  memcpy (destination, &encoded, sizeof (encoded));
-}
-
-static int
-frida_compare_symbol_names (const void * a,
-                            const void * b)
-{
-  const struct frida_kernel_symbol * x = a;
-  const struct frida_kernel_symbol * y = b;
-  int res;
-
-  res = strcmp (x->name, y->name);
-  if (res != 0)
-    return res;
-
-  return (x->index > y->index) - (x->index < y->index);
-}
-
-static int
-frida_compare_symbol_offsets (const void * a,
-                              const void * b)
-{
-  const struct frida_kernel_symbol * x = a;
-  const struct frida_kernel_symbol * y = b;
-
-  if (x->offset != y->offset)
-    return (x->offset > y->offset) ? 1 : -1;
-
-  return (x->index > y->index) - (x->index < y->index);
-}
-
 static size_t
 frida_measure_config (size_t symbol_table_size,
                       unsigned int * offset_size)
@@ -839,10 +876,114 @@ frida_write_modules (struct frida_config_writer * writer)
 }
 
 static void
-frida_write_u8 (struct frida_config_writer * writer,
-                u8 value)
+frida_write_symbol_table (struct frida_symbol_census * census,
+                          u8 * table)
 {
-  frida_write_bytes (writer, &value, sizeof (value));
+  u8 * name_index, * address_index;
+  size_t offset;
+  unsigned int i;
+
+  sort (census->symbols, census->n_symbols, sizeof (struct frida_kernel_symbol),
+      frida_compare_symbol_names, NULL);
+
+  frida_store_u32 (table, census->n_symbols);
+  name_index = table + sizeof (u32);
+  address_index = name_index + census->n_symbols * sizeof (u32);
+
+  offset = sizeof (u32) + 2 * census->n_symbols * sizeof (u32);
+  for (i = 0; i != census->n_symbols; i++)
+    {
+      struct frida_kernel_symbol * symbol = &census->symbols[i];
+      size_t name_size = strlen (symbol->name) + 1;
+      u8 * entry;
+
+      offset = ALIGN (offset, 8);
+      entry = table + offset;
+      symbol->entry_offset = offset;
+      frida_store_u32 (name_index + i * sizeof (u32), offset);
+
+      frida_store_u64 (entry, symbol->offset);
+      entry[8] = FRIDA_SYMBOL_TYPE;
+      entry[9] = FRIDA_SYMBOL_SECTION;
+      frida_store_u16 (entry + 10, 0);
+      memcpy (entry + 12, symbol->name, name_size);
+
+      offset += 12 + name_size;
+    }
+
+  sort (census->symbols, census->n_symbols, sizeof (struct frida_kernel_symbol),
+      frida_compare_symbol_offsets, NULL);
+
+  for (i = 0; i != census->n_symbols; i++)
+    frida_store_u32 (address_index + i * sizeof (u32), census->symbols[i].entry_offset);
+}
+
+static int
+frida_compare_symbol_names (const void * a,
+                            const void * b)
+{
+  const struct frida_kernel_symbol * x = a;
+  const struct frida_kernel_symbol * y = b;
+  int res;
+
+  res = strcmp (x->name, y->name);
+  if (res != 0)
+    return res;
+
+  return (x->index > y->index) - (x->index < y->index);
+}
+
+static void
+frida_store_u32 (u8 * destination,
+                 u32 value)
+{
+  __le32 encoded = cpu_to_le32 (value);
+
+  memcpy (destination, &encoded, sizeof (encoded));
+}
+
+static void
+frida_store_u64 (u8 * destination,
+                 u64 value)
+{
+  __le64 encoded = cpu_to_le64 (value);
+
+  memcpy (destination, &encoded, sizeof (encoded));
+}
+
+static void
+frida_store_u16 (u8 * destination,
+                 u16 value)
+{
+  __le16 encoded = cpu_to_le16 (value);
+
+  memcpy (destination, &encoded, sizeof (encoded));
+}
+
+static int
+frida_compare_symbol_offsets (const void * a,
+                              const void * b)
+{
+  const struct frida_kernel_symbol * x = a;
+  const struct frida_kernel_symbol * y = b;
+
+  if (x->offset != y->offset)
+    return (x->offset > y->offset) ? 1 : -1;
+
+  return (x->index > y->index) - (x->index < y->index);
+}
+
+static unsigned int
+frida_framing_offset_size (size_t body_size,
+                           unsigned int n_offsets)
+{
+  if (body_size + n_offsets <= U8_MAX)
+    return 1;
+  if (body_size + 2 * n_offsets <= U16_MAX)
+    return 2;
+  if (body_size + 4 * n_offsets <= U32_MAX)
+    return 4;
+  return 8;
 }
 
 static void
@@ -852,6 +993,20 @@ frida_write_u64 (struct frida_config_writer * writer,
   __le64 encoded = cpu_to_le64 (value);
 
   frida_write_bytes (writer, &encoded, sizeof (encoded));
+}
+
+static void
+frida_write_u8 (struct frida_config_writer * writer,
+                u8 value)
+{
+  frida_write_bytes (writer, &value, sizeof (value));
+}
+
+static void
+frida_align_writer (struct frida_config_writer * writer,
+                    size_t alignment)
+{
+  writer->offset = ALIGN (writer->offset, alignment);
 }
 
 static void
@@ -871,26 +1026,6 @@ frida_write_offset (struct frida_config_writer * writer,
   __le64 encoded = cpu_to_le64 (value);
 
   frida_write_bytes (writer, &encoded, size);
-}
-
-static void
-frida_align_writer (struct frida_config_writer * writer,
-                    size_t alignment)
-{
-  writer->offset = ALIGN (writer->offset, alignment);
-}
-
-static unsigned int
-frida_framing_offset_size (size_t body_size,
-                           unsigned int n_offsets)
-{
-  if (body_size + n_offsets <= U8_MAX)
-    return 1;
-  if (body_size + 2 * n_offsets <= U16_MAX)
-    return 2;
-  if (body_size + 4 * n_offsets <= U32_MAX)
-    return 4;
-  return 8;
 }
 
 static void
@@ -982,24 +1117,18 @@ frida_unseal_landing_pad (void * address)
   unsigned long first_page = (unsigned long) address & PAGE_MASK;
   unsigned int n_pages = ((((unsigned long) address + ENDBR_INSN_SIZE - 1) & PAGE_MASK)
       - first_page) / PAGE_SIZE + 1;
-  struct page * pages[2];
-  unsigned int i;
   u8 * alias;
 
   if (*(u32 *) address != gen_endbr_poison ())
     return address;
 
-  for (i = 0; i != n_pages; i++)
-    pages[i] = pfn_to_page (__phys_to_pfn (__pa_symbol (first_page + i * PAGE_SIZE)));
-
-  alias = vmap (pages, n_pages, VM_MAP, PAGE_KERNEL);
+  alias = frida_kmod_remap_writable (first_page, n_pages);
   if (alias == NULL)
     return address;
 
   *(u32 *) (alias + ((unsigned long) address - first_page)) = gen_endbr ();
 
-  vunmap (alias);
-  kick_all_cpus_sync ();
+  frida_kmod_unmap_writable (alias);
 #endif
 
   return address;
@@ -1149,6 +1278,119 @@ bool
 frida_kmod_link_pending (void)
 {
   return !kfifo_is_empty (&frida_from_client);
+}
+
+/*
+ * A second mapping of the same physical pages, writable regardless of what the
+ * primary mapping allows. This is how the agent lands hooks in text that
+ * STRICT_KERNEL_RWX has made read-only.
+ */
+void *
+frida_kmod_remap_writable (unsigned long first_page,
+                           unsigned int n_pages)
+{
+  struct page ** pages;
+  unsigned int i;
+  void * mapping;
+  struct frida_writable_alias * alias;
+
+  pages = kmalloc_array (n_pages, sizeof (struct page *), GFP_KERNEL);
+  if (pages == NULL)
+    return NULL;
+  for (i = 0; i != n_pages; i++)
+    pages[i] = frida_page_for_virtual (first_page + ((unsigned long) i * PAGE_SIZE));
+
+  mapping = vmap (pages, n_pages, VM_MAP, PAGE_KERNEL);
+
+  kfree (pages);
+
+  if (mapping == NULL)
+    return NULL;
+
+  alias = kmalloc (sizeof (struct frida_writable_alias), GFP_KERNEL);
+  alias->mapping = mapping;
+  alias->first_page = first_page;
+  alias->n_pages = n_pages;
+
+  mutex_lock (&frida_writable_aliases_mutex);
+  list_add (&alias->node, &frida_writable_aliases);
+  mutex_unlock (&frida_writable_aliases_mutex);
+
+  return mapping;
+}
+
+bool
+frida_kmod_unmap_writable (void * mapping)
+{
+  struct frida_writable_alias * alias = NULL, * candidate;
+
+  mutex_lock (&frida_writable_aliases_mutex);
+  list_for_each_entry (candidate, &frida_writable_aliases, node)
+    {
+      if (candidate->mapping == mapping)
+        {
+          alias = candidate;
+          list_del (&alias->node);
+          break;
+        }
+    }
+  mutex_unlock (&frida_writable_aliases_mutex);
+
+  if (alias == NULL)
+    return false;
+
+  vunmap (mapping);
+
+  frida_flush_icache_range (alias->first_page, (unsigned long) alias->n_pages * PAGE_SIZE);
+
+  kfree (alias);
+
+  return true;
+}
+
+static struct page *
+frida_page_for_virtual (unsigned long address)
+{
+  if (frida_is_vmalloc_or_module_addr ((void *) address))
+    return vmalloc_to_page ((void *) address);
+
+  if (virt_addr_valid ((void *) address))
+    return virt_to_page ((void *) address);
+
+  /*
+   * Kernel text and rodata live in the image mapping, which is neither the linear
+   * map nor vmalloc space. __pa_symbol() is the sanctioned way out of there.
+   */
+  return pfn_to_page (__phys_to_pfn (__pa_symbol (address)));
+}
+
+/* The kernel's own is_vmalloc_or_module_addr() is not exported, and on arm64 the
+ * module region sits below the vmalloc range rather than inside it, so testing for
+ * vmalloc alone would miss it. */
+static bool
+frida_is_vmalloc_or_module_addr (const void * x)
+{
+#if defined (CONFIG_MODULES) && defined (MODULES_VADDR)
+  unsigned long address = (unsigned long) kasan_reset_tag (x);
+
+  if (address >= MODULES_VADDR && address < MODULES_END)
+    return true;
+#endif
+
+  return is_vmalloc_addr (x);
+}
+
+static void
+frida_flush_icache_range (unsigned long start,
+                          unsigned long size)
+{
+#ifdef CONFIG_ARM64
+  /* flush_icache_range() inlines a reference to __icache_flags, which GKI does not
+   * export; these two are what it would have called. */
+  caches_clean_inval_pou (start, start + size);
+#endif
+
+  kick_all_cpus_sync ();
 }
 
 void
