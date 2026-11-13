@@ -1406,10 +1406,11 @@ namespace Frida.Barebone {
 				for (uint i = 0; i != t1sz; i++)
 					parameters.upper_bits |= 1ULL << (63 - i);
 
-				// TTBR1 carries more than the table's address: an ASID above it, and CnP in
-				// the bit below, which the table itself is far too aligned to have set.
-				parameters.tt1 = regs.ttbr1 & INT48_MASK & ~((uint64) parameters.granule - 1);
 				parameters.t1sz = t1sz;
+
+				uint64 first_table_size = (uint64) compute_max_entries (parameters.first_level, parameters)
+					* Descriptor.SIZE;
+				parameters.tt1 = regs.ttbr1 & INT48_MASK & ~(first_table_size - 1);
 
 				parameters.sprr_enabled = (regs.sprr_config & 1) != 0;
 				parameters.sprr_perm = regs.sprr_perm;
