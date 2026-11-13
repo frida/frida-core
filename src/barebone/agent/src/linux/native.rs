@@ -921,8 +921,21 @@ fn hot_per_cpu_place(member: &str) -> Option<usize> {
         return None;
     }
 
-    Some(hot + super::layout::field_offset("pcpu_hot", member)?)
+    Some(hot + hot_member_offset(member)?)
 }
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn hot_member_offset(member: &str) -> Option<usize> {
+    super::layout::field_offset("pcpu_hot", member).or_else(|| {
+        PCPU_HOT_LEADING_MEMBERS
+            .iter()
+            .position(|leading| *leading == member)
+            .map(|index| index * size_of::<usize>())
+    })
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const PCPU_HOT_LEADING_MEMBERS: [&str; 2] = ["current_task", "preempt_count"];
 
 #[cfg(target_arch = "x86_64")]
 fn read_per_cpu_word(place: usize) -> usize {
