@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -19,7 +20,8 @@ import urllib.request
 
 def main():
     if len(sys.argv) >= 2 and sys.argv[1].split("-", maxsplit=1)[0] in ("check", "boot", "rewind",
-                                                                       "live", "livecheck"):
+                                                                       "live", "livecheck", "prepare",
+                                                                       "test"):
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -68,6 +70,19 @@ def main():
             rewind.add_argument("--qmp", type=Path, required=True)
             rewind.add_argument("--snapshot", default=SNAPSHOT_NAME)
 
+        for name, preparation in PREPARATIONS.items():
+            description = preparation.description
+            subparsers.add_parser(f"prepare-{name}",
+                                  help=f"fetch a {description} guest and save it booted, for live tests to "
+                                       "resume")
+
+            test = subparsers.add_parser(f"test-{name}",
+                                         help=f"run the {preparation.suite} live tests against a prepared "
+                                              f"{description} guest")
+            test.add_argument("--agent", type=Path, required=True)
+            test.add_argument("--tests", type=Path, required=True)
+            test.add_argument("names", nargs="*")
+
         subparsers.add_parser("check-kmod",
                               help="verify that a kmod guest can be booted, fetching what it needs")
 
@@ -82,7 +97,12 @@ def main():
 
         args = parser.parse_args()
         action, target = args.command.split("-", maxsplit=1)
-        if target == "kmod":
+        if action == "prepare":
+            image, _ = prepare_guest(target)
+            print(image)
+        elif action == "test":
+            test_guest(target, args)
+        elif target == "kmod":
             if action == "check":
                 check_kmod_guest()
             else:
@@ -235,42 +255,47 @@ def boot_live_guest(arch: str, args):
     if args.console_commands is not None:
         threading.Thread(target=feed_console, args=(args.console_commands, process), daemon=True).start()
 
-    asked = False
-    ready = False
-    where_it_is = []
     try:
+        where_it_is = bring_up_link(guest, process)
+
+        print(f"system-map {system_map}", flush=True)
+        for name, value in where_it_is.items():
+            print(f"{name} {value}", flush=True)
+        print(f"bus {VIRTIO_SERIAL_ID}.0", flush=True)
+        print("ready", flush=True)
+
         for raw_line in process.stdout:
-            line = raw_line.decode(errors="replace").rstrip()
-            print(line, file=sys.stderr)
-
-            if not asked and LIVE_READY_MARKER in line:
-                asked = True
-                if guest.hostlink == "mmio":
-                    process.stdin.write((WHERE_THE_LINK_IS + "\n").encode())
-                else:
-                    process.stdin.write((LET_THE_LINK_GO + "\n").encode())
-                process.stdin.flush()
-
-            if not ready and LINK_ANSWER_MARKER in line and LINK_GONE_MARKER not in line:
-                fields = line.split(LINK_ANSWER_MARKER, maxsplit=1)[1].split()
-                where_it_is = [f"mmio 0x{fields[0]}", f"irq {fields[1]}"]
-
-                process.stdin.write((LET_THE_LINK_GO + "\n").encode())
-                process.stdin.flush()
-
-            if not ready and LINK_GONE_MARKER in line:
-                ready = True
-
-                print(f"system-map {system_map}", flush=True)
-                for detail in where_it_is:
-                    print(detail, flush=True)
-                print(f"bus {VIRTIO_SERIAL_ID}.0", flush=True)
-                print("ready", flush=True)
-
-        if not ready:
-            raise Unavailable("guest exited before it said where the link is")
+            print(raw_line.decode(errors="replace").rstrip(), file=sys.stderr)
     finally:
         process.kill()
+
+
+def bring_up_link(guest: "Guest", process) -> dict:
+    asked = False
+    where_it_is = {}
+    for raw_line in process.stdout:
+        line = raw_line.decode(errors="replace").rstrip()
+        print(line, file=sys.stderr)
+
+        if not asked and LIVE_READY_MARKER in line:
+            asked = True
+            if guest.hostlink == "mmio":
+                process.stdin.write((WHERE_THE_LINK_IS + "\n").encode())
+            else:
+                process.stdin.write((LET_THE_LINK_GO + "\n").encode())
+            process.stdin.flush()
+
+        if LINK_ANSWER_MARKER in line and LINK_GONE_MARKER not in line:
+            fields = line.split(LINK_ANSWER_MARKER, maxsplit=1)[1].split()
+            where_it_is = {"mmio": f"0x{fields[0]}", "irq": fields[1]}
+
+            process.stdin.write((LET_THE_LINK_GO + "\n").encode())
+            process.stdin.flush()
+
+        if LINK_GONE_MARKER in line:
+            return where_it_is
+
+    raise Unavailable("guest exited before it said where the link is")
 
 
 def hostlink_arguments(guest: "Guest") -> [str]:
@@ -320,10 +345,7 @@ def boot_windows_guest(guest: "WindowsGuest", args):
 
     diagnostics = []
     if args.debugcon is not None:
-        diagnostics = [
-            "-chardev", f"file,id={DEBUGCON_ID},path={args.debugcon}",
-            "-device", f"isa-debugcon,iobase={DEBUGCON_PORT:#x},chardev={DEBUGCON_ID}",
-        ]
+        diagnostics = debugcon_arguments(args.debugcon)
 
     process = subprocess.Popen([
         qemu,
@@ -408,6 +430,337 @@ def rewind_windows_guest(args):
     qmp.monitor("cont")
 
 
+def prepare_guest(name: str) -> ("Path", dict):
+    directory = cache_root() / name
+    image = directory / f"{name}.qcow2"
+    details_path = directory / f"{name}.json"
+    if image.exists():
+        return image, json.loads(details_path.read_text())
+
+    with tempfile.TemporaryDirectory() as workdir:
+        staged, details = PREPARATIONS[name].prepare(Path(workdir))
+        directory.mkdir(parents=True, exist_ok=True)
+        details_path.write_text(json.dumps(details))
+        shutil.move(staged, image)
+
+    return image, details
+
+
+def test_guest(name: str, args):
+    preparation = PREPARATIONS[name]
+    image, details = prepare_guest(name)
+
+    names = [test for test in live_tests(args.tests, preparation.suite)
+             if not args.names or any(wanted in test for wanted in args.names)]
+
+    failed = []
+    with tempfile.TemporaryDirectory() as workdir:
+        disk = Path(workdir) / image.name
+        shutil.copyfile(image, disk)
+        qmp_path = Path(workdir) / "qmp.sock"
+        console_path = Path(workdir) / "console.log"
+        agent_log_path = Path(workdir) / "agent.log"
+        emulator_path = Path(workdir) / "emulator.log"
+        variables = preparation.variables
+
+        for index, test in enumerate(names):
+            console_path.write_bytes(b"")
+            agent_log_path.write_bytes(b"")
+            with Listeners(qmp_path) as listeners, emulator_path.open("wb") as emulator_output:
+                process = subprocess.Popen(
+                    preparation.arguments(disk, details, listeners) + [
+                        "-serial", f"file:{console_path}",
+                        "-loadvm", PREPARED_SNAPSHOT,
+                    ] + preparation.agent_log(agent_log_path),
+                    pass_fds=listeners.fds, stdout=subprocess.DEVNULL, stderr=emulator_output)
+                try:
+                    environment = os.environ | {
+                        f"FRIDA_TEST_{variables}_AGENT": str(args.agent),
+                        f"FRIDA_TEST_{variables}_QMP": str(qmp_path),
+                        f"FRIDA_TEST_{variables}_GDB_PORT": str(listeners.gdb_port),
+                        f"FRIDA_TEST_{variables}_BUS": f"{VIRTIO_SERIAL_ID}.0",
+                    } | {f"FRIDA_TEST_{variables}_{key}": value
+                         for key, value in preparation.environment(details).items()}
+                    outcome = subprocess.run([args.tests, "-p", test], env=environment,
+                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    emulator_gave_up = process.poll() is not None
+                finally:
+                    process.terminate()
+                    process.wait()
+
+            if outcome.returncode == 0:
+                print(f"ok {index + 1} {test}", flush=True)
+            else:
+                failed.append(test)
+                print(f"not ok {index + 1} {test}", flush=True)
+                print(outcome.stdout.decode(errors="replace"), file=sys.stderr)
+                said = [("guest console", console_path), ("agent", agent_log_path)]
+                if emulator_gave_up:
+                    said.append(("emulator", emulator_path))
+                report_what_the_guest_said(said)
+
+    print(f"1..{len(names)}")
+    if failed:
+        sys.exit(1)
+
+
+def live_tests(runner: Path, suite: str) -> [str]:
+    listing = subprocess.run([runner, "-l", "-p", f"/Barebone/{suite}"], capture_output=True, check=True)
+    names = []
+    for line in listing.stdout.decode().splitlines():
+        test = line.removeprefix("# ")
+        if test.startswith(f"/Barebone/{suite}/") and test.endswith("-in-live-guest"):
+            names.append(test)
+    return names
+
+
+def report_what_the_guest_said(said: [(str, Path)]):
+    for title, path in said:
+        text = path.read_bytes().decode(errors="replace").strip()
+        if text:
+            print(f"--- {title} ---\n{text}", file=sys.stderr)
+
+
+def prepare_linux(arch: str, workdir: Path) -> (Path, dict):
+    guest = GUESTS[arch]
+    qemu_img = require_program("qemu-img")
+    details = {
+        "kernel": str(fetch_kernel(guest)),
+        "ramdisk": str(fetch_ramdisk(guest)),
+        "system_map": str(fetch_system_map(guest)),
+    }
+
+    image = workdir / f"linux-{arch}.qcow2"
+    subprocess.run([qemu_img, "create", "-q", "-f", "qcow2", image, LIVE_STATE_DISK_SIZE], check=True)
+
+    control_path = workdir / "control.sock"
+    with Listeners(control_path) as listeners:
+        process = subprocess.Popen(live_guest_arguments(guest, image, details, listeners) + ["-serial", "stdio"],
+                                   pass_fds=listeners.fds, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL)
+        try:
+            details |= bring_up_link(guest, process)
+            control = Qmp(control_path, process)
+            control.monitor("stop")
+            control.monitor(f"savevm {PREPARED_SNAPSHOT}")
+        finally:
+            process.kill()
+            process.wait()
+
+    return image, details
+
+
+def live_guest_arguments(guest: "Guest", image: Path, details: dict, listeners: "Listeners") -> [str]:
+    machine_arguments = []
+    if guest.live_machine != "":
+        machine_arguments += ["-machine", guest.live_machine]
+    if guest.cpu != "":
+        machine_arguments += ["-cpu", guest.cpu]
+
+    return [
+        require_qemu(guest),
+        "-m", str(LIVE_MEMORY_SIZE),
+    ] + machine_arguments + [
+        "-kernel", details["kernel"],
+        "-initrd", details["ramdisk"],
+        "-append", f"console={guest.console} panic=-1 {guest.live_cmdline}".rstrip(),
+        "-drive", f"if=none,id=state,file={image},format=qcow2",
+        "-display", "none",
+        "-monitor", "none",
+        "-no-reboot",
+    ] + listener_arguments(listeners) + hostlink_arguments(guest)
+
+
+def live_guest_environment(guest: "Guest", details: dict) -> dict:
+    environment = {"SYSTEM_MAP": details["system_map"]}
+    if guest.hostlink == "mmio":
+        environment["MMIO"] = details["mmio"]
+    elif guest.ecam != 0:
+        environment["ECAM"] = hex(guest.ecam)
+    return environment
+
+
+def prepare_win95(workdir: Path) -> (Path, dict):
+    guest = WINDOWS_GUESTS["win95"]
+    qemu = require_windows_emulator(guest)
+    qemu_img = require_program("qemu-img")
+    for program in MTOOLS_PROGRAMS:
+        require_program(program)
+
+    disk = workdir / "disk.raw"
+    subprocess.run([qemu_img, "convert", "-O", "raw", fetch_verified(WIN95_DISK), disk], check=True)
+    system = f"{disk}@@{WIN95_PARTITION_OFFSET}"
+    rewrite_dos_file(system, "::/MSDOS.SYS",
+                     lambda text: replace_once(text, b"[Options]\r\n", b"[Options]\r\nAutoScan=0\r\n"))
+    rewrite_dos_file(system, "::/WINDOWS/SYSTEM.INI", without_display_surprises)
+    write_dos_file(system, "::/WINDOWS/Start Menu/Programs/StartUp/READY.BAT", ANNOUNCE_READINESS)
+    write_dos_file(system, "::/WINDOWS/INF/FRIDA.INF", HOSTLINK_INF)
+    mtools("mren", "-i", system, "::/WINDOWS/WELCOME.EXE", "::/WINDOWS/WELCOME.OFF")
+
+    floppy = workdir / "patcher9x.img"
+    shutil.copyfile(fetch_verified(PATCHER9X_FLOPPY), floppy)
+    write_dos_file(str(floppy), "::/AUTOEXEC.BAT", PATCH_AND_ANNOUNCE)
+    run_until_marker([
+        qemu,
+        "-machine", "pc,accel=tcg",
+        "-cpu", guest.cpu,
+        "-m", str(guest.memory),
+        "-drive", f"file={disk},format=raw,if=ide",
+        "-drive", f"file={floppy},format=raw,if=floppy,readonly=on",
+        "-boot", "a",
+        "-nic", "none",
+        "-display", "none",
+        "-monitor", "none",
+        "-serial", "stdio",
+    ], PATCHED_MARKER)
+
+    image = workdir / "win95.qcow2"
+    subprocess.run([qemu_img, "convert", "-O", "qcow2", disk, image], check=True)
+
+    control_path = workdir / "control.sock"
+    with Listeners(control_path) as listeners:
+        process = subprocess.Popen(windows_guest_arguments(guest, image, listeners) + ["-serial", "stdio"],
+                                   pass_fds=listeners.fds, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            wait_for_marker(process, READY_MARKER)
+            control = Qmp(control_path, process)
+            control.monitor("stop")
+            control.monitor(f"savevm {PREPARED_SNAPSHOT}")
+        finally:
+            process.kill()
+            process.wait()
+
+    return image, {}
+
+
+def fetch_verified(download: "Download") -> Path:
+    cached = cache_root() / "downloads" / download.name
+    if not cached.exists():
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        staging = cached.with_suffix(".partial")
+        try:
+            with urllib.request.urlopen(download.url, timeout=60) as response, staging.open("wb") as f:
+                shutil.copyfileobj(response, f)
+        except Exception as e:
+            staging.unlink(missing_ok=True)
+            raise Unavailable(f"unable to download {download.url}: {e}")
+        staging.replace(cached)
+
+    digest = hashlib.sha256(cached.read_bytes()).hexdigest()
+    if digest != download.sha256:
+        cached.unlink()
+        raise Unavailable(f"{download.url} is not what it was: its SHA-256 is {digest}")
+    return cached
+
+
+def rewrite_dos_file(image: str, path: str, change):
+    original = mtools("mtype", "-i", image, path)
+    attributes = mtools("mattrib", "-i", image, path).split(b":", 1)[0].decode()
+    mtools("mattrib", "-i", image, "-r", "-s", "-h", path)
+    write_dos_file(image, path, change(original))
+    flags = [f"+{flag.lower()}" for flag in attributes if flag in "RSH"]
+    if flags:
+        mtools("mattrib", "-i", image, *flags, path)
+
+
+def without_display_surprises(text: bytes) -> bytes:
+    text = replace_once(text, b"display.drv=pnpdrvr.drv\r\n", b"display.drv=vga.drv\r\n")
+    return re.sub(rb"SCRNSAVE\.EXE=[^\r]*\r\n", b"", text)
+
+
+def replace_once(text: bytes, old: bytes, new: bytes) -> bytes:
+    if old not in text:
+        raise Unavailable(f"the image is not the one expected: it lacks {old!r}")
+    return text.replace(old, new, 1)
+
+
+def write_dos_file(image: str, path: str, content: bytes):
+    with tempfile.NamedTemporaryFile() as staged:
+        staged.write(content)
+        staged.flush()
+        mtools("mcopy", "-o", "-i", image, staged.name, path)
+
+
+def mtools(*arguments) -> bytes:
+    return subprocess.run(arguments, env=os.environ | {"MTOOLS_SKIP_CHECK": "1"}, capture_output=True,
+                          check=True).stdout
+
+
+def run_until_marker(arguments: [str], marker: str):
+    process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        wait_for_marker(process, marker)
+    finally:
+        process.kill()
+        process.wait()
+
+
+def windows_guest_arguments(guest: "WindowsGuest", image: Path, listeners: "Listeners") -> [str]:
+    return [
+        require_windows_emulator(guest),
+        "-machine", "pc,accel=tcg",
+        "-cpu", guest.cpu,
+        "-m", str(guest.memory),
+        "-drive", f"file={image},format=qcow2,if={guest.disk_interface}",
+        "-vga", "cirrus",
+        "-nic", "none",
+        "-display", "none",
+        "-monitor", "none",
+        "-device", "virtio-serial-pci,id=" + VIRTIO_SERIAL_ID,
+    ] + listener_arguments(listeners)
+
+
+def listener_arguments(listeners: "Listeners") -> [str]:
+    return [
+        "-chardev", f"socket,id={GDB_ID},fd={listeners.gdb.fileno()},server=on,wait=off,nodelay=on",
+        "-gdb", f"chardev:{GDB_ID}",
+        "-chardev", f"socket,id={QMP_ID},fd={listeners.qmp.fileno()},server=on,wait=off",
+        "-mon", f"chardev={QMP_ID},mode=control",
+    ]
+
+
+def debugcon_arguments(path: Path) -> [str]:
+    return [
+        "-chardev", f"file,id={DEBUGCON_ID},path={path}",
+        "-device", f"isa-debugcon,iobase={DEBUGCON_PORT:#x},chardev={DEBUGCON_ID}",
+    ]
+
+
+class Listeners:
+    def __init__(self, qmp_path: Path):
+        self.qmp = socket.socket(socket.AF_UNIX)
+        self.qmp.bind(str(qmp_path))
+        self.qmp.listen()
+        self._qmp_path = qmp_path
+
+        self.gdb = socket.socket()
+        self.gdb.bind(("127.0.0.1", 0))
+        self.gdb.listen()
+
+    @property
+    def gdb_port(self) -> int:
+        return self.gdb.getsockname()[1]
+
+    @property
+    def fds(self) -> [int]:
+        return [self.qmp.fileno(), self.gdb.fileno()]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.qmp.close()
+        self.gdb.close()
+        self._qmp_path.unlink(missing_ok=True)
+
+
+def wait_for_marker(process, marker: str):
+    for raw_line in process.stdout:
+        if marker in raw_line.decode(errors="replace"):
+            return
+    raise Unavailable(f"guest exited before it said {marker}")
+
+
 class Qmp:
     def __init__(self, path, process=None):
         deadline = time.monotonic() + QMP_CONNECT_TIMEOUT_SECONDS
@@ -468,11 +821,16 @@ def disk_arguments(args) -> [str]:
 
 
 def require_windows_guest(guest: "WindowsGuest", args) -> str:
+    qemu = require_windows_emulator(guest)
+    if not args.image.exists():
+        raise Unavailable(f"{args.image} does not exist")
+    return qemu
+
+
+def require_windows_emulator(guest: "WindowsGuest") -> str:
     qemu = shutil.which(guest.emulator)
     if qemu is None:
         raise Unavailable(f"{guest.emulator} is not installed")
-    if not args.image.exists():
-        raise Unavailable(f"{args.image} does not exist")
     return qemu
 
 
@@ -654,9 +1012,13 @@ def fetch_cached(guest: "Guest", name: str, url: str) -> Path:
 
 
 def cache_dir(guest: "Guest") -> Path:
+    return cache_root() / f"qemu-{guest.arch}"
+
+
+def cache_root() -> Path:
     base = os.environ.get("XDG_CACHE_HOME")
     root = Path(base) if base is not None else Path.home() / ".cache"
-    return root / "frida-tests" / f"qemu-{guest.arch}"
+    return root / "frida-tests"
 
 
 class Unavailable(Exception):
@@ -701,6 +1063,10 @@ GUESTS = {
               # Left where it lands by default, the configuration space is above what a
               # kernel without LPAE can address.
               live_machine="virt,highmem=off", ecam=0x3f000000),
+        Guest("arm64", "qemu-system-aarch64", ALPINE_NETBOOT_URL.format("aarch64"),
+              machine="virt", cpu="max", console="ttyAMA0",
+              ramdisk_url=ALPINE_RAMDISK_URL.format("aarch64"), live_machine="virt", ecam=0x4010000000,
+              live_cmdline="initcall_blacklist=virtio_console_init"),
     ]
 }
 
@@ -711,6 +1077,8 @@ BUSYBOX_URL = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/b
 VIRTIO_SERIAL_ID = "frida-vserial"
 
 GDB_ID = "frida-gdb"
+
+QMP_ID = "frida-qmp"
 
 # Newest model that boots 95; older ones lack the CMOVs the agent emits.
 class WindowsGuest(NamedTuple):
@@ -731,6 +1099,101 @@ WINDOWS_GUESTS = {
     "winxp64": WindowsGuest("Windows XP x64", "qemu-system-x86_64", "core2duo", 1024, 900, "ide",
                             None),
 }
+
+class Preparation(NamedTuple):
+    description: str
+    suite: str
+    variables: str
+    prepare: object
+    arguments: object
+    environment: object
+    agent_log: object
+
+
+def windows_preparation(name: str, suite: str, variables: str, prepare) -> Preparation:
+    guest = WINDOWS_GUESTS[name]
+    return Preparation(guest.description, suite, variables, prepare,
+                       lambda image, details, listeners: windows_guest_arguments(guest, image, listeners),
+                       lambda details: {},
+                       debugcon_arguments)
+
+
+def linux_preparation(arch: str, suite: str, variables: str) -> Preparation:
+    guest = GUESTS[arch]
+    return Preparation(f"Linux ({arch})", suite, variables,
+                       lambda workdir: prepare_linux(arch, workdir),
+                       lambda image, details, listeners: live_guest_arguments(guest, image, details, listeners),
+                       lambda details: live_guest_environment(guest, details),
+                       lambda path: [])
+
+
+PREPARATIONS = {
+    "win95": windows_preparation("win95", "Win9x", "WIN9X", prepare_win95),
+    "linux-x86": linux_preparation("x86", "IA32", "LINUX_X86"),
+    "linux-x86_64": linux_preparation("x86_64", "X64", "LINUX_X86_64"),
+    "linux-arm": linux_preparation("arm", "ARM", "LINUX_ARM"),
+    "linux-arm64": linux_preparation("arm64", "ARM", "LINUX_ARM"),
+}
+
+PREPARED_SNAPSHOT = "ready"
+
+LIVE_MEMORY_SIZE = 256
+LIVE_STATE_DISK_SIZE = "16M"
+
+
+class Download(NamedTuple):
+    name: str
+    url: str
+    sha256: str
+
+
+WIN95_DISK = Download(
+    "win95-en.vhd",
+    "https://archive.org/download/windows-95-vhd/Windows%2095%20VHD.iso/"
+    "VHD%20%28Virtual%20Hard%20Disk%29%2FWin95-en%20with%20MS-DOS_6.%20Hard%20Disk.vhd",
+    "bea8244016d7ffe8c3e6ab0efbd9ef37219d76ebc74590a0e307d0dc7dc74d25")
+WIN95_PARTITION_OFFSET = 63 * 512
+
+PATCHER9X_FLOPPY = Download(
+    "patcher9x-0.9.91-boot.img",
+    "https://github.com/JHRobotics/patcher9x/releases/download/v0.9.91/patcher9x-0.9.91-boot.img",
+    "ca4fddeb6ad44f63f42f50c668b5e9e1587f9686b21d5a68c3beac1f5781ed03")
+
+MTOOLS_PROGRAMS = ["mtype", "mattrib", "mcopy", "mren"]
+
+PATCHED_MARKER = "patched"
+READY_MARKER = "ready"
+
+PATCH_AND_ANNOUNCE = (
+    b"@ECHO OFF\r\n"
+    b"SET PATH=A:\\\r\n"
+    b"patch9x -auto C:\\WINDOWS\\SYSTEM\r\n"
+    b"ECHO patched > COM1\r\n"
+)
+
+ANNOUNCE_READINESS = (
+    b"@ECHO OFF\r\n"
+    b"ECHO ready > COM1\r\n"
+)
+
+HOSTLINK_INF = (
+    b"[Version]\r\n"
+    b"Signature=\"$CHICAGO$\"\r\n"
+    b"Class=System\r\n"
+    b"Provider=%Frida%\r\n"
+    b"\r\n"
+    b"[Manufacturer]\r\n"
+    b"%Frida%=Frida\r\n"
+    b"\r\n"
+    b"[Frida]\r\n"
+    b"%Hostlink%=NoDriver,PCI\\VEN_1AF4&DEV_1003\r\n"
+    b"\r\n"
+    b"[NoDriver]\r\n"
+    b"\r\n"
+    b"[Strings]\r\n"
+    b"Frida=\"Frida\"\r\n"
+    b"Hostlink=\"Frida hostlink\"\r\n"
+)
 
 DEBUGCON_ID = "frida-debugcon"
 DEBUGCON_PORT = 0xe9
