@@ -1,10 +1,14 @@
 use core::ffi::{c_int, c_void};
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use core::ffi::c_long;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 use core::ptr;
+#[cfg(target_arch = "arm")]
+use core::sync::atomic::AtomicBool;
+#[cfg(target_arch = "aarch64")]
+use core::sync::atomic::AtomicPtr;
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::Ordering;
 
 use crate::bindings::{
     gum_barebone_handle_exception, GumCpuContext,
@@ -303,6 +307,9 @@ unsafe extern "C" {
 const PROLOGUE: [u32; 2] = [0xe92d4010, 0xe52de004];
 
 #[cfg(target_arch = "arm")]
+static ACTIVATED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_arch = "arm")]
 static mut ORIGINAL_STUB: usize = 0;
 
 #[cfg(target_arch = "arm")]
@@ -442,10 +449,38 @@ unsafe extern "C" {
 }
 
 #[cfg(target_arch = "aarch64")]
-const PROLOGUE: [u32; 4] = [0xd503233f, 0xa9be7bfd, 0x910003fd, 0xa90153f3];
+struct Prologue {
+    words: [u32; 4],
+    call_original: unsafe extern "C" fn(*mut c_void) -> c_int,
+}
 
-#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-static ACTIVATED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_arch = "aarch64")]
+static PROLOGUES: [Prologue; 2] = [
+    Prologue {
+        words: [PACIASP, STP_FRAME_RECORD, MOV_FRAME_POINTER, STP_X19_X20],
+        call_original: frida_arm64_call_original,
+    },
+    Prologue {
+        words: [MOV_X9_X30, NOP, PACIASP, STP_FRAME_RECORD],
+        call_original: frida_arm64_call_original_traceable,
+    },
+];
+
+#[cfg(target_arch = "aarch64")]
+const MOV_X9_X30: u32 = 0xaa1e03e9;
+#[cfg(target_arch = "aarch64")]
+const NOP: u32 = 0xd503201f;
+#[cfg(target_arch = "aarch64")]
+const PACIASP: u32 = 0xd503233f;
+#[cfg(target_arch = "aarch64")]
+const STP_FRAME_RECORD: u32 = 0xa9be7bfd;
+#[cfg(target_arch = "aarch64")]
+const MOV_FRAME_POINTER: u32 = 0x910003fd;
+#[cfg(target_arch = "aarch64")]
+const STP_X19_X20: u32 = 0xa90153f3;
+
+#[cfg(target_arch = "aarch64")]
+static INSTALLED: AtomicPtr<Prologue> = AtomicPtr::new(ptr::null_mut());
 
 #[cfg(target_arch = "aarch64")]
 #[unsafe(no_mangle)]
@@ -454,11 +489,10 @@ static mut FRIDA_ARM64_ORIGINAL_CONT: u64 = 0;
 #[cfg(target_arch = "aarch64")]
 pub fn install() {
     let target = unsafe { _fixup_exception } as *const u32;
-    for slot in 0..4 {
-        if unsafe { target.add(slot).read_volatile() } != PROLOGUE[slot] {
-            return;
-        }
-    }
+    let present = core::array::from_fn(|slot| unsafe { target.add(slot).read_volatile() });
+    let Some(prologue) = PROLOGUES.iter().find(|prologue| prologue.words == present) else {
+        return;
+    };
 
     unsafe { FRIDA_ARM64_ORIGINAL_CONT = target.add(4) as u64 };
 
@@ -470,19 +504,21 @@ pub fn install() {
         _aarch64_insn_patch_text_nosync(addr.add(1) as *mut c_void, jump[1]);
         _aarch64_insn_patch_text_nosync(addr as *mut c_void, jump[0]);
     }
-    ACTIVATED.store(true, Ordering::Release);
+    INSTALLED.store(prologue as *const Prologue as *mut Prologue, Ordering::Release);
 }
 
 #[cfg(target_arch = "aarch64")]
 pub fn uninstall() {
-    if !ACTIVATED.swap(false, Ordering::AcqRel) {
+    let prologue = INSTALLED.swap(ptr::null_mut(), Ordering::AcqRel);
+    if prologue.is_null() {
         return;
     }
 
     let target = unsafe { _fixup_exception } as *mut u32;
+    let words = unsafe { (*prologue).words };
     unsafe {
         for slot in 0..4 {
-            _aarch64_insn_patch_text_nosync(target.add(slot) as *mut c_void, PROLOGUE[slot]);
+            _aarch64_insn_patch_text_nosync(target.add(slot) as *mut c_void, words[slot]);
         }
     }
 }
@@ -504,12 +540,21 @@ core::arch::global_asm!(
     "add x16, x16, :lo12:{cont}",
     "ldr x16, [x16]",
     "br x16",
+    ".globl frida_arm64_call_original_traceable",
+    "frida_arm64_call_original_traceable:",
+    "paciasp",
+    "stp x29, x30, [sp, #-32]!",
+    "adrp x16, {cont}",
+    "add x16, x16, :lo12:{cont}",
+    "ldr x16, [x16]",
+    "br x16",
     cont = sym FRIDA_ARM64_ORIGINAL_CONT,
 );
 
 #[cfg(target_arch = "aarch64")]
 unsafe extern "C" {
     fn frida_arm64_call_original(regs: *mut c_void) -> c_int;
+    fn frida_arm64_call_original_traceable(regs: *mut c_void) -> c_int;
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -517,7 +562,8 @@ unsafe extern "C" fn frida_arm64_fixup(regs: *mut c_void) -> c_int {
     if unsafe { recovered(regs) } {
         return 1;
     }
-    unsafe { frida_arm64_call_original(regs) }
+    let prologue = INSTALLED.load(Ordering::Acquire);
+    unsafe { ((*prologue).call_original)(regs) }
 }
 
 #[cfg(target_arch = "aarch64")]
