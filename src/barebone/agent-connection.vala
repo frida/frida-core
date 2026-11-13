@@ -285,7 +285,7 @@ namespace Frida.Barebone {
 			// runs: the host looks once and passes on what it found.
 			config_builder.open (new VariantType ("a(st)"));
 			foreach (var e in kernel_notes.entries)
-				config_builder.add ("(st)", e.key, e.value);
+				config_builder.add ("(st)", e.key, (uint64) e.value);
 			if (xnu_layout != null) {
 				config_builder.add ("(st)", "process.number", xnu_layout.number_offset);
 				config_builder.add ("(st)", "process.name", xnu_layout.name_offset);
