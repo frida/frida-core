@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/frida/idun.git
-revision = 6040e17b1ef871ff7ae5b18fffbe5f0396a0810c
+revision = 29184dff69074d5150c9e5c04227a5912de1fad7
 depth = 1
 
 [provide]
