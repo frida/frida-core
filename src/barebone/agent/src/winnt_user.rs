@@ -951,7 +951,7 @@ struct ThreadSlotApi {
 static mut THREAD_SLOT_API: Option<ThreadSlotApi> = None;
 
 fn hear_about_faults() {
-    unsafe { FAULT_HANDLER = (user_api().add_fault_handler)(1, on_fault as *const c_void) };
+    unsafe { FAULT_HANDLER = (user_api().add_fault_handler)(1, frida_winnt_user_on_fault as *const c_void) };
 }
 
 fn stop_hearing_about_faults() {
@@ -1228,6 +1228,28 @@ fn free_code(ptr: *mut u8, _size: usize) {
 
     unsafe { (user_api().free_memory)(CURRENT_PROCESS, &mut address, &mut region, MEM_RELEASE) };
 }
+
+unsafe extern "C" {
+    fn frida_winnt_user_on_fault();
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+core::arch::global_asm!(
+    ".balign 16",
+    ".global frida_winnt_user_on_fault",
+    "frida_winnt_user_on_fault:",
+    "jmp {on_fault}",
+    on_fault = sym on_fault,
+);
+
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(
+    ".balign 16",
+    ".global frida_winnt_user_on_fault",
+    "frida_winnt_user_on_fault:",
+    "b {on_fault}",
+    on_fault = sym on_fault,
+);
 
 fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
     let mut base = address as *mut u8;
