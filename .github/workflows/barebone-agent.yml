@@ -3,13 +3,17 @@ name: Barebone agent
 on:
   push:
     paths:
-      - 'src/barebone/agent/**'
+      - 'src/barebone/**'
+      - 'tests/test-barebone.vala'
+      - 'tests/vm.py'
       - '.github/workflows/barebone-agent.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'src/barebone/agent/**'
+      - 'src/barebone/**'
+      - 'tests/test-barebone.vala'
+      - 'tests/vm.py'
       - '.github/workflows/barebone-agent.yml'
   workflow_dispatch:
 
@@ -205,6 +209,77 @@ jobs:
         with:
           name: frida-barebone-agent-${{ matrix.flavor }}-${{ matrix.arch }}
           path: src/barebone/agent/target-${{ matrix.flavor }}/${{ matrix.rust_target }}/release/frida-barebone-agent
+
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Build
+        run: |
+          ./configure --disable-compiler-backend
+          make
+      - name: Upload tests
+        uses: actions/upload-artifact@v7
+        with:
+          name: frida-tests-linux-x86_64
+          path: build/tests/frida-tests
+
+  live:
+    needs: [blob, host]
+    strategy:
+      matrix:
+        include:
+          - { guest: win95,        agent: win9x-x86,    qemu: qemu-system-x86 }
+          - { guest: linux-x86,    agent: linux-x86,    qemu: qemu-system-x86 }
+          - { guest: linux-x86_64, agent: linux-x86_64, qemu: qemu-system-x86 }
+          - { guest: linux-arm,    agent: linux-arm,    qemu: qemu-system-arm }
+          - { guest: linux-arm64,  agent: linux-arm64,  qemu: qemu-system-arm }
+      fail-fast: false
+    runs-on: ubuntu-latest
+    env:
+      AGENT_DIR: ${{ github.workspace }}/agent
+      TESTS_DIR: ${{ github.workspace }}/tests-bin
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.qemu }} qemu-utils mtools
+      - name: Download agent
+        uses: actions/download-artifact@v8
+        with:
+          name: frida-barebone-agent-${{ matrix.agent }}
+          path: ${{ env.AGENT_DIR }}
+      - name: Download tests
+        uses: actions/download-artifact@v8
+        with:
+          name: frida-tests-linux-x86_64
+          path: ${{ env.TESTS_DIR }}
+      - name: Restore prepared guest
+        id: guest
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/frida-tests
+          key: live-guest-${{ matrix.guest }}-${{ hashFiles('tests/vm.py') }}
+      - name: Prepare guest
+        if: steps.guest.outputs.cache-hit != 'true'
+        run: python3 tests/vm.py prepare-${{ matrix.guest }}
+      - name: Save prepared guest
+        if: steps.guest.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/frida-tests
+          key: live-guest-${{ matrix.guest }}-${{ hashFiles('tests/vm.py') }}
+      - name: Test
+        run: >-
+          chmod +x "$TESTS_DIR/frida-tests" &&
+          python3 tests/vm.py test-${{ matrix.guest }}
+          --agent "$AGENT_DIR/frida-barebone-agent"
+          --tests "$TESTS_DIR/frida-tests"
 
   kext:
     needs: gum-macos-kernel
