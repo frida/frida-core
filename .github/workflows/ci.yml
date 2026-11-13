@@ -64,7 +64,7 @@ jobs:
         if: matrix.id == 'linux-x86'
         run: |
           sudo apt-get update
-          sudo apt-get install gcc-multilib lib32stdc++-13-dev
+          sudo apt-get install g++-multilib
       - name: Install setuptools for distutils shim
         if: ${{ startsWith(matrix.id, 'windows-') }}
         run: pip install setuptools
@@ -145,15 +145,24 @@ jobs:
           - { id: linux-mips64el,       opts: '--host=mips64el-linux-gnuabi64',                         pkg: g++-mips64el-linux-gnuabi64 }
       fail-fast: false
     runs-on: ubuntu-latest
+    container: debian:stable
     steps:
+      - name: Install toolchain
+        run: |
+          apt-get update
+          apt-get install -y \
+              ca-certificates \
+              curl \
+              g++ \
+              git \
+              make \
+              python3 \
+              xz-utils \
+              ${{ matrix.pkg }}
       - name: Check out repo
         uses: actions/checkout@v6
         with:
           submodules: recursive
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install ${{ matrix.pkg }}
       - name: Install Go toolchain
         uses: actions/setup-go@v6
         with:
