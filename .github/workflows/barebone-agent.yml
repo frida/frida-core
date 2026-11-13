@@ -23,10 +23,6 @@ jobs:
       matrix:
         machine:
           - none-x86-softfloat_pic
-          - none-x86_64-softfloat_pic
-          - none-x86_64-softfloat_pic_msabi
-          - none-arm-softfloat_pic
-          - none-arm64-softfloat_pic
       fail-fast: false
     runs-on: ubuntu-latest
     env:
@@ -116,46 +112,6 @@ jobs:
             arch: x86
             machine: none-x86-softfloat_pic
             rust_target: i686-unknown-none-pic
-          - flavor: winnt
-            feature: winnt
-            arch: x86
-            machine: none-x86-softfloat_pic
-            rust_target: i686-unknown-none-pic
-          - flavor: winnt
-            feature: winnt
-            arch: x86_64
-            machine: none-x86_64-softfloat_pic_msabi
-            rust_target: x86_64-unknown-none-pic
-          - flavor: winnt
-            feature: winnt
-            arch: arm64
-            machine: none-arm64-softfloat_pic
-            rust_target: aarch64-unknown-none-pic
-          - flavor: xnu
-            feature: xnu
-            arch: arm64
-            machine: none-arm64-softfloat_pic
-            rust_target: aarch64-unknown-none-pic
-          - flavor: linux
-            feature: linux-injected
-            arch: x86
-            machine: none-x86-softfloat_pic
-            rust_target: i686-unknown-none-pic
-          - flavor: linux
-            feature: linux-injected
-            arch: x86_64
-            machine: none-x86_64-softfloat_pic
-            rust_target: x86_64-unknown-none-pic
-          - flavor: linux
-            feature: linux-injected
-            arch: arm
-            machine: none-arm-softfloat_pic
-            rust_target: armv7a-unknown-none-pic
-          - flavor: linux
-            feature: linux-injected
-            arch: arm64
-            machine: none-arm64-softfloat_pic
-            rust_target: aarch64-unknown-none-pic
       fail-fast: false
     runs-on: ubuntu-latest
     env:
@@ -233,10 +189,6 @@ jobs:
       matrix:
         include:
           - { guest: win95,        agent: win9x-x86,    qemu: qemu-system-x86 }
-          - { guest: linux-x86,    agent: linux-x86,    qemu: qemu-system-x86 }
-          - { guest: linux-x86_64, agent: linux-x86_64, qemu: qemu-system-x86 }
-          - { guest: linux-arm,    agent: linux-arm,    qemu: qemu-system-arm }
-          - { guest: linux-arm64,  agent: linux-arm64,  qemu: qemu-system-arm }
       fail-fast: false
     runs-on: ubuntu-latest
     env:

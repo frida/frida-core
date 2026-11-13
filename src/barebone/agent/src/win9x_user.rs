@@ -20,6 +20,7 @@ static USER_ENTRY: extern "C" fn(u32) = frida_win9x_user_main;
 // the primitives that need the kernel are different.
 #[unsafe(no_mangle)]
 pub extern "C" fn frida_win9x_user_main(arena: u32) {
+    crate::kprintln!("XXX user entered");
     select_user();
     resolve_user_api();
     crate::gthread::use_thread_slots(&SLOTS);
@@ -28,7 +29,9 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
             ((arena + IMAGE_SIZE) as *const u32).read_volatile() as u64)
     };
     unsafe { crate::run_constructors() };
+    crate::kprintln!("XXX user constructed");
     unsafe { crate::init_gum_without_exceptor() };
+    crate::kprintln!("XXX user gum");
     hear_about_faults();
 
     let sleep: unsafe extern "stdcall" fn(u32) =
@@ -37,6 +40,7 @@ pub extern "C" fn frida_win9x_user_main(arena: u32) {
     // This thread waits for the host. Do not use yield_now() here, because that rate makes the
     // guest slow.
     unsafe { ((arena + RUNNING_FLAG) as *mut u32).write_volatile(1) };
+    crate::kprintln!("XXX user running");
     while unsafe { ((arena + GO_FLAG) as *const u32).read_volatile() } == 0 {
         unsafe { sleep(PARKED_SLEEP_MS) };
     }

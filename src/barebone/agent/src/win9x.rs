@@ -274,6 +274,7 @@ pub fn inject_agent(pid: u32) -> u32 {
             .write_volatile(publish_module_list(process))
     };
     if !await_flag(injection.arena + OBSERVED_PID) {
+        crate::kprintln!("XXX no observed pid");
         return 0;
     }
 
@@ -828,8 +829,10 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
     let stack = alloc_shared(INJECTION_STACK_SIZE) as u32;
     write_trampoline(arena + TRAMPOLINE_OFFSET, entry, stack + INJECTION_STACK_SIZE as u32 - 0x40);
 
+    crate::kprintln!("XXX inject process={:#x} arena={:#x}", process, arena);
     create_suspended_thread(arena + STUB_OFFSET, arena + TRAMPOLINE_OFFSET, arena, process);
     if !await_flag(arena + THREAD_DATABASE) {
+        crate::kprintln!("XXX no thread database");
         return Injection { arena, thread: 0, stack };
     }
 
@@ -837,8 +840,10 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
     let thread = unsafe { (database as *const u32).byte_add(TDB_CONTROL_BLOCK).read() };
     let start_stack = redirect_to_trampoline(arena, thread);
 
+    crate::kprintln!("XXX resuming thread={:#x}", thread);
     resume_thread(arena + RESUME_STUB_OFFSET, arena);
     if !await_flag(arena + RUNNING_FLAG) {
+        crate::kprintln!("XXX not running resumed={}", unsafe { ((arena + RESUMED_FLAG) as *const u32).read_volatile() });
         return Injection { arena, thread: 0, stack };
     }
     free_shared(start_stack);
@@ -1131,9 +1136,10 @@ fn redirect_to_trampoline(arena: u32, thread: u32) -> u32 {
 
 fn await_flag(address: u32) -> bool {
     static mut TOKEN: u8 = 0;
-    for _ in 0..INJECTION_ATTEMPTS {
+    for attempt in 0..INJECTION_ATTEMPTS {
         wait(core::ptr::addr_of!(TOKEN), Some(INJECTION_POLL_US), &mut || false);
         if unsafe { (address as *const u32).read_volatile() } != 0 {
+            crate::kprintln!("XXX flag {:#x} after {} polls", address & 0xff, attempt + 1);
             return true;
         }
     }
