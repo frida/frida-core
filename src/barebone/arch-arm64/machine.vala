@@ -299,9 +299,19 @@ namespace Frida.Barebone {
 
 		public override async uint64 translate_address (uint64 va, Cancellable? cancellable) throws Efni.Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
-			uint64 descriptor = yield read_level3_descriptor (va, cancellable);
-			uint64 page_mask = (1ULL << inpage_bits_for_granule (p.granule)) - 1;
-			return (descriptor & INT48_MASK & ~page_mask) | (va & page_mask);
+
+			bool was_running = yield begin_physical_addressing (cancellable);
+			uint64 pa = 0;
+			GLib.Error? failure = null;
+			try {
+				pa = yield resolve_physical_address (va, p, cancellable);
+			} catch (GLib.Error e) {
+				failure = e;
+			}
+			yield end_physical_addressing (was_running, cancellable);
+			throw_if_failed (failure);
+
+			return pa;
 		}
 
 		public override async Bytes read_virtual (uint64 va, size_t size, Cancellable? cancellable)
@@ -560,14 +570,14 @@ namespace Frida.Barebone {
 				uint64 raw = d_buf.read_uint64 (0);
 				Descriptor desc = Descriptor.parse (raw, level, p.granule);
 
-				if (desc.kind == BLOCK || level == 3) {
+				if (desc.kind == INVALID)
+					throw new Efni.Error.NOT_SUPPORTED ("Unable to resolve physical address for 0x%" + uint64.FORMAT_MODIFIER + "x", va);
+				if (desc.kind == BLOCK) {
 					uint64 span = (level == 3)
 						? (uint64) 1 << inpage_bits_for_granule (p.granule)
 						: (uint64) 1 << num_block_bits_at_level (level, p.granule);
 					return (raw & INT48_MASK & ~(span - 1)) | (va & (span - 1));
 				}
-				if (desc.kind != TABLE)
-					throw new Efni.Error.NOT_SUPPORTED ("Unable to resolve physical address for 0x%" + uint64.FORMAT_MODIFIER + "x", va);
 
 				table_pa = desc.target_address;
 				level++;
