@@ -181,15 +181,30 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
 
 fn block_until_signalled_or_timed_out(semaphore: u32, timeout_us: u64) {
     let timeout_ms = (timeout_us / 1000).max(1) as u32;
-    let timeout = unsafe { set_global_time_out(timeout_ms, semaphore) };
+    let mut time_out = TimeOut { semaphore, expired: 0 };
+    let handle = unsafe { set_global_time_out(timeout_ms, &mut time_out) };
     unsafe {
         wait_semaphore(semaphore, BLOCK_SVC_INTS);
     }
-    if timeout != 0 {
-        unsafe {
-            cancel_time_out(timeout);
-        }
+    if handle != 0 {
+        cancel_unless_expired(handle, &time_out);
     }
+}
+
+fn cancel_unless_expired(handle: u32, time_out: &TimeOut) {
+    unsafe {
+        core::arch::asm!("cli");
+        if core::ptr::addr_of!(time_out.expired).read_volatile() == 0 {
+            cancel_time_out(handle);
+        }
+        core::arch::asm!("sti");
+    }
+}
+
+#[repr(C)]
+struct TimeOut {
+    semaphore: u32,
+    expired: u32,
 }
 
 pub fn poke_loop_wakeup() {
@@ -2787,7 +2802,7 @@ unsafe extern "C" {
     fn vpicd_physically_unmask(handle: u32);
     fn vpicd_phys_eoi(handle: u32);
     fn vpicd_force_default_behavior(handle: u32) -> u32;
-    fn set_global_time_out(milliseconds: u32, semaphore: u32) -> u32;
+    fn set_global_time_out(milliseconds: u32, time_out: *mut TimeOut) -> u32;
     fn cancel_time_out(timeout: u32);
     fn hook_vmm_fault(fault: u32, handler: unsafe extern "C" fn()) -> u32;
     fn vmm_add_ddb(ddb: u32) -> u32;
@@ -3217,7 +3232,8 @@ cancel_time_out:
 .global frida_win9x_time_out_thunk
 frida_win9x_time_out_thunk:
     pushad
-    mov eax, edx
+    mov dword ptr [edx + 4], 1
+    mov eax, [edx]
     CALL_SERVICE _Signal_Semaphore
     popad
     ret
