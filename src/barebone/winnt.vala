@@ -229,7 +229,7 @@ namespace Frida.Barebone {
 
 		Debugger debugger = machine.debugger;
 		uint64 seed_page = seed - (seed % PCR_SCAN_SIZE);
-		Buffer page = debugger.make_buffer (yield debugger.read_byte_array (seed_page, PCR_SCAN_SIZE, cancellable));
+		Buffer page = debugger.make_buffer (yield machine.read_virtual (seed_page, PCR_SCAN_SIZE, cancellable));
 
 		for (size_t offset = 0; offset != PCR_SCAN_SIZE; offset += shape.pointer_size) {
 			uint64 candidate = read_pointer (page, offset, shape);
@@ -254,13 +254,13 @@ namespace Frida.Barebone {
 		if (pcr_base == 0)
 			return 0;
 
-		Buffer pcr = debugger.make_buffer (yield debugger.read_byte_array (pcr_base,
+		Buffer pcr = debugger.make_buffer (yield machine.read_virtual (pcr_base,
 			shape.version_block + shape.pointer_size, cancellable));
 		uint64 version_block = read_pointer (pcr, shape.version_block, shape);
 		if (!is_kernel_address (version_block, shape))
 			return 0;
 
-		Buffer v = debugger.make_buffer (yield debugger.read_byte_array (version_block, VERSION_BLOCK_SIZE, cancellable));
+		Buffer v = debugger.make_buffer (yield machine.read_virtual (version_block, VERSION_BLOCK_SIZE, cancellable));
 		if (v.read_uint16 (MACHINE_TYPE_OFFSET) != shape.machine_type)
 			return 0;
 
@@ -322,7 +322,7 @@ namespace Frida.Barebone {
 		Debugger debugger = machine.debugger;
 		Buffer head;
 		try {
-			head = debugger.make_buffer (yield debugger.read_byte_array (candidate + shape.self,
+			head = debugger.make_buffer (yield machine.read_virtual (candidate + shape.self,
 				shape.pointer_size, cancellable));
 		} catch (Efni.Error e) {
 			return false;
@@ -337,7 +337,7 @@ namespace Frida.Barebone {
 			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
-		uint64 list = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (
+		uint64 list = read_pointer (debugger.make_buffer (yield machine.read_virtual (
 			version_block + LOADED_MODULE_LIST_OFFSET, shape.pointer_size, cancellable)), 0, shape);
 		if (!is_kernel_address (list, shape))
 			throw new Efni.Error.NOT_SUPPORTED ("Unable to find the loaded module list");
@@ -350,17 +350,17 @@ namespace Frida.Barebone {
 			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
-		uint64 data_list = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (
+		uint64 data_list = read_pointer (debugger.make_buffer (yield machine.read_virtual (
 			version_block + DEBUGGER_DATA_LIST_OFFSET, shape.pointer_size, cancellable)), 0, shape);
 		if (!is_kernel_address (data_list, shape))
 			return 0;
 
-		uint64 block = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (data_list, shape.pointer_size,
+		uint64 block = read_pointer (debugger.make_buffer (yield machine.read_virtual (data_list, shape.pointer_size,
 			cancellable)), 0, shape);
 		if (!is_kernel_address (block, shape))
 			return 0;
 
-		uint64 head = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (
+		uint64 head = read_pointer (debugger.make_buffer (yield machine.read_virtual (
 			block + PROCESS_LIST_HEAD_OFFSET, shape.pointer_size, cancellable)), 0, shape);
 		if (!is_kernel_address (head, shape))
 			return 0;
@@ -372,12 +372,12 @@ namespace Frida.Barebone {
 			Cancellable? cancellable) throws Efni.Error, IOError {
 		Debugger debugger = machine.debugger;
 
-		uint64 entry = read_pointer (debugger.make_buffer (yield debugger.read_byte_array (head, shape.pointer_size,
+		uint64 entry = read_pointer (debugger.make_buffer (yield machine.read_virtual (head, shape.pointer_size,
 			cancellable)), 0, shape);
 		if (entry == head || !is_kernel_address (entry, shape))
 			return null;
 
-		Buffer e = debugger.make_buffer (yield debugger.read_byte_array (entry, shape.table_entry_size, cancellable));
+		Buffer e = debugger.make_buffer (yield machine.read_virtual (entry, shape.table_entry_size, cancellable));
 
 		uint64 base_address = read_pointer (e, shape.dll_base, shape);
 		if (!is_kernel_address (base_address, shape))
@@ -427,7 +427,7 @@ namespace Frida.Barebone {
 		if (length == 0 || length > MAX_NAME_SIZE || !is_kernel_address (buffer, shape))
 			return "";
 
-		Bytes raw = yield machine.debugger.read_byte_array (buffer, length, cancellable);
+		Bytes raw = yield machine.read_virtual (buffer, length, cancellable);
 		try {
 			return convert ((string) raw.get_data (), length, "UTF-8", "UTF-16LE");
 		} catch (ConvertError e) {

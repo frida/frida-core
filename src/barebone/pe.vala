@@ -22,7 +22,7 @@ namespace Frida.Barebone {
 
 		Buffer headers;
 		try {
-			headers = debugger.make_buffer (yield debugger.read_byte_array (image, HEADERS_SIZE, cancellable));
+			headers = debugger.make_buffer (yield machine.read_virtual (image, HEADERS_SIZE, cancellable));
 		} catch (Efni.Error e) {
 			return exports;
 		}
@@ -52,7 +52,7 @@ namespace Frida.Barebone {
 			return exports;
 
 		Buffer directory = debugger.make_buffer (
-			yield read_present_pages (debugger, image + directory_rva, directory_size, cancellable));
+			yield read_present_pages (machine, image + directory_rva, directory_size, cancellable));
 		var window = new DirectoryWindow (directory, directory_rva, directory_size);
 
 		uint32 count = directory.read_uint32 (NAME_COUNT_OFFSET);
@@ -91,7 +91,7 @@ namespace Frida.Barebone {
 
 		Buffer headers;
 		try {
-			headers = debugger.make_buffer (yield debugger.read_byte_array (image, HEADERS_SIZE, cancellable));
+			headers = debugger.make_buffer (yield machine.read_virtual (image, HEADERS_SIZE, cancellable));
 		} catch (Efni.Error e) {
 			return 0;
 		}
@@ -107,10 +107,10 @@ namespace Frida.Barebone {
 	// Part of an image can be out of memory. Read it in one go when it is fully present, and
 	// otherwise one page at a time, letting the absent pages read as zero, because no name or
 	// table entry has that value.
-	private static async Bytes read_present_pages (Debugger debugger, uint64 address, size_t size,
+	private static async Bytes read_present_pages (Machine machine, uint64 address, size_t size,
 			Cancellable? cancellable) throws Efni.Error, IOError {
 		try {
-			return yield debugger.read_byte_array (address, size, cancellable);
+			return yield machine.read_virtual (address, size, cancellable);
 		} catch (Efni.Error e) {
 		}
 
@@ -124,7 +124,7 @@ namespace Frida.Barebone {
 				PAGE_SIZE - (size_t) (cursor & (PAGE_SIZE - 1)));
 
 			try {
-				unowned uint8[] page = (yield debugger.read_byte_array (cursor, chunk, cancellable))
+				unowned uint8[] page = (yield machine.read_virtual (cursor, chunk, cancellable))
 					.get_data ();
 				Memory.copy ((uint8 *) result + offset, page, chunk);
 				present++;
