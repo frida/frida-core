@@ -947,6 +947,14 @@ namespace Frida {
 					gadget_path = gadget_value.get_string ();
 				}
 
+				bool interruptible = false;
+				Variant? interruptible_value = aux["interruptible"];
+				if (interruptible_value != null) {
+					if (!interruptible_value.is_of_type (VariantType.BOOLEAN))
+						throw new Error.INVALID_ARGUMENT ("The 'interruptible' option must be a boolean");
+					interruptible = interruptible_value.get_boolean ();
+				}
+
 				string[] argv = { app.path };
 				if (options.has_argv) {
 					var provided_argv = options.argv;
@@ -969,6 +977,7 @@ namespace Frida {
 				}
 
 				var session = new LLDBSession (lldb, process, gadget_path, ExceptionHandlingStatus.LIMITED, device);
+				session.interruptible = interruptible;
 				add_lldb_session (session);
 
 				return process.pid;
@@ -1084,6 +1093,32 @@ namespace Frida {
 				}
 			} catch (Efni.Error e) {
 				throw_api_error (e);
+			}
+		}
+
+		public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable) throws Error, IOError {
+			try {
+				var lldb_session = lldb_sessions[pid];
+				if (lldb_session != null)
+					return yield lldb_session.dump_backtraces (cancellable);
+
+				var lldb = yield start_lldb_service (cancellable);
+				try {
+					yield lldb.attach_by_pid (pid, cancellable);
+					var backtraces = yield BacktraceCollector.collect (lldb, null, cancellable);
+					yield lldb.detach (cancellable);
+					yield lldb.close (cancellable);
+					return backtraces;
+				} catch (GLib.Error e) {
+					lldb.close.begin (null);
+					throw e;
+				}
+			} catch (GLib.Error e) {
+				if (e is Error)
+					throw (Error) e;
+				if (e is IOError)
+					throw (IOError) e;
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
@@ -1667,14 +1702,23 @@ namespace Frida {
 
 			public uint attach_count = 0;
 
+			public bool interruptible = false;
+
 			private Promise<Fruity.Injector.GadgetDetails>? gadget_request;
+			private Fruity.Injector.GadgetDetails? gadget;
+			private string? gadget_module_name;
+			private bool early_instrumentation = false;
 			private ulong exception_handler = 0;
 			private string? main_thread_id;
 			private bool resumed = false;
 
+			private bool dumping_backtraces = false;
+			private Promise<Idun.LLDB.Exception>? pending_interrupt;
+
 			private Cancellable io_cancellable = new Cancellable ();
 
 			private const size_t PAGE_SIZE = 0x4000;
+			private const uint INTERRUPT_TIMEOUT_SECONDS = 5;
 
 			public LLDBSession (LLDB.Client lldb, LLDB.Process process, string? gadget_path, ExceptionHandlingStatus ehs,
 					Idun.ChannelProvider channel_provider) {
@@ -1710,54 +1754,197 @@ namespace Frida {
 			private async void handle_exception (DebuggerException exception) throws Error, Efni.Error, IOError {
 				var e = (Idun.LLDB.Exception) exception;
 
-				var sig = (LLDB.Signal) e.signum;
-				var medata = e.medata;
-				if (sig == SIGTRAP && e.metype == EXC_BREAKPOINT && medata.size == 2) {
-					uint64 x1 = e.context["x1"];
-					uint64 x2 = e.context["x2"];
+				if (pending_interrupt != null && !pending_interrupt.future.ready && is_interrupt (e)) {
+					pending_interrupt.resolve (e);
+					return;
+				}
+
+				if (is_gadget_breakpoint (e)) {
 					var action = (GadgetBreakpointAction) e.context["x3"];
-					if (x1 == x2 == 1337) {
-						uint64 pc = e.context["pc"];
-						var thread = e.thread;
-						yield thread.write_register ("pc", pc + 4, io_cancellable);
 
-						switch (action) {
-							case RESUME: {
-								resumed = true;
-								yield lldb.resume (io_cancellable);
+					uint64 pc = e.context["pc"];
+					var thread = e.thread;
+					yield thread.write_register ("pc", pc + 4, io_cancellable);
 
-								return;
-							}
-							case DETACH: {
-								yield lldb.detach (io_cancellable);
-								detached ();
+					switch (action) {
+						case RESUME: {
+							resumed = true;
+							yield lldb.resume (io_cancellable);
 
-								break;
-							}
-							case PAGE_PLAN: {
-								var plan_size = (size_t) e.context["x4"];
-								var plan_address = e.context["x5"];
-								yield DebuggerMappings.handle_page_plan (lldb, plan_address, plan_size,
-									PAGE_SIZE, io_cancellable);
-
-								yield thread.write_register ("x0", 0x1337, io_cancellable);
-
-								if (resumed)
-									yield lldb.resume (io_cancellable);
-								else
-									yield continue_gadget_threads (io_cancellable);
-
-								return;
-							}
-							default:
-								break;
+							return;
 						}
+						case DETACH: {
+							yield lldb.detach (io_cancellable);
+							detached ();
+
+							break;
+						}
+						case PAGE_PLAN: {
+							var plan_size = (size_t) e.context["x4"];
+							var plan_address = e.context["x5"];
+							yield DebuggerMappings.handle_page_plan (lldb, plan_address, plan_size,
+								PAGE_SIZE, io_cancellable);
+
+							yield thread.write_register ("x0", 0x1337, io_cancellable);
+
+							if (resumed)
+								yield lldb.resume (io_cancellable);
+							else
+								yield continue_gadget_threads (io_cancellable);
+
+							return;
+						}
+						case INTERRUPT:
+							yield restore_execution (io_cancellable);
+							return;
+						default:
+							break;
 					}
 				}
 
 				detach_exception_handler ();
 
 				yield lldb.close (io_cancellable);
+			}
+
+			private static bool is_gadget_breakpoint (Idun.LLDB.Exception e) {
+				var sig = (LLDB.Signal) e.signum;
+				if (!(sig == SIGTRAP && e.metype == EXC_BREAKPOINT && e.medata.size == 2))
+					return false;
+
+				uint64 x1 = e.context["x1"];
+				uint64 x2 = e.context["x2"];
+				return x1 == x2 == 1337;
+			}
+
+			private static bool is_interrupt (Idun.LLDB.Exception e) {
+				return is_gadget_breakpoint (e) && (GadgetBreakpointAction) e.context["x3"] == INTERRUPT;
+			}
+
+			public async HashTable<string, Variant> dump_backtraces (Cancellable? cancellable) throws Error, Efni.Error, IOError {
+				if (dumping_backtraces)
+					throw new Error.INVALID_OPERATION ("Already dumping backtraces");
+				if (gadget_request != null && gadget == null)
+					throw new Error.INVALID_OPERATION ("Gadget is being injected; try again later");
+
+				dumping_backtraces = true;
+				try {
+					if (gadget == null) {
+						if (lldb.state != STOPPED)
+							throw new Error.INVALID_OPERATION ("Process is busy; try again later");
+						return yield BacktraceCollector.collect (lldb, null, cancellable);
+					}
+
+					return yield interrupt_and_dump_backtraces (cancellable);
+				} finally {
+					dumping_backtraces = false;
+				}
+			}
+
+			private async HashTable<string, Variant> interrupt_and_dump_backtraces (Cancellable? cancellable)
+					throws Error, Efni.Error, IOError {
+				if (lldb.state != RUNNING)
+					throw new Error.INVALID_OPERATION ("Process is busy handling an exception; try again later");
+
+				uint16 port = gadget.interrupt_port;
+				if (port == 0) {
+					throw new Error.NOT_SUPPORTED ("Gadget can't be interrupted; spawn with the 'interruptible' option " +
+						"set to true, using a Gadget that supports it");
+				}
+
+				var request = new Promise<Idun.LLDB.Exception> ();
+				pending_interrupt = request;
+
+				IOStream? channel = null;
+				var timeout = new TimeoutSource.seconds (INTERRUPT_TIMEOUT_SECONDS);
+				timeout.set_callback (() => {
+					fail_pending_interrupt (new Error.TIMED_OUT ("Timed out waiting for Gadget's interrupt listener"));
+					return Source.REMOVE;
+				});
+				timeout.attach (MainContext.get_thread_default ());
+
+				Idun.LLDB.Exception? interrupt = null;
+				try {
+					channel = yield channel_provider.open_channel (("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (port),
+						cancellable);
+					interrupt = yield request.future.wait_async (cancellable);
+				} catch (GLib.Error e) {
+					close_channel.begin (channel);
+					yield resume_if_interrupted (request);
+					throw_as_lldb_session_error (e);
+				} finally {
+					timeout.destroy ();
+					pending_interrupt = null;
+				}
+
+				HashTable<string, Variant>? backtraces = null;
+				GLib.Error? pending_error = null;
+				try {
+					backtraces = yield BacktraceCollector.collect (lldb, make_gadget_range ((!) interrupt), cancellable);
+				} catch (GLib.Error e) {
+					pending_error = e;
+				}
+
+				try {
+					yield handle_exception ((!) interrupt);
+				} catch (GLib.Error e) {
+					if (pending_error == null)
+						pending_error = e;
+				}
+
+				close_channel.begin (channel);
+
+				if (pending_error != null)
+					throw_as_lldb_session_error (pending_error);
+
+				return backtraces;
+			}
+
+			private async void resume_if_interrupted (Promise<Idun.LLDB.Exception> request) {
+				var interrupt = request.future.value;
+				if (interrupt == null)
+					return;
+
+				try {
+					yield handle_exception (interrupt);
+				} catch (GLib.Error e) {
+				}
+			}
+
+			private BacktraceCollector.ModuleRange make_gadget_range (Idun.LLDB.Exception interrupt) {
+				var context = interrupt.context;
+				return new BacktraceCollector.ModuleRange (gadget_module_name, context["x4"], context["x5"]);
+			}
+
+			private void fail_pending_interrupt (Error error) {
+				if (pending_interrupt != null && !pending_interrupt.future.ready)
+					pending_interrupt.reject (error);
+			}
+
+			private static async void close_channel (IOStream? channel) {
+				if (channel == null)
+					return;
+				try {
+					yield channel.close_async ();
+				} catch (IOError e) {
+				}
+			}
+
+			private static void throw_as_lldb_session_error (GLib.Error e) throws Error, Efni.Error, IOError {
+				if (e is Error)
+					throw (Error) e;
+				if (e is Efni.Error)
+					throw (Efni.Error) e;
+				if (e is IOError)
+					throw (IOError) e;
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			private async void restore_execution (Cancellable? cancellable) throws Error, Efni.Error, IOError {
+				if (resumed || !early_instrumentation)
+					yield lldb.resume (cancellable);
+				else
+					yield continue_gadget_threads (cancellable);
 			}
 
 			private async void continue_gadget_threads (Cancellable? cancellable) throws Error, Efni.Error, IOError {
@@ -1812,9 +1999,10 @@ namespace Frida {
 					var module = new Gum.MachoModule.from_file (path, Gum.CpuType.ARM64, ptrauth_support);
 
 					Fruity.Injector.Transaction transaction =
-						yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, cancellable);
+						yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, interruptible, cancellable);
 					Fruity.Injector.GadgetDetails gadget = transaction.gadget;
 					main_thread_id = transaction.main_thread_id;
+					early_instrumentation = transaction.is_early_instrumentation;
 
 					exception_handler = lldb.notify["exception"].connect ((obj, pspec) => {
 						var exception = lldb.exception;
@@ -1824,6 +2012,8 @@ namespace Frida {
 
 					yield transaction.commit (cancellable);
 
+					this.gadget = gadget;
+					gadget_module_name = transaction.loaded_gadget ? path : "FridaGadget.dylib";
 					gadget_request.resolve (gadget);
 
 					return gadget;
@@ -1848,6 +2038,7 @@ namespace Frida {
 			}
 
 			private void on_lldb_closed () {
+				fail_pending_interrupt (new Error.TRANSPORT ("Debugger connection closed while waiting for Gadget's interrupt"));
 				closed ();
 			}
 
@@ -1859,6 +2050,172 @@ namespace Frida {
 		private enum ExceptionHandlingStatus {
 			FULL,
 			LIMITED,
+		}
+
+		private class BacktraceCollector {
+			public static async HashTable<string, Variant> collect (LLDB.Client lldb, ModuleRange? extra_module,
+					Cancellable? cancellable) throws Efni.Error, IOError {
+				var modules = new Gee.ArrayList<ModuleRange> ();
+				if (extra_module != null)
+					modules.add (extra_module);
+				yield lldb.enumerate_modules (m => {
+					var text = m.segments.first_match (s => s.name == "__TEXT");
+					if (text != null)
+						modules.add (new ModuleRange (m.pathname, m.load_address, text.vmsize));
+					return true;
+				}, cancellable);
+
+				var threads = yield fetch_threads (lldb, cancellable);
+				var register_names = map_register_names (lldb);
+
+				var threads_builder = new VariantBuilder (new VariantType ("aa{sv}"));
+				foreach (var thread in threads)
+					threads_builder.add_value (yield describe_thread (lldb, thread, register_names, modules, cancellable));
+
+				var result = make_parameters_dict ();
+				result["threads"] = threads_builder.end ();
+				return result;
+			}
+
+			private static async Gee.List<ThreadState> fetch_threads (LLDB.Client lldb, Cancellable? cancellable)
+					throws Efni.Error, IOError {
+				var response = yield lldb.query_simple ("jThreadsInfo", cancellable);
+
+				Json.Node root;
+				try {
+					root = Json.from_string (response.payload);
+				} catch (GLib.Error e) {
+					throw new Efni.Error.PROTOCOL ("Invalid jThreadsInfo response");
+				}
+				if (root.get_node_type () != Json.NodeType.ARRAY)
+					throw new Efni.Error.PROTOCOL ("Invalid jThreadsInfo response");
+
+				var threads = new Gee.ArrayList<ThreadState> ();
+				foreach (unowned Json.Node element in root.get_array ().get_elements ()) {
+					unowned Json.Object? info = element.get_object ();
+					if (info == null || !info.has_member ("tid"))
+						continue;
+
+					int64 tid = info.get_int_member ("tid");
+					if (tid == 0)
+						continue;
+					string? name = info.has_member ("name") ? info.get_string_member ("name") : null;
+
+					var thread = new ThreadState (new LLDB.Thread (("%" + int64.FORMAT_MODIFIER + "x").printf (tid), name, lldb));
+					if (info.has_member ("registers")) {
+						unowned Json.Object registers = info.get_object_member ("registers");
+						foreach (unowned string regnum in registers.get_members ())
+							thread.little_endian_registers[(uint) uint64.parse (regnum)] = registers.get_string_member (regnum);
+					}
+					threads.add (thread);
+				}
+
+				return threads;
+			}
+
+			private static Gee.Map<uint, string> map_register_names (LLDB.Client lldb) {
+				var names = new Gee.HashMap<uint, string> ();
+				try {
+					for (uint i = 0; true; i++) {
+						var reg = lldb.get_register_by_index (i);
+						names[reg.id] = reg.name;
+					}
+				} catch (Efni.Error e) {
+				}
+				return names;
+			}
+
+			private static async Variant describe_thread (LLDB.Client lldb, ThreadState state, Gee.Map<uint, string> register_names,
+					Gee.List<ModuleRange> modules, Cancellable? cancellable) throws IOError {
+				var thread = state.thread;
+
+				var builder = new VariantBuilder (VariantType.VARDICT);
+				builder.add ("{sv}", "id", new Variant.string ("0x" + thread.id));
+				unowned string? name = thread.name;
+				if (name != null)
+					builder.add ("{sv}", "name", new Variant.string (name));
+				if (!state.little_endian_registers.is_empty)
+					builder.add ("{sv}", "registers", describe_registers (state, register_names));
+
+				var frames = new VariantBuilder (new VariantType ("aa{sv}"));
+				try {
+					uint64 pc = lldb.strip_code_address (yield thread.read_register ("pc", cancellable));
+					frames.add_value (describe_address (pc, modules));
+
+					foreach (var frame in yield thread.generate_backtrace (null, cancellable)) {
+						if (frame.address == 0)
+							continue;
+						frames.add_value (describe_address (frame.address, modules));
+					}
+				} catch (Efni.Error e) {
+					builder.add ("{sv}", "error", new Variant.string (e.message));
+				}
+				builder.add ("{sv}", "frames", frames.end ());
+
+				return builder.end ();
+			}
+
+			private static Variant describe_registers (ThreadState state, Gee.Map<uint, string> register_names) {
+				var regnums = new Gee.ArrayList<uint> ();
+				regnums.add_all (state.little_endian_registers.keys);
+				regnums.sort ((a, b) => (a < b) ? -1 : (a > b) ? 1 : 0);
+
+				var builder = new VariantBuilder (VariantType.VARDICT);
+				foreach (uint regnum in regnums) {
+					string? name = register_names[regnum];
+					builder.add ("{sv}", (name != null) ? name : regnum.to_string (),
+						new Variant.string (format_little_endian_hex (state.little_endian_registers[regnum])));
+				}
+				return builder.end ();
+			}
+
+			private static string format_little_endian_hex (string little_endian_hex) {
+				var result = new StringBuilder.sized (2 + little_endian_hex.length);
+				result.append ("0x");
+				for (int i = little_endian_hex.length - 2; i >= 0; i -= 2)
+					result.append (little_endian_hex.substring (i, 2));
+				return result.str;
+			}
+
+			private static Variant describe_address (uint64 address, Gee.List<ModuleRange> modules) {
+				var builder = new VariantBuilder (VariantType.VARDICT);
+				string address_str = ("0x%" + uint64.FORMAT_MODIFIER + "x").printf (address);
+				builder.add ("{sv}", "address", new Variant.string (address_str));
+
+				foreach (var m in modules) {
+					if (address >= m.base_address && address < m.base_address + m.size) {
+						uint64 offset = address - m.base_address;
+						if (offset <= uint32.MAX) {
+							builder.add ("{sv}", "module", new Variant.string (m.path));
+							builder.add ("{sv}", "offset", new Variant.uint32 ((uint32) offset));
+						}
+						break;
+					}
+				}
+
+				return builder.end ();
+			}
+
+			private class ThreadState {
+				public LLDB.Thread thread;
+				public Gee.Map<uint, string> little_endian_registers = new Gee.HashMap<uint, string> ();
+
+				public ThreadState (LLDB.Thread thread) {
+					this.thread = thread;
+				}
+			}
+
+			public class ModuleRange {
+				public string path;
+				public uint64 base_address;
+				public uint64 size;
+
+				public ModuleRange (string path, uint64 base_address, uint64 size) {
+					this.path = path;
+					this.base_address = base_address;
+					this.size = size;
+				}
+			}
 		}
 
 		private class GadgetEntry : Object {

@@ -69,6 +69,21 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Fruity.Manual.Xpc.launch.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Fruity/Manual/DumpBacktraces/blocked-frida-threads", () => {
+			var h = new Harness ((h) => Fruity.Manual.DumpBacktraces.blocked_frida_threads.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Fruity/Manual/DumpBacktraces/reattach", () => {
+			var h = new Harness ((h) => Fruity.Manual.DumpBacktraces.reattach.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Fruity/Manual/DumpBacktraces/not-interruptible", () => {
+			var h = new Harness ((h) => Fruity.Manual.DumpBacktraces.not_interruptible.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 #if HAVE_DROIDY_BACKEND
@@ -4302,6 +4317,265 @@ namespace Frida.HostSessionTest {
 					}
 				}
 
+			}
+
+			namespace DumpBacktraces {
+				private async void blocked_frida_threads (Harness h) {
+					if (!GLib.Test.slow ()) {
+						stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+						h.done ();
+						return;
+					}
+
+					var target = Target.from_environment ();
+					if (target == null) {
+						stdout.printf ("<skipping, set %s> ", Target.REQUIRED_VARIABLES);
+						h.done ();
+						return;
+					}
+
+					h.disable_timeout ();
+
+					var device_manager = new DeviceManager ();
+
+					try {
+						var device = yield device_manager.get_device_by_id (target.device_id, 5000);
+
+						var pid = yield spawn_with_gadget (device, target, true);
+						var session = yield device.attach (pid);
+						yield device.resume (pid);
+
+						var script = yield session.create_script ("""
+							const hits = { accept: 0, close: 0 };
+
+							function hijack(name, retType, argTypes) {
+							  const target = Module.getGlobalExportByName(name);
+							  const original = new NativeFunction(target, retType, argTypes);
+							  Interceptor.replace(target, new NativeCallback((...args) => {
+							    hits[name]++;
+							    return original(...args);
+							  }, retType, argTypes));
+							}
+
+							hijack('accept', 'int', ['int', 'pointer', 'pointer']);
+							hijack('close', 'int', ['int']);
+
+							const closeHitsBefore = hits.close;
+							new NativeFunction(Module.getGlobalExportByName('close'), 'int', ['int'])(-1);
+							send(hits.close > closeHitsBefore);
+
+							setTimeout(() => {
+							  const end = Date.now() + 60000;
+							  while (Date.now() < end)
+							    ;
+							}, 100);
+							""");
+						var hook_check = new Promise<string> ();
+						var message_handler = script.message.connect ((json, data) => {
+							if (!hook_check.future.ready)
+								hook_check.resolve (json);
+						});
+						yield script.load ();
+						var hook_check_message = yield hook_check.future.wait_async (null);
+						script.disconnect (message_handler);
+						assert_true (hook_check_message == "{\"type\":\"send\",\"payload\":true}");
+
+						yield sleep (500);
+
+						for (uint i = 0; i != 3; i++)
+							assert_backtraces_include_gadget (yield device.dump_backtraces (pid), target.gadget_path);
+
+						yield device.kill (pid);
+					} catch (GLib.Error e) {
+						printerr ("\nFAIL: %s\n\n", e.message);
+						assert_not_reached ();
+					}
+
+					yield close_device_manager (device_manager);
+
+					h.done ();
+				}
+
+				private async void reattach (Harness h) {
+					if (!GLib.Test.slow ()) {
+						stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+						h.done ();
+						return;
+					}
+
+					var target = Target.from_environment ();
+					if (target == null) {
+						stdout.printf ("<skipping, set %s> ", Target.REQUIRED_VARIABLES);
+						h.done ();
+						return;
+					}
+
+					h.disable_timeout ();
+
+					var device_manager = new DeviceManager ();
+
+					try {
+						var device = yield device_manager.get_device_by_id (target.device_id, 5000);
+
+						var pid = yield spawn_with_gadget (device, target, true);
+						var session = yield device.attach (pid);
+						yield device.resume (pid);
+
+						var interrupt_port = find_interrupt_port (yield device.dump_backtraces (pid));
+						assert_true (interrupt_port != 0);
+
+						yield session.detach ();
+
+						yield connect_and_hang_up (device, interrupt_port);
+						yield sleep (1000);
+
+						session = yield device.attach (pid);
+
+						var backtraces = yield device.dump_backtraces (pid);
+						assert_backtraces_include_gadget (backtraces, "FridaGadget.dylib");
+						assert_true (find_interrupt_port (backtraces) == interrupt_port);
+
+						yield session.detach ();
+						yield device.kill (pid);
+					} catch (GLib.Error e) {
+						printerr ("\nFAIL: %s\n\n", e.message);
+						assert_not_reached ();
+					}
+
+					yield close_device_manager (device_manager);
+
+					h.done ();
+				}
+
+				private async void not_interruptible (Harness h) {
+					if (!GLib.Test.slow ()) {
+						stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+						h.done ();
+						return;
+					}
+
+					var target = Target.from_environment ();
+					if (target == null) {
+						stdout.printf ("<skipping, set %s> ", Target.REQUIRED_VARIABLES);
+						h.done ();
+						return;
+					}
+
+					h.disable_timeout ();
+
+					var device_manager = new DeviceManager ();
+
+					try {
+						var device = yield device_manager.get_device_by_id (target.device_id, 5000);
+
+						var pid = yield spawn_with_gadget (device, target, false);
+						yield device.attach (pid);
+						yield device.resume (pid);
+
+						try {
+							yield device.dump_backtraces (pid);
+							assert_not_reached ();
+						} catch (Error e) {
+							assert_true (e is Error.NOT_SUPPORTED);
+						}
+
+						yield device.kill (pid);
+					} catch (GLib.Error e) {
+						printerr ("\nFAIL: %s\n\n", e.message);
+						assert_not_reached ();
+					}
+
+					yield close_device_manager (device_manager);
+
+					h.done ();
+				}
+
+				private async uint spawn_with_gadget (Device device, Target target, bool interruptible) throws GLib.Error {
+					var options = new SpawnOptions ();
+					options.aux["gadget"] = target.gadget_path;
+					if (interruptible)
+						options.aux["interruptible"] = true;
+
+					return yield device.spawn (target.app_id, options);
+				}
+
+				private async void connect_and_hang_up (Device device, uint16 port) {
+					try {
+						var connection = yield device.open_channel ("tcp:%u".printf (port));
+						yield connection.close_async ();
+					} catch (GLib.Error e) {
+					}
+				}
+
+				private void assert_backtraces_include_gadget (HashTable<string, Variant> backtraces, string gadget_module) {
+					var threads = backtraces["threads"];
+					assert_true (threads.n_children () > 0);
+
+					bool found_interrupt_listener = false;
+					uint gadget_frames = 0;
+					foreach (var thread in threads) {
+						var thread_dict = new VariantDict (thread);
+
+						string name;
+						if (thread_dict.lookup ("name", "s", out name) && name.has_prefix ("frida-gadget-interrupt-"))
+							found_interrupt_listener = true;
+
+						foreach (var frame in thread_dict.lookup_value ("frames", new VariantType ("aa{sv}"))) {
+							string module;
+							if (new VariantDict (frame).lookup ("module", "s", out module) && module == gadget_module)
+								gadget_frames++;
+						}
+					}
+
+					assert_true (found_interrupt_listener);
+					assert_true (gadget_frames > 0);
+				}
+
+				private uint16 find_interrupt_port (HashTable<string, Variant> backtraces) {
+					foreach (var thread in backtraces["threads"]) {
+						string name;
+						if (new VariantDict (thread).lookup ("name", "s", out name) &&
+								name.has_prefix ("frida-gadget-interrupt-")) {
+							return (uint16) uint.parse (name.split ("-")[3]);
+						}
+					}
+					return 0;
+				}
+
+				private class Target {
+					public const string REQUIRED_VARIABLES = "FRIDA_FRUITY_DEVICE_ID, FRIDA_FRUITY_APP_ID and FRIDA_FRUITY_GADGET";
+
+					public string device_id;
+					public string app_id;
+					public string gadget_path;
+
+					public static Target? from_environment () {
+						unowned string? device_id = Environment.get_variable ("FRIDA_FRUITY_DEVICE_ID");
+						unowned string? app_id = Environment.get_variable ("FRIDA_FRUITY_APP_ID");
+						unowned string? gadget_path = Environment.get_variable ("FRIDA_FRUITY_GADGET");
+						if (device_id == null || app_id == null || gadget_path == null)
+							return null;
+
+						var target = new Target ();
+						target.device_id = device_id;
+						target.app_id = app_id;
+						target.gadget_path = gadget_path;
+						return target;
+					}
+				}
+
+				private async void sleep (uint milliseconds) {
+					Timeout.add (milliseconds, sleep.callback);
+					yield;
+				}
+
+				private async void close_device_manager (DeviceManager device_manager) {
+					try {
+						yield device_manager.close ();
+					} catch (IOError e) {
+						assert_not_reached ();
+					}
+				}
 			}
 
 		}

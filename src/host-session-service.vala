@@ -1021,6 +1021,11 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
 		}
 
+		public virtual async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable)
+				throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Backtrace dumping is not supported by this backend");
+		}
+
 		public ServiceSession link_service_session (ServiceSessionId id) throws Error {
 			return service_session_registry.link (id);
 		}
