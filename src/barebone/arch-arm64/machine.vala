@@ -1457,10 +1457,9 @@ namespace Frida.Barebone {
 							regs.sprr_perm = val;
 					}
 				} else if ("parallels" in client.features) {
-					// The stub serves no system register, and the monitor command that would
-					// print them aborts the VM whenever another processor is somewhere it
-					// cannot be read from, so leave the caller to manage without them.
-					throw new Efni.Error.NOT_SUPPORTED ("Parallels serves no system register");
+					var parallels = (ParallelsStubClient) client;
+					regs.tcr = yield parallels.read_system_register (thread, TCR_EL1, cancellable);
+					regs.ttbr1 = yield parallels.read_system_register (thread, TTBR1_EL1, cancellable);
 				} else {
 					regs.tcr = yield thread.read_register ("tcr_el1", cancellable);
 					regs.ttbr1 = yield thread.read_register ("ttbr1_el1", cancellable);

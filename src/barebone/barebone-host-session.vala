@@ -190,11 +190,9 @@ namespace Frida {
 
 		private async BareboneHostSession establish (BareboneConfig config, Debugger debugger, owned ConnectingFunc connecting,
 				Cancellable? cancellable) throws Error, Efni.Error, IOError {
-			// The arm64 MMU system registers (TTBR1_EL1/TCR_EL1) are exposed by some stubs and not
-			// others (the Android emulator's does not); detect it from the advertised register set,
-			// which selects host page-table walking versus the kernel's set_memory_* helpers.
 			bool mmu_registers_available = debugger.arch != TargetArch.ARM64
-				|| (debugger.has_register ("ttbr1_el1") && debugger.has_register ("tcr_el1"));
+				|| (debugger.has_register ("ttbr1_el1") && debugger.has_register ("tcr_el1"))
+				|| "parallels" in debugger.features;
 
 			Barebone.Machine machine;
 			switch (debugger.arch) {

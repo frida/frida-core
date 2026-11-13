@@ -443,6 +443,7 @@ namespace Frida.Barebone {
 		private Machine machine;
 		private uint64 yield_point;
 		private SymbolInfo? bug_check;
+		private SymbolInfo? get_virtual_for_physical;
 
 		public WinNtKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Efni.Error {
 			this.machine = machine;
@@ -455,9 +456,14 @@ namespace Frida.Barebone {
 			yield_point = wait_for_single_object.offset;
 
 			bug_check = symbols["KeBugCheckEx"];
+			get_virtual_for_physical = symbols["MmGetVirtualForPhysical"];
 		}
 
 		public async void prepare (Cancellable? cancellable) throws Efni.Error, IOError {
+			var parallels = machine.debugger as ParallelsStubClient;
+			if (parallels != null)
+				parallels.physical_address_resolver = new WinNtPhysicalAddressResolver (machine, get_virtual_for_physical.offset);
+
 			var arm64 = machine as Arm64Machine;
 			if (bug_check != null && arm64 != null)
 				arm64.call_landing_zone = bug_check.offset;
@@ -490,6 +496,31 @@ namespace Frida.Barebone {
 
 		private static size_t breakpoint_size_for (Debugger debugger) {
 			return (debugger.arch == TargetArch.ARM64) ? 4 : 1;
+		}
+	}
+
+	private sealed class WinNtPhysicalAddressResolver : Object, PhysicalAddressResolver {
+		private Machine machine;
+		private uint64 get_virtual_for_physical;
+		private Gee.Map<uint64?, uint64?> page_aliases = new Gee.HashMap<uint64?, uint64?> (Numeric.uint64_hash,
+			Numeric.uint64_equal);
+
+		private const uint64 PAGE_MASK = 0xfff;
+
+		public WinNtPhysicalAddressResolver (Machine machine, uint64 get_virtual_for_physical) {
+			this.machine = machine;
+			this.get_virtual_for_physical = get_virtual_for_physical;
+		}
+
+		public async uint64 virtual_address_of (uint64 physical_address, Cancellable? cancellable)
+				throws Efni.Error, IOError {
+			uint64 page = physical_address & ~PAGE_MASK;
+			uint64? alias = page_aliases[page];
+			if (alias == null) {
+				alias = yield machine.invoke (get_virtual_for_physical, { page }, cancellable);
+				page_aliases[page] = alias;
+			}
+			return alias + (physical_address & PAGE_MASK);
 		}
 	}
 }
