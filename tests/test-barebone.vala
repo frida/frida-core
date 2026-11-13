@@ -6233,11 +6233,15 @@ FAIL: %s
 					['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer']);
 				const terminateThread = fn('TerminateThread', 'int', ['pointer', 'uint']);
 				const closeHandle = fn('CloseHandle', 'int', ['pointer']);
+				const createEvent = fn('CreateEventA', 'pointer', ['pointer', 'int', 'int', 'pointer']);
+				const waitForSingleObject = fn('WaitForSingleObject', 'uint', ['pointer', 'uint']);
 
+				const running = createEvent(NULL, 1, 0, NULL);
 				const flag = Memory.alloc(4);
 				const body = Memory.alloc(Process.pageSize);
 				Memory.protect(body, Process.pageSize, 'rwx');
 
+				const setEvent = lib.getExportByName('SetEvent');
 				const sleep = lib.getExportByName('Sleep');
 				const little = value => [value & 0xff, (value >>> 8) & 0xff,
 					(value >>> 16) & 0xff, (value >>> 24) & 0xff];
@@ -6247,12 +6251,17 @@ FAIL: %s
 						bytes.push(value.shr(i * 8).and(0xff).toUInt32());
 					return bytes;
 				};
-				Memory.patchCode(body, 64, code => {
+				Memory.patchCode(body, 96, code => {
 					code.writeByteArray((Process.pointerSize === 4)
-						? [0x6a, 0x64, 0xe8, ...little(sleep.sub(body.add(7)).toInt32()),
+						? [0x68, ...little(running.toUInt32()),
+							0xe8, ...little(setEvent.sub(body.add(10)).toInt32()),
+							0x6a, 0x64, 0xe8, ...little(sleep.sub(body.add(17)).toInt32()),
 							0xa1, ...little(flag.toUInt32()), 0x85, 0xc0, 0x74, 0xf0,
 							0x33, 0xc0, 0xc2, 0x04, 0x00]
-						: [0x48, 0x83, 0xec, 0x28, 0xb9, 0x64, 0x00, 0x00, 0x00,
+						: [0x48, 0x83, 0xec, 0x28,
+							0x48, 0xb9, ...wide(running), 0x48, 0xb8, ...wide(setEvent), 0xff, 0xd0,
+							0x48, 0x83, 0xc4, 0x28,
+							0x48, 0x83, 0xec, 0x28, 0xb9, 0x64, 0x00, 0x00, 0x00,
 							0x48, 0xb8, ...wide(sleep), 0xff, 0xd0,
 							0x48, 0x83, 0xc4, 0x28,
 							0x48, 0xb8, ...wide(flag), 0x8b, 0x00, 0x85, 0xc0, 0x74, 0xd7,
@@ -6265,6 +6274,7 @@ FAIL: %s
 
 				let blocks = 0;
 				recv('follow', () => {
+					waitForSingleObject(running, 0xffffffff);
 					// A service of this system is reached by a call through a gate, which the
 					// Stalker cannot follow. Thus leave the library that holds them alone.
 					Stalker.exclude(lib);
@@ -6286,6 +6296,7 @@ FAIL: %s
 					flag.writeU32(1);
 					terminateThread(handle, 0);
 					closeHandle(handle);
+					closeHandle(running);
 					send('stopped');
 				});
 
