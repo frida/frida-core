@@ -89,25 +89,10 @@ pub unsafe fn pipe_read(file: *mut c_void, into: *mut u8, count: usize, position
     unsafe { _kernel_read(file, into, count, position) }
 }
 
-#[cfg(not(target_arch = "x86"))]
-pub unsafe fn pipe_write(file: *mut c_void, from: *const u8, count: usize, position: *mut i64) -> isize {
-    let write: unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut i64) -> isize =
-        unsafe { core::mem::transmute(_kernel_write) };
-    unsafe { write(file, from, count, position) }
-}
-
-#[cfg(target_arch = "x86")]
 pub unsafe fn pipe_write(file: *mut c_void, from: *const u8, count: usize, position: *mut i64) -> isize {
     unsafe { _kernel_write(file, from, count, position) }
 }
 
-#[cfg(not(target_arch = "x86"))]
-pub fn leave_a_word(file: *mut c_void) {
-    let one: u64 = 1;
-    unsafe { _kernel_write(file, &one as *const u64 as *const u8, 8, 0) };
-}
-
-#[cfg(target_arch = "x86")]
 pub fn leave_a_word(file: *mut c_void) {
     let one: u64 = 1;
     unsafe { _kernel_write(file, &one as *const u64 as *const u8, 8, core::ptr::null_mut()) };
@@ -1293,8 +1278,7 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _kernel_read: unsafe extern "C" fn(*mut c_void, *mut u8, usize, *mut i64) -> isize;
     #[cfg(not(target_arch = "x86"))]
-    #[cfg(not(target_arch = "x86"))]
-    static _kernel_write: unsafe extern "C" fn(*mut c_void, *const u8, usize, i64) -> isize;
+    static _kernel_write: unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut i64) -> isize;
     // Allocation profiling renamed the entry points in 6.10; before that the
     // size-plus-flags pair went to __kmalloc.
     static ___kmalloc_noprof: Option<unsafe extern "C" fn(usize, u32) -> *mut u8>;
