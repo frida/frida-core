@@ -128,30 +128,7 @@ pub fn run_when_ready(action: fn()) {
 }
 
 pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
-    let start = Box::into_raw(Box::new(ThreadStart { entry, parameter }));
-
-    let mut handle: *mut c_void = core::ptr::null_mut();
-    let status = unsafe {
-        (_PsCreateSystemThread)(
-            &mut handle,
-            THREAD_ALL_ACCESS,
-            core::ptr::null_mut(),
-            core::ptr::null_mut(),
-            core::ptr::null_mut(),
-            thread_start,
-            start as *mut c_void,
-        )
-    };
-    if status < 0 {
-        drop(unsafe { Box::from_raw(start) });
-        return -1;
-    }
-
-    unsafe {
-        (_ZwClose)(handle);
-    }
-
-    0
+    (primitives().spawn_thread)(entry, parameter)
 }
 
 // The kernel gives a system thread a stack of a few pages, and you cannot increase it. The
@@ -3399,6 +3376,7 @@ pub struct Primitives {
     pub free: fn(*mut u8, usize),
     pub alloc_code: fn(usize) -> *mut u8,
     pub free_code: fn(*mut u8, usize),
+    pub spawn_thread: fn(ThreadEntry, *mut c_void) -> isize,
     pub protect: fn(u64, usize, u32) -> bool,
     pub region_at: fn(usize) -> Option<MemoryRegion>,
     pub enumerate_ranges: fn(&mut dyn FnMut(u64, u64, u32)),
@@ -3454,6 +3432,7 @@ static KERNEL: Primitives = Primitives {
     free: kernel::free,
     alloc_code: kernel::alloc_code,
     free_code: kernel::free_code,
+    spawn_thread: kernel::spawn_thread,
     protect: kernel::protect,
     region_at: kernel::region_at,
     enumerate_ranges: kernel::enumerate_ranges,
@@ -3497,6 +3476,33 @@ mod kernel {
 
     pub fn free_code(ptr: *mut u8, size: usize) {
         free(ptr, size);
+    }
+
+    pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
+        let start = Box::into_raw(Box::new(ThreadStart { entry, parameter }));
+
+        let mut handle: *mut c_void = core::ptr::null_mut();
+        let status = unsafe {
+            (_PsCreateSystemThread)(
+                &mut handle,
+                THREAD_ALL_ACCESS,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                thread_start,
+                start as *mut c_void,
+            )
+        };
+        if status < 0 {
+            drop(unsafe { Box::from_raw(start) });
+            return -1;
+        }
+
+        unsafe {
+            (_ZwClose)(handle);
+        }
+
+        0
     }
 
     pub fn protect(address: u64, size: usize, gum_prot: u32) -> bool {

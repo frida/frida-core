@@ -2,6 +2,7 @@
 // nothing of the kernel's, thus it has primitives of its own, which frida_winnt_user_main selects
 // before it does anything else.
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -9,7 +10,7 @@ use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::gum_windows::{FileApi, TextApi};
-use crate::kernel::MemoryRegion;
+use crate::kernel::{MemoryRegion, ThreadEntry};
 use crate::winnt::{
     BLOCK_PROCESS_ID, BLOCK_THREAD_ID, CURRENT_PROCESS, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
     COPY_LEFT, OBSERVED_PID, OBSERVED_THREAD, PAGE_EXECUTE_READWRITE, PAGE_READWRITE, Primitives,
@@ -124,6 +125,7 @@ pub static USER: Primitives = Primitives {
     free,
     alloc_code,
     free_code,
+    spawn_thread,
     protect,
     region_at,
     enumerate_ranges,
@@ -169,6 +171,7 @@ fn resolve_user_api() {
             create_event: core::mem::transmute(export(ntdll, b"NtCreateEvent")),
             close: core::mem::transmute(export(ntdll, b"NtClose")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
+            create_thread: core::mem::transmute(export(ntdll, b"RtlCreateUserThread")),
             #[cfg(target_arch = "aarch64")]
             flush_code: core::mem::transmute(export(ntdll, b"NtFlushInstructionCache")),
             create_heap: core::mem::transmute(export(ntdll, b"RtlCreateHeap")),
@@ -868,6 +871,8 @@ struct UserApi {
     create_event: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32),
     close: windows_fn!(*mut c_void => i32),
     exit_thread: windows_fn!(u32 => !),
+    create_thread: windows_fn!(*mut c_void, *mut c_void, u8, u32, usize, usize, *const c_void, *mut c_void,
+        *mut *mut c_void, *mut c_void => i32),
     add_fault_handler: windows_fn!(u32, *const c_void => *mut c_void),
     remove_fault_handler: windows_fn!(*mut c_void => u32),
     create_heap: windows_fn!(u32, *mut c_void, usize, usize, *mut c_void, *mut c_void => usize),
@@ -1229,8 +1234,54 @@ fn free_code(ptr: *mut u8, _size: usize) {
     unsafe { (user_api().free_memory)(CURRENT_PROCESS, &mut address, &mut region, MEM_RELEASE) };
 }
 
+fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
+    let start = Box::into_raw(Box::new(UserThreadStart { entry, parameter }));
+
+    let mut handle: *mut c_void = core::ptr::null_mut();
+    let status = unsafe {
+        (user_api().create_thread)(CURRENT_PROCESS, core::ptr::null_mut(), 0, 0, 0, 0,
+            frida_winnt_user_thread_start as *const c_void, start as *mut c_void, &mut handle,
+            core::ptr::null_mut())
+    };
+    if status < 0 {
+        drop(unsafe { Box::from_raw(start) });
+        return -1;
+    }
+
+    unsafe { (user_api().close)(handle) };
+
+    0
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn user_thread_start(context: *mut c_void) -> u32 {
+    unsafe { run_user_thread(context) }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn user_thread_start(context: *mut c_void) -> u32 {
+    unsafe { run_user_thread(context) }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn user_thread_start(context: *mut c_void) -> u32 {
+    unsafe { run_user_thread(context) }
+}
+
+unsafe fn run_user_thread(context: *mut c_void) -> u32 {
+    let start = unsafe { Box::from_raw(context as *mut UserThreadStart) };
+    unsafe { (start.entry)(start.parameter, 0) };
+    0
+}
+
+struct UserThreadStart {
+    entry: ThreadEntry,
+    parameter: *mut c_void,
+}
+
 unsafe extern "C" {
     fn frida_winnt_user_on_fault();
+    fn frida_winnt_user_thread_start();
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -1239,7 +1290,12 @@ core::arch::global_asm!(
     ".global frida_winnt_user_on_fault",
     "frida_winnt_user_on_fault:",
     "jmp {on_fault}",
+    ".balign 16",
+    ".global frida_winnt_user_thread_start",
+    "frida_winnt_user_thread_start:",
+    "jmp {thread_start}",
     on_fault = sym on_fault,
+    thread_start = sym user_thread_start,
 );
 
 #[cfg(target_arch = "aarch64")]
@@ -1248,7 +1304,12 @@ core::arch::global_asm!(
     ".global frida_winnt_user_on_fault",
     "frida_winnt_user_on_fault:",
     "b {on_fault}",
+    ".balign 16",
+    ".global frida_winnt_user_thread_start",
+    "frida_winnt_user_thread_start:",
+    "b {thread_start}",
     on_fault = sym on_fault,
+    thread_start = sym user_thread_start,
 );
 
 fn protect(address: u64, size: usize, gum_prot: u32) -> bool {
