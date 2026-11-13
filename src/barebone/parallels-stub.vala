@@ -75,6 +75,7 @@ namespace Frida.Barebone {
 			arch = arch_from_cpu_type (GDB.Protocol.parse_uint (host.get_string ("cputype"), 10));
 			pointer_size = GDB.Protocol.parse_uint (host.get_string ("ptrsize"), 10);
 			byte_order = (host.get_string ("endian") == "little") ? ByteOrder.LITTLE_ENDIAN : ByteOrder.BIG_ENDIAN;
+			suppress_solo = true;
 
 			yield halt (cancellable, HALT_TIMEOUT_MSEC);
 		}
