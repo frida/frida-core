@@ -465,10 +465,26 @@ fn registers_of_thread(id: u32) -> Option<usize> {
     }
     let mut places = describe_registers()?;
     if places.stack_of_task == 0 {
-        places.stack_of_task = field_offset("task_struct", "stack")?;
+        places.stack_of_task = where_tasks_keep_their_stack()?;
     }
     Some(registers_of_task(task, &places))
 }
+
+fn where_tasks_keep_their_stack() -> Option<usize> {
+    if let Some(at) = field_offset("task_struct", "stack") {
+        return Some(at);
+    }
+
+    let marker = 0usize;
+    let own_stack = (&marker as *const usize as usize) & !(STACK_SPAN - 1);
+    let this_task = native::current_task() as usize as *const usize;
+
+    (0..TASK_WORDS_SEARCHED_FOR_STACK)
+        .find(|&slot| unsafe { this_task.add(slot).read() } == own_stack)
+        .map(|slot| slot * size_of::<usize>())
+}
+
+const TASK_WORDS_SEARCHED_FOR_STACK: usize = 64;
 
 #[cfg(target_arch = "aarch64")]
 pub fn capture_registers(id: u32) -> Option<crate::kernel::CpuState> {
