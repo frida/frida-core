@@ -15,7 +15,7 @@ use super::layout::field_offset;
 use super::layout::struct_size;
 use super::STACK_SPAN;
 use super::native;
-use super::processes::task_with_id;
+use super::processes::{id_of, task_with_id};
 use super::arena::{Arena, HOME, REPORTED, WOKEN};
 use super::user::entry_offset;
 
@@ -1031,12 +1031,6 @@ fn note_a_thread(task: usize, is_gone: bool) {
 
 fn group_of(task: usize) -> Option<u32> {
     let at = field_offset("task_struct", "tgid")?;
-
-    Some(unsafe { ((task + at) as *const u32).read() })
-}
-
-pub fn id_of(task: usize) -> Option<u32> {
-    let at = field_offset("task_struct", "pid")?;
 
     Some(unsafe { ((task + at) as *const u32).read() })
 }

@@ -129,6 +129,10 @@ pub fn task_with_id(id: u32) -> Option<usize> {
     found
 }
 
+pub fn id_of(task: usize) -> Option<u32> {
+    Some(read_id(task, task_layout()?))
+}
+
 pub fn describe_process(process: &ProcessInfo) -> *const u8 {
     process.name
 }

@@ -61,7 +61,7 @@ pub fn holds_this_one(task: usize) -> bool {
         return true;
     }
 
-    let Some(id) = super::injection::id_of(task) else {
+    let Some(id) = super::processes::id_of(task) else {
         return false;
     };
 
@@ -157,7 +157,7 @@ static GATING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::
 pub unsafe extern "C" fn frida_cb_hold_spawn(_info: *mut c_void, _credentials: *mut c_void) -> c_int {
     let held = SPAWNING.load(Ordering::Acquire);
 
-    let id = super::injection::id_of(native::current_task() as usize).unwrap_or(0);
+    let id = super::processes::id_of(native::current_task() as usize).unwrap_or(0);
     unsafe {
         (*held).id = id;
         (&raw mut HELD).write(id);
