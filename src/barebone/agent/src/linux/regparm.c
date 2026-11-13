@@ -570,18 +570,11 @@ frida_k_call_usermodehelper_setup (const void * a0, const void * a1, const void 
 }
 
 extern int frida_cb_hold_spawn (void * info, void * credentials);
-extern void frida_cb_release_words (void * info);
 
 __attribute__ ((regparm (3))) int
 frida_kcb_hold_spawn (void * info, void * credentials)
 {
   return frida_cb_hold_spawn (info, credentials);
-}
-
-__attribute__ ((regparm (3))) void
-frida_kcb_release_words (void * info)
-{
-  frida_cb_release_words (info);
 }
 
 extern void * _get_user_pages_unlocked;

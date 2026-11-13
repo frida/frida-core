@@ -1,11 +1,9 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::ffi::{c_int, c_void};
-use core::mem::size_of;
 use core::ptr;
-use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
-use super::layout::field_offset;
 use super::native;
 use super::processes::task_with_id;
 
@@ -16,35 +14,29 @@ pub fn spawn_process(words: &[&str]) -> u32 {
 
     super::injection::hold_what_is_spawned();
 
-    let held = native::alloc(size_of::<Held>()) as *mut Held;
-    unsafe {
-        held.write(Held {
-            id: 0,
-            words,
-            environment: environment(),
-        })
+    let mut held = Held {
+        id: 0,
+        words,
+        environment: environment(),
     };
+    SPAWNING.store(&mut held, Ordering::Release);
 
     let info = unsafe {
         _call_usermodehelper_setup(
-            (*held).words.first_word(),
-            (*held).words.as_argv(),
-            (*held).environment.as_argv(),
+            held.words.first_word(),
+            held.words.as_argv(),
+            held.environment.as_argv(),
             GFP_KERNEL,
             HOLD_SPAWN,
-            RELEASE_WORDS,
-            held as *mut c_void,
+            None,
+            ptr::null_mut(),
         )
     };
-    if info.is_null() {
-        return 0;
-    }
+    let started = !info.is_null() && unsafe { _call_usermodehelper_exec(info, UMH_WAIT_EXEC) } == 0;
 
-    if unsafe { _call_usermodehelper_exec(info, UMH_WAIT_EXEC) } != 0 {
-        return 0;
-    }
+    SPAWNING.store(ptr::null_mut(), Ordering::Release);
 
-    unsafe { (*held).id }
+    if started { held.id } else { 0 }
 }
 
 pub fn resume_process(id: u32) -> bool {
@@ -162,11 +154,8 @@ static mut HELD_SPAWNS: Vec<(u32, Vec<u8>)> = Vec::new();
 static GATING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn frida_cb_hold_spawn(info: *mut c_void, _credentials: *mut c_void) -> c_int {
-    let Some(at) = field_offset("subprocess_info", "data") else {
-        return 0;
-    };
-    let held = unsafe { ((info as usize + at) as *const usize).read() } as *mut Held;
+pub unsafe extern "C" fn frida_cb_hold_spawn(_info: *mut c_void, _credentials: *mut c_void) -> c_int {
+    let held = SPAWNING.load(Ordering::Acquire);
 
     let id = super::injection::id_of(native::current_task() as usize).unwrap_or(0);
     unsafe {
@@ -175,17 +164,6 @@ pub unsafe extern "C" fn frida_cb_hold_spawn(info: *mut c_void, _credentials: *m
     }
 
     0
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn frida_cb_release_words(info: *mut c_void) {
-    let Some(at) = field_offset("subprocess_info", "data") else {
-        return;
-    };
-    let held = unsafe { ((info as usize + at) as *const usize).read() } as *mut Held;
-
-    unsafe { ptr::drop_in_place(held) };
-    native::free(held as *mut u8, size_of::<Held>());
 }
 
 fn said_as(words: &[&str]) -> Option<Words> {
@@ -226,6 +204,7 @@ impl Words {
 }
 
 static mut HELD: u32 = 0;
+static SPAWNING: AtomicPtr<Held> = AtomicPtr::new(ptr::null_mut());
 
 const GFP_KERNEL: u32 = 0xcc0;
 const UMH_WAIT_EXEC: c_int = 1;
@@ -239,7 +218,7 @@ unsafe extern "C" {
         *const *const u8,
         u32,
         unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int,
-        unsafe extern "C" fn(*mut c_void),
+        Option<unsafe extern "C" fn(*mut c_void)>,
         *mut c_void,
     ) -> *mut c_void;
     #[cfg(not(target_arch = "x86"))]
@@ -261,19 +240,13 @@ unsafe extern "C" {
         a2: *const *const u8,
         a3: u32,
         a4: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int,
-        a5: unsafe extern "C" fn(*mut c_void),
+        a5: Option<unsafe extern "C" fn(*mut c_void)>,
         a6: *mut c_void,
     ) -> *mut c_void;
     fn frida_kcb_hold_spawn(info: *mut c_void, credentials: *mut c_void) -> c_int;
-    fn frida_kcb_release_words(info: *mut c_void);
 }
 
 #[cfg(target_arch = "x86")]
 const HOLD_SPAWN: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int = frida_kcb_hold_spawn;
 #[cfg(not(target_arch = "x86"))]
 const HOLD_SPAWN: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int = frida_cb_hold_spawn;
-
-#[cfg(target_arch = "x86")]
-const RELEASE_WORDS: unsafe extern "C" fn(*mut c_void) = frida_kcb_release_words;
-#[cfg(not(target_arch = "x86"))]
-const RELEASE_WORDS: unsafe extern "C" fn(*mut c_void) = frida_cb_release_words;
