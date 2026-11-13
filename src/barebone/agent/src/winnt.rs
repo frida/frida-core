@@ -2163,19 +2163,11 @@ fn active_process_head(system: usize) -> usize {
 }
 
 fn sweep_for_active_process_head(system: usize) -> usize {
-    let base = KERNEL_BASE.load(Ordering::Relaxed);
-    if base == 0 {
-        return 0;
-    }
-    let size = unsafe {
-        (*core::ptr::addr_of!(crate::MODULE_INFO))
-            .iter()
-            .find(|m| m.offset as usize == base)
-            .map(|m| m.size as usize)
-    };
-    let Some(size) = size else {
+    let Some(kernel) = enumerate_kernel_modules().into_iter().next() else {
         return 0;
     };
+    let base = kernel.base as usize;
+    let size = kernel.size as usize;
 
     for offset in (0..PROCESS_SCAN_SIZE).step_by(core::mem::size_of::<usize>()) {
         let node = system + offset;
