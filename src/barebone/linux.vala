@@ -21,12 +21,13 @@ namespace Frida.Barebone {
 			size = span_of (symbols, linked_base),
 		});
 
+		uint64 per_cpu_end = address_of (symbols, PER_CPU_END_SYMBOL);
+		bool per_cpu_linked_at_zero = per_cpu_end <= linked_base;
 		foreach (var symbol in symbols) {
-			if (symbol.offset >= linked_base) {
-				symbol.offset -= linked_base;
-			} else {
+			if (per_cpu_linked_at_zero && symbol.offset < per_cpu_end)
 				symbol.per_cpu = true;
-			}
+			else
+				symbol.offset -= linked_base;
 		}
 
 		return new LinuxLayout (running_base, modules, symbols);
@@ -196,6 +197,7 @@ namespace Frida.Barebone {
 	private const uint64 IMAGE_MAGIC_OFFSET = 0x38;
 	private const string KERNEL_END_SYMBOL = "_end";
 	private const string KERNEL_BANNER_SYMBOL = "linux_banner";
+	private const string PER_CPU_END_SYMBOL = "__per_cpu_end";
 	private const string KERNEL_BANNER = "Linux version ";
 	private const uint64 KERNEL_ALIGNMENT = 2 * 1024 * 1024;
 	private const uint64 KERNEL_TEXT_MIN = 0xffffffff80000000;
