@@ -717,7 +717,7 @@ unsafe fn targets() -> &'static mut BTreeMap<u32, Target> {
 static mut TARGETS: BTreeMap<u32, Target> = BTreeMap::new();
 
 fn process_for_pid(pid: u32) -> u32 {
-    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    let slot = thread_data_slot();
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
 
@@ -1664,7 +1664,6 @@ const WAKE_STUB_OFFSET: u32 = 0x1c0;
 const TRAMPOLINE_OFFSET: u32 = 0x180;
 
 const INJECTION_STACK_SIZE: usize = 0x4000;
-const THREAD_BLOCK_SLOT: u32 = 0xc002_11cc;
 const PDB_MEMORY_CONTEXT: usize = 0x1c;
 const PR_SHARED: u32 = 0x8006_0000;
 const PD_FIXEDZERO: u32 = 0x3;
@@ -1832,7 +1831,7 @@ pub fn enumerate_threads_of(pid: u32, found: &mut dyn FnMut(ThreadInfo), with_re
 }
 
 fn enumerate_thread_handles_of(pid: u32, found: &mut dyn FnMut(u32, u32)) {
-    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    let slot = thread_data_slot();
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
 
@@ -1965,7 +1964,7 @@ pub struct ProcessInfo {
 // process list is the deduplicated set of those, and the image path is where the command
 // line starts.
 pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
-    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    let slot = thread_data_slot();
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
 
@@ -1994,6 +1993,10 @@ pub fn enumerate_processes(found: &mut dyn FnMut(ProcessInfo)) {
         let next = unsafe { get_next_thread_handle(thread) };
         thread = if next == first { 0 } else { next };
     }
+}
+
+fn thread_data_slot() -> u32 {
+    unsafe { (core::ptr::addr_of!(_VWIN32_ThreadDataSlot).read() as *const u32).read() }
 }
 
 fn process_id(pdb: u32) -> u32 {
@@ -2405,7 +2408,7 @@ extern "C" fn frida_win9x_on_control(message: u32, thread: u32) {
 }
 
 fn tell_the_copy_of_a_departure(thread: u32) {
-    let slot = unsafe { (THREAD_BLOCK_SLOT as *const u32).read() };
+    let slot = thread_data_slot();
     if unsafe { (thread as *const u32).add(0x2c / 4).read() } != WIN32_THREAD {
         return;
     }
@@ -3329,6 +3332,7 @@ unsafe extern "C" {
     static __PageReserve: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static __PageCommit: unsafe extern "C" fn(u32, u32, u32, u32, u32) -> u32;
     static __PageCommitPhys: unsafe extern "C" fn(u32, u32, u32, u32) -> u32;
+    static _VWIN32_ThreadDataSlot: u32;
     static __VWIN32_QueueUserApc: unsafe extern "C" fn(u32, u32, u32) -> u32;
     static _Hook_VMM_Fault: unsafe extern "C" fn();
     static _VMM_Add_DDB: unsafe extern "C" fn();

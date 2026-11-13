@@ -65,6 +65,8 @@ namespace Frida.Barebone {
 			});
 		}
 
+		yield add_vwin32_symbols (machine, symbols, cancellable);
+
 		return new Win9xLayout (modules, symbols);
 	}
 
@@ -301,6 +303,43 @@ namespace Frida.Barebone {
 			symbols.add (make_symbol (MODULE_TABLE, table));
 	}
 
+	private static async void add_vwin32_symbols (Machine machine, Gee.List<SymbolInfo> symbols,
+			Cancellable? cancellable) throws Efni.Error, IOError {
+		uint64 thread_data_slot = yield find_thread_data_slot (machine, symbols, cancellable);
+		if (thread_data_slot != 0)
+			symbols.add (make_symbol (THREAD_DATA_SLOT, thread_data_slot));
+	}
+
+	private static async uint64 find_thread_data_slot (Machine machine, Gee.List<SymbolInfo> symbols,
+			Cancellable? cancellable) throws Efni.Error, IOError {
+		uint64 getter = address_of_symbol (symbols, "VWIN32_GetContextHandle");
+		if (getter == 0)
+			return 0;
+
+		Debugger debugger = machine.debugger;
+		size_t load_offset = TEST_FOR_WIN32_THREAD.length + 1;
+		Buffer code = debugger.make_buffer (yield debugger.read_byte_array (getter,
+			load_offset + LOAD_EBX_ABSOLUTE.length + 4, cancellable));
+		for (size_t i = 0; i != TEST_FOR_WIN32_THREAD.length; i++) {
+			if (code.read_uint8 (i) != TEST_FOR_WIN32_THREAD[i])
+				return 0;
+		}
+		for (size_t i = 0; i != LOAD_EBX_ABSOLUTE.length; i++) {
+			if (code.read_uint8 (load_offset + i) != LOAD_EBX_ABSOLUTE[i])
+				return 0;
+		}
+
+		return code.read_uint32 (load_offset + LOAD_EBX_ABSOLUTE.length);
+	}
+
+	private static uint64 address_of_symbol (Gee.List<SymbolInfo> symbols, string name) {
+		foreach (SymbolInfo symbol in symbols) {
+			if (symbol.name == name)
+				return symbol.offset;
+		}
+		return 0;
+	}
+
 	private static SymbolInfo make_symbol (string name, uint64 address) {
 		return new SymbolInfo () {
 			name = name,
@@ -500,6 +539,10 @@ namespace Frida.Barebone {
 	public const string KERNEL32_BASE = "KERNEL32_Base";
 	public const string PROCESS_ID_OBFUSCATOR = "KERNEL32_ProcessIdObfuscator";
 	public const string MODULE_TABLE = "KERNEL32_ModuleTable";
+	public const string THREAD_DATA_SLOT = "VWIN32_ThreadDataSlot";
+
+	private const uint8[] TEST_FOR_WIN32_THREAD = { 0x83, 0x7f, 0x2c, 0x2a, 0x75 };
+	private const uint8[] LOAD_EBX_ABSOLUTE = { 0x8b, 0x1d };
 
 	// movsx ecx, WORD PTR [eax+0x10] ; mov eax, ds:<table>
 	private const uint8[] INDEX_MODULE_TABLE = { 0x0f, 0xbf, 0x48, 0x10, 0xa1 };

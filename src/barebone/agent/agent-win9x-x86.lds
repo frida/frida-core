@@ -53,6 +53,7 @@ SECTIONS {
     _VPICD_Force_Default_Behavior = .; . += 4;
     _VPICD_Phys_EOI = .; . += 4;
     _VPICD_Physically_Unmask = .; . += 4;
+    _VWIN32_ThreadDataSlot = .; . += 4;
     __VWIN32_QueueUserApc = .; . += 4;
     __VWIN32_Get_Thread_Context = .; . += 4;
     __VWIN32_Set_Thread_Context = .; . += 4;
