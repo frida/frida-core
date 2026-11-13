@@ -154,9 +154,26 @@ pub fn run_when_ready(action: fn()) {
 
 #[unsafe(no_mangle)]
 extern "C" fn frida_win9x_on_event() {
+    unsafe {
+        vwin32_create_ring0_thread(
+            THREAD_STACK_SIZE as u32,
+            0,
+            frida_win9x_ready_thread_thunk as *const () as u32,
+            frida_win9x_ready_thread_failed_thunk as *const () as u32,
+        );
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn frida_win9x_on_ready_thread() {
     if let Some(action) = unsafe { READY_ACTION } {
         action();
     }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn frida_win9x_on_ready_thread_failed() {
+    log("frida: failed to spawn the starter\n\0");
 }
 
 static mut READY_ACTION: Option<fn()> = None;
@@ -2820,9 +2837,11 @@ unsafe extern "C" {
     fn get_initial_thread_handle(vm: u32) -> u32;
     fn get_next_thread_handle(thread: u32) -> u32;
     fn ifsmgr_ring0_file_io(function: u32, ebx: u32, ecx: u32, edx: u32, esi: u32, edi: u32) -> u32;
-    fn vwin32_create_ring0_thread(stack_size: u32, parameter: u32, entry: u32, event: u32) -> u32;
+    fn vwin32_create_ring0_thread(stack_size: u32, parameter: u32, entry: u32, on_failure: u32) -> u32;
     fn frida_win9x_hw_int_thunk();
     fn frida_win9x_thread_thunk();
+    fn frida_win9x_ready_thread_thunk();
+    fn frida_win9x_ready_thread_failed_thunk();
 }
 
 core::arch::global_asm!(
@@ -3307,6 +3326,18 @@ vpicd_virtualize_irq:
 .global frida_win9x_thread_thunk
 frida_win9x_thread_thunk:
     call frida_win9x_thread_start
+    ret
+
+.global frida_win9x_ready_thread_thunk
+frida_win9x_ready_thread_thunk:
+    call frida_win9x_on_ready_thread
+    ret
+
+.global frida_win9x_ready_thread_failed_thunk
+frida_win9x_ready_thread_failed_thunk:
+    pushad
+    call frida_win9x_on_ready_thread_failed
+    popad
     ret
 
 .global frida_win9x_hw_int_thunk
