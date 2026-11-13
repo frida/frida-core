@@ -591,25 +591,6 @@ def fetch_system_map(guest: "Guest") -> Path:
     return fetch_cached(guest, names[-1], netboot + names[-1])
 
 
-def fetch_system_map(guest: "Guest") -> Path:
-    """
-    The map is named after the kernel it describes, which the mirror versions in place, so
-    the directory says which one is being served today.
-    """
-    netboot = guest.kernel_url.rsplit("/", maxsplit=1)[0] + "/"
-    try:
-        with urllib.request.urlopen(netboot, timeout=60) as response:
-            index = response.read().decode(errors="replace")
-    except Exception as e:
-        raise Unavailable(f"unable to list {netboot}: {e}")
-
-    names = sorted(set(re.findall(r'System\.map-[0-9][^"<]*-lts', index)))
-    if not names:
-        raise Unavailable(f"{netboot} serves no System.map")
-
-    return fetch_cached(guest, names[-1], netboot + names[-1])
-
-
 def host_kernel() -> Path:
     return Path("/boot") / ("vmlinuz-" + os.uname().release)
 
