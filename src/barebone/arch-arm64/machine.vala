@@ -316,19 +316,30 @@ namespace Frida.Barebone {
 
 		public override async Bytes read_virtual (uint64 va, size_t size, Cancellable? cancellable)
 				throws Efni.Error, IOError {
-			if (physical_memory == null)
-				return yield debugger.read_byte_array (va, size, cancellable);
+			if (physical_memory != null)
+				return yield read_virtual_through_page_tables (va, size, cancellable);
 
+			try {
+				return yield debugger.read_byte_array (va, size, cancellable);
+			} catch (Efni.Error e) {
+				if (!("parallels" in debugger.features))
+					throw e;
+				return yield read_virtual_through_page_tables (va, size, cancellable);
+			}
+		}
+
+		private async Bytes read_virtual_through_page_tables (uint64 va, size_t size, Cancellable? cancellable)
+				throws Efni.Error, IOError {
 			MMUParameters p = yield load_mmu_parameters (cancellable);
 			var taken = new ByteArray ();
 			size_t offset = 0;
 			while (offset < size) {
 				uint64 cur_va = va + offset;
 				uint64 pa = yield translate_address (cur_va, cancellable);
-				if (!physical_memory.contains (pa))
+				if (physical_memory != null && !physical_memory.contains (pa))
 					throw new Efni.Error.NOT_SUPPORTED ("Address 0x%" + uint64.FORMAT_MODIFIER + "x is a device, not memory", cur_va);
 				size_t chunk = size_t.min ((size_t) (p.granule - (cur_va & (p.granule - 1))), size - offset);
-				taken.append (physical_memory.read (pa, chunk));
+				taken.append (yield read_physical (pa, chunk, cancellable));
 				offset += chunk;
 			}
 
