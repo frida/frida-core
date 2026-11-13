@@ -4123,7 +4123,7 @@ FAIL: %s
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield device.spawn ("C:\\WINDOWS\\SOL.EXE", null, null);
+			uint pid = yield device.spawn ("C:\\WINDOWS\\WINVER.EXE", null, null);
 			assert_true (pid != 0);
 
 			var settle = new TimeoutSource.seconds (3);
@@ -4132,7 +4132,7 @@ FAIL: %s
 			yield;
 			settle.destroy ();
 
-			assert_true ((yield find_program (device, "sol.exe")) == pid);
+			assert_true ((yield find_program (device, "winver.exe")) == pid);
 
 			yield device.resume (pid, null);
 
@@ -4142,7 +4142,7 @@ FAIL: %s
 			yield;
 			running.destroy ();
 
-			assert_true ((yield find_program (device, "sol.exe")) == pid);
+			assert_true ((yield find_program (device, "winver.exe")) == pid);
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -4172,7 +4172,7 @@ FAIL: %s
 			var starter = yield session.create_script ("""
 				const winExec = new NativeFunction(Process.getModuleByName('KERNEL32.DLL')
 					.getExportByName('WinExec'), 'uint32', ['pointer', 'uint32']);
-				send(['started', winExec(Memory.allocUtf8String('C:\\WINDOWS\\SOL.EXE'), 1)]);
+				send(['started', winExec(Memory.allocUtf8String('C:\\WINDOWS\\WINVER.EXE'), 1)]);
 			""", null, null);
 
 			var announced = new Gee.ArrayList<string> ();
@@ -4192,17 +4192,17 @@ FAIL: %s
 			var options = new ProcessQueryOptions ();
 			options.scope = METADATA;
 
-			Process? game = null;
+			Process? program = null;
 			var list = yield device.enumerate_processes (options, null);
 			for (int i = 0; i != list.size (); i++) {
 				var path = list.get (i).parameters["path"];
-				if (path != null && path.get_string ().down ().has_suffix ("sol.exe"))
-					game = list.get (i);
+				if (path != null && path.get_string ().down ().has_suffix ("winver.exe"))
+					program = list.get (i);
 			}
-			assert_nonnull (game);
+			assert_nonnull (program);
 
-			assert_true (game.name.down ().contains ("solitaire"));
-			assert_true (game.parameters["path"].get_string ().down ().has_suffix ("sol.exe"));
+			assert_true (program.name.down ().contains ("version"));
+			assert_true (program.parameters["path"].get_string ().down ().has_suffix ("winver.exe"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
