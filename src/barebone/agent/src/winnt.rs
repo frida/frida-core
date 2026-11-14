@@ -1878,11 +1878,11 @@ fn walk_threads_of(process: *mut c_void, found: &mut dyn FnMut(*mut c_void)) {
 // machine. A thread also cannot ask about itself.
 unsafe fn capture(thread: *mut c_void) -> Option<CpuState> {
     unsafe {
-        if (_PsGetThreadTeb)(thread).is_null() {
-            return None;
-        }
         if thread == (_PsGetCurrentThread)() {
             return None;
+        }
+        if (_PsGetThreadTeb)(thread).is_null() {
+            return where_it_waits(thread as usize);
         }
 
         let context = &mut *core::ptr::addr_of_mut!(CONTEXT);
@@ -1899,6 +1899,147 @@ unsafe fn capture(thread: *mut c_void) -> Option<CpuState> {
 }
 
 static mut CONTEXT: [u8; CONTEXT_SIZE + CONTEXT_ALIGNMENT] = [0; CONTEXT_SIZE + CONTEXT_ALIGNMENT];
+
+fn where_it_waits(thread: usize) -> Option<CpuState> {
+    let layout = stack_layout()?;
+    unsafe {
+        let base = try_read_pointer(thread + layout.base)?;
+        let sp = try_read_pointer(thread + layout.saved)?;
+
+        let pc = (sp..base)
+            .step_by(POINTER_SIZE)
+            .take(MAX_WAIT_FRAME_WORDS)
+            .filter_map(|slot| try_read_pointer(slot))
+            .find(|&value| returns_into_kernel_code(value))?;
+
+        Some(waiting_at(pc, sp))
+    }
+}
+
+fn stack_layout() -> Option<StackLayout> {
+    unsafe {
+        if let Some(known) = STACK_LAYOUT {
+            return Some(known);
+        }
+
+        let bounds = stack_bounds();
+        let limit = bounds.limit;
+        let base = bounds.tops[0];
+
+        let me = (_PsGetCurrentThread)() as usize;
+        let mut waiting = alloc::vec::Vec::new();
+        walk_threads_of((_PsGetThreadProcess)(me as *mut c_void), &mut |thread| {
+            if thread as usize != me && waiting.len() != THREADS_TO_COMPARE {
+                waiting.push(thread as usize);
+            }
+        });
+
+        let saved = (0..MAX_OBJECT_SIZE).step_by(POINTER_SIZE).find(|&at| {
+            let mut depths = waiting.iter().map(|&thread| {
+                let bounds = try_read_pointer(thread + limit).zip(try_read_pointer(thread + base));
+                let value = try_read_pointer(thread + at);
+                match (bounds, value) {
+                    (Some((bottom, top)), Some(value)) if value > bottom && value < top => Some(top - value),
+                    _ => None,
+                }
+            });
+            let Some(Some(first)) = depths.next() else {
+                return false;
+            };
+            let mut varied = false;
+            for depth in depths {
+                let Some(depth) = depth else {
+                    return false;
+                };
+                varied |= depth != first;
+            }
+            varied
+        })?;
+
+        let layout = StackLayout { base, saved };
+        STACK_LAYOUT = Some(layout);
+        Some(layout)
+    }
+}
+
+fn returns_into_kernel_code(address: usize) -> bool {
+    let inside = unsafe {
+        (*core::ptr::addr_of!(crate::MODULE_INFO))
+            .iter()
+            .any(|m| address.wrapping_sub(m.offset as usize) < m.size as usize)
+    };
+    inside && follows_a_call(address)
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn follows_a_call(address: usize) -> bool {
+    let before = |distance: usize| unsafe { try_read_byte(address - distance) };
+    before(5) == Some(CALL_RELATIVE)
+        || (before(6) == Some(CALL_INDIRECT) && before(5) == Some(CALL_INDIRECT_ABSOLUTE))
+        || (before(2) == Some(CALL_INDIRECT) && before(1).is_some_and(|m| m & 0xf8 == 0xd0))
+}
+
+#[cfg(target_arch = "aarch64")]
+fn follows_a_call(address: usize) -> bool {
+    let Some(instruction) = (unsafe { try_read_u32(address - 4) }) else {
+        return false;
+    };
+    (instruction & BRANCH_LINK_MASK) == BRANCH_LINK || (instruction & BRANCH_LINK_REGISTER_MASK) == BRANCH_LINK_REGISTER
+}
+
+#[cfg(target_arch = "x86")]
+fn waiting_at(pc: usize, sp: usize) -> CpuState {
+    CpuState { eip: pc as u32, edi: 0, esi: 0, ebp: 0, esp: sp as u32, ebx: 0, edx: 0, ecx: 0, eax: 0 }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn waiting_at(pc: usize, sp: usize) -> CpuState {
+    CpuState {
+        rip: pc as u64,
+        r15: 0,
+        r14: 0,
+        r13: 0,
+        r12: 0,
+        r11: 0,
+        r10: 0,
+        r9: 0,
+        r8: 0,
+        rdi: 0,
+        rsi: 0,
+        rbp: 0,
+        rsp: sp as u64,
+        rbx: 0,
+        rdx: 0,
+        rcx: 0,
+        rax: 0,
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn waiting_at(pc: usize, sp: usize) -> CpuState {
+    CpuState { pc: pc as u64, sp: sp as u64, nzcv: 0, x: [0; 29], fp: 0, lr: 0 }
+}
+
+#[derive(Clone, Copy)]
+struct StackLayout {
+    base: usize,
+    saved: usize,
+}
+
+static mut STACK_LAYOUT: Option<StackLayout> = None;
+
+const THREADS_TO_COMPARE: usize = 8;
+const MAX_WAIT_FRAME_WORDS: usize = 64;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const CALL_RELATIVE: u8 = 0xe8;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const CALL_INDIRECT: u8 = 0xff;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const CALL_INDIRECT_ABSOLUTE: u8 = 0x15;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_LINK_REGISTER_MASK: u32 = 0xffff_fc1f;
+#[cfg(target_arch = "aarch64")]
+const BRANCH_LINK_REGISTER: u32 = 0xd63f_0000;
 
 // No export gives the position of the thread list in a process. Thus calculate both offsets:
 // the caller is on the list, and its own links go back into its process.
@@ -2002,6 +2143,16 @@ unsafe fn try_read_pointer(address: usize) -> Option<usize> {
 
         Some(value)
     }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+unsafe fn try_read_byte(address: usize) -> Option<u8> {
+    unsafe { ((_MmIsAddressValid)(address as *const c_void) != 0).then(|| (address as *const u8).read()) }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn try_read_u32(address: usize) -> Option<u32> {
+    unsafe { ((_MmIsAddressValid)(address as *const c_void) != 0).then(|| (address as *const u32).read()) }
 }
 
 pub(crate) const POINTER_SIZE: usize = core::mem::size_of::<usize>();
