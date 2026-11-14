@@ -866,6 +866,7 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
                 let mut words = alloc::string::String::new();
                 for i in 0..64u32 { use core::fmt::Write; write!(&mut words, "{:04x} ", read_u16(stack_base + (state.esp & 0xffff) + i * 2)).unwrap(); }
                 crate::kprintln!("XXX stack16 {}", words);
+                xxx_dump_threads();
                 if state.esp >= stack && state.esp < stack + INJECTION_STACK_SIZE as u32 {
                     let mut words = alloc::string::String::new();
                     let mut at = state.esp;
@@ -1919,6 +1920,28 @@ fn enumerate_thread_handles_of(pid: u32, found: &mut dyn FnMut(u32, u32)) {
             }
         }
 
+        let next = unsafe { get_next_thread_handle(thread) };
+        thread = if next == first { 0 } else { next };
+    }
+}
+
+fn xxx_dump_threads() {
+    let slot = thread_data_slot();
+    let vm = unsafe { get_sys_vm_handle() };
+    let first = unsafe { get_initial_thread_handle(vm) };
+    let mut thread = first;
+    while thread != 0 {
+        let win32 = unsafe { (thread as *const u32).add(0x2c / 4).read() } == WIN32_THREAD;
+        let process = if win32 { unsafe { ((thread as *const u32).byte_add(slot as usize).read() as *const u32).add(1).read() } } else { 0 };
+        let mut context = [0u8; CONTEXT_SIZE];
+        unsafe { context.as_mut_ptr().add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL) };
+        let ok = unsafe { __VWIN32_Get_Thread_Context(thread, context.as_mut_ptr()) } != 0;
+        let field = |offset: usize| unsafe { context.as_ptr().add(offset).cast::<u32>().read_unaligned() };
+        if ok {
+            crate::kprintln!("XXX thread {:#x} process={:#x} cs={:#x} eip={:#x} esp={:#x} eax={:#x} edx={:#x} ecx={:#x}", thread, process, field(0xbc), field(CONTEXT_EIP), field(CONTEXT_ESP), field(CONTEXT_EAX), field(CONTEXT_EDX), field(CONTEXT_ECX));
+        } else {
+            crate::kprintln!("XXX thread {:#x} process={:#x} (no context)", thread, process);
+        }
         let next = unsafe { get_next_thread_handle(thread) };
         thread = if next == first { 0 } else { next };
     }
