@@ -2481,6 +2481,10 @@ pub fn place_agent_in_process(pid: u32) -> bool {
         return false;
     }
 
+    if threads_need_the_session_server(process, library) {
+        put_a_copy_in_the_session_server(pid);
+    }
+
     let own = unsafe { &*core::ptr::addr_of!(crate::OWN_RANGE) };
     let private_offset = crate::writable_half_start() - own.base_address as usize;
     let shared_size = private_offset;
@@ -2773,6 +2777,20 @@ fn carry_image_across(process: *mut c_void, whole: u64, private_offset: usize, s
 
         carried
     }
+}
+
+fn threads_need_the_session_server(process: *mut c_void, ntdll: u64) -> bool {
+    while_attached(process, || export(ntdll as usize, b"NtCreateThreadEx") == 0)
+}
+
+fn put_a_copy_in_the_session_server(pid: u32) {
+    let server = session_server_pid();
+    if server == 0 || server == pid || arena_for_pid(server).is_some() {
+        return;
+    }
+
+    place_agent_in_process(server);
+    start_agent_in_process(server);
 }
 
 fn introduce_to_session_server(pid: u32) {
