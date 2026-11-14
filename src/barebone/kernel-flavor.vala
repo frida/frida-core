@@ -397,10 +397,10 @@ namespace Frida.Barebone {
 		public Win9xKernelFlavor (Machine machine, Gee.Map<string, SymbolInfo> symbols) throws Efni.Error {
 			this.machine = machine;
 
-			SymbolInfo? get_system_time = symbols["Get_System_Time"];
-			if (get_system_time == null)
-				throw new Efni.Error.NOT_SUPPORTED ("Missing symbol for Get_System_Time");
-			yield_point = get_system_time.offset;
+			SymbolInfo? wait_semaphore = symbols["Wait_Semaphore"];
+			if (wait_semaphore == null)
+				throw new Efni.Error.NOT_SUPPORTED ("Missing symbol for Wait_Semaphore");
+			yield_point = wait_semaphore.offset;
 		}
 
 		public async void prepare (Cancellable? cancellable) throws Efni.Error, IOError {
