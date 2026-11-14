@@ -56,7 +56,7 @@ def main():
                                             help=f"boot a {guest.description} disk image with the GDB stub enabled")
             windows.add_argument("--image", type=Path, required=True)
             windows.add_argument("--format", default="qcow2")
-            windows.add_argument("--disk-interface", choices=["ide", "lsi"], default=guest.disk_interface)
+            windows.add_argument("--disk-interface", choices=["ide", "lsi", "piix4"], default=guest.disk_interface)
             windows.add_argument("--gdb-port", type=int, required=True)
             windows.add_argument("--memory", type=int, default=guest.memory)
             windows.add_argument("--boot-seconds", type=int, default=guest.boot_seconds)
@@ -352,7 +352,7 @@ def boot_windows_guest(guest: "WindowsGuest", args):
         "-machine", "pc,accel=tcg",
         "-cpu", guest.cpu,
         "-m", str(args.memory),
-    ] + disk_arguments(args) + [
+    ] + disk_arguments(args.image, args.format, args.disk_interface) + [
         "-vga", "cirrus",
         "-nic", "none",
         "-display", "none",
@@ -633,6 +633,60 @@ def prepare_win95(workdir: Path) -> (Path, dict):
     return image, {}
 
 
+def prepare_winxp(workdir: Path) -> (Path, dict):
+    image = workdir / "winxp.qcow2"
+    convert_to_qcow2(fetch_verified(WINXP_DISK), image)
+    snapshot_windows_desktop(WINDOWS_GUESTS["winxp"], image, workdir, [
+        (WINXP_WELCOME_SCREEN, ["down", "ret"]),
+        (WINXP_DESKTOP, []),
+    ])
+    return image, {}
+
+
+def prepare_winxp64(workdir: Path) -> (Path, dict):
+    seven_zip = require_any_program(SEVEN_ZIP_PROGRAMS)
+    subprocess.run([seven_zip, "e", "-y", f"-o{workdir}", fetch_verified(WINXP64_ARCHIVE)], check=True,
+                   stdout=subprocess.DEVNULL)
+    image = workdir / "winxp64.qcow2"
+    convert_to_qcow2(workdir / WINXP64_DISK_NAME, image)
+    snapshot_windows_desktop(WINDOWS_GUESTS["winxp64"], image, workdir, [
+        (WINXP64_DESKTOP, []),
+    ])
+    return image, {}
+
+
+def convert_to_qcow2(source: Path, image: Path):
+    subprocess.run([require_program("qemu-img"), "convert", "-O", "qcow2", source, image], check=True)
+
+
+def snapshot_windows_desktop(guest: "WindowsGuest", image: Path, workdir: Path, stages: [("ScreenMark", [str])]):
+    control_path = workdir / "control.sock"
+    with Listeners(control_path) as listeners:
+        process = subprocess.Popen(windows_guest_arguments(guest, image, listeners), pass_fds=listeners.fds,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            control = Qmp(control_path, process)
+            for screen, keys in stages:
+                wait_for_screen(control, screen)
+                for key in keys:
+                    time.sleep(WINXP_INPUT_SETTLE_SECONDS)
+                    control.monitor(f"sendkey {key}")
+            time.sleep(WINXP_SHELL_SETTLE_SECONDS)
+            control.monitor("stop")
+            control.monitor(f"savevm {PREPARED_SNAPSHOT}")
+        finally:
+            process.kill()
+            process.wait()
+
+
+def wait_for_screen(qmp: "Qmp", screen: "ScreenMark"):
+    deadline = time.monotonic() + WINXP_BOOT_TIMEOUT_SECONDS
+    while qmp.color_at(screen.x, screen.y) != screen.color:
+        if time.monotonic() > deadline:
+            raise Unavailable(f"guest never showed its {screen.name}")
+        time.sleep(WINXP_SCREEN_POLL_SECONDS)
+
+
 def fetch_verified(download: "Download") -> Path:
     cached = cache_root() / "downloads" / download.name
     if not cached.exists():
@@ -701,7 +755,7 @@ def windows_guest_arguments(guest: "WindowsGuest", image: Path, listeners: "List
         "-machine", "pc,accel=tcg",
         "-cpu", guest.cpu,
         "-m", str(guest.memory),
-        "-drive", f"file={image},format=qcow2,if={guest.disk_interface}",
+    ] + disk_arguments(image, "qcow2", guest.disk_interface) + [
         "-vga", "cirrus",
         "-nic", "none",
         "-display", "none",
@@ -806,13 +860,27 @@ class Qmp:
             header = open(shot.name, "rb").read(32).split()
             return (int(header[1]), int(header[2]))
 
+    def color_at(self, x: int, y: int) -> (int, int, int):
+        with tempfile.NamedTemporaryFile(suffix=".ppm") as shot:
+            self.execute("screendump", {"filename": shot.name})
+            magic, size, depth, pixels = open(shot.name, "rb").read().split(b"\n", 3)
+            width = int(size.split()[0])
+            offset = (y * width + x) * 3
+            return tuple(pixels[offset:offset + 3])
+
 
 # Images exported from VMware put the system disk on a SCSI adapter, which the guest's own
 # driver expects to find; handing it over as IDE bugchecks the kernel.
-def disk_arguments(args) -> [str]:
-    drive = f"file={args.image},format={args.format}"
-    if args.disk_interface == "ide":
+def disk_arguments(image: Path, format: str, interface: str) -> [str]:
+    drive = f"file={image},format={format}"
+    if interface == "ide":
         return ["-drive", drive + ",if=ide"]
+    if interface == "piix4":
+        return [
+            "-drive", drive + ",if=none,id=disk",
+            "-device", "piix4-ide,id=piix4",
+            "-device", "ide-hd,drive=disk,bus=piix4.0",
+        ]
     return [
         "-drive", drive + ",if=none,id=disk",
         "-device", "lsi53c895a,id=scsi0",
@@ -920,6 +988,14 @@ def require_program(name: str) -> str:
     if program is None:
         raise Unavailable(f"{name} is not installed")
     return program
+
+
+def require_any_program(names: [str]) -> str:
+    for name in names:
+        program = shutil.which(name)
+        if program is not None:
+            return program
+    raise Unavailable(f"none of {', '.join(names)} is installed")
 
 
 def fetch_busybox(guest: "Guest") -> Path:
@@ -1095,8 +1171,8 @@ WINDOWS_GUESTS = {
     # Old enough for Windows 95, new enough for the CMOV the agent is built with.
     "win95": WindowsGuest("Windows 95", "qemu-system-i386", "pentium3", 128, 120, "ide",
                           settle_win95_desktop),
-    "winxp": WindowsGuest("Windows XP", "qemu-system-i386", "core2duo", 512, 600, "ide", None),
-    "winxp64": WindowsGuest("Windows XP x64", "qemu-system-x86_64", "core2duo", 1024, 900, "ide",
+    "winxp": WindowsGuest("Windows XP", "qemu-system-i386", "core2duo,-nx", 512, 600, "ide", None),
+    "winxp64": WindowsGuest("Windows XP x64", "qemu-system-x86_64", "core2duo", 1024, 900, "piix4",
                             None),
 }
 
@@ -1129,6 +1205,8 @@ def linux_preparation(arch: str, suite: str, variables: str) -> Preparation:
 
 PREPARATIONS = {
     "win95": windows_preparation("win95", "Win9x", "WIN9X", prepare_win95),
+    "winxp": windows_preparation("winxp", "WinNt", "WINNT", prepare_winxp),
+    "winxp64": windows_preparation("winxp64", "WinNt64", "WINNT64", prepare_winxp64),
     "linux-x86": linux_preparation("x86", "IA32", "LINUX_X86"),
     "linux-x86_64": linux_preparation("x86_64", "X64", "LINUX_X86_64"),
     "linux-arm": linux_preparation("arm", "ARM", "LINUX_ARM"),
@@ -1158,6 +1236,36 @@ PATCHER9X_FLOPPY = Download(
     "patcher9x-0.9.91-boot.img",
     "https://github.com/JHRobotics/patcher9x/releases/download/v0.9.91/patcher9x-0.9.91-boot.img",
     "ca4fddeb6ad44f63f42f50c668b5e9e1587f9686b21d5a68c3beac1f5781ed03")
+
+WINXP_DISK = Download(
+    "winxp-core-sp3.vdi",
+    "https://archive.org/download/windows-xp-professional-core-edition-sp-3-1-40-gb-disk/"
+    "Windows%20XP%20Professional%20Core%20Edition%20SP3%20%281_40GB%20Disk%29.vdi",
+    "aa729bf8c5bf814569c32d8bf27cdf95988585003b91563a3e28bafbc0f196a4")
+
+WINXP64_ARCHIVE = Download(
+    "winxp64-sp2.7z",
+    "https://archive.org/download/virtual-box-xp-21-01-2025-11-19-46/Windows%20XP%20SP2%20VL%20x64.7z",
+    "df2625a8754768ed000f90f0e00013abca7a171ba2c8c0ca547b4959435f37ef")
+WINXP64_DISK_NAME = "Windows XP SP2 VL x64.vhd"
+
+SEVEN_ZIP_PROGRAMS = ["7z", "7zz"]
+
+
+class ScreenMark(NamedTuple):
+    name: str
+    x: int
+    y: int
+    color: tuple
+
+
+WINXP_WELCOME_SCREEN = ScreenMark("welcome screen", 20, 465, (55, 51, 172))
+WINXP_DESKTOP = ScreenMark("desktop", 20, 465, (212, 208, 200))
+WINXP64_DESKTOP = ScreenMark("desktop", 30, 466, (59, 165, 59))
+WINXP_BOOT_TIMEOUT_SECONDS = 1800
+WINXP_SCREEN_POLL_SECONDS = 5
+WINXP_INPUT_SETTLE_SECONDS = 5
+WINXP_SHELL_SETTLE_SECONDS = 60
 
 MTOOLS_PROGRAMS = ["mtype", "mattrib", "mcopy", "mren"]
 
