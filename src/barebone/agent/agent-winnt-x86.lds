@@ -43,6 +43,7 @@ SECTIONS {
     _PsGetThreadProcess = .; . += 4;
     _PsGetThreadId = .; . += 4;
     _PsGetThreadTeb = .; . += 4;
+    _IoGetStackLimits = .; . += 4;
     _PsGetContextThread = .; . += 4;
     _PsSetContextThread = .; . += 4;
     _KeStackAttachProcess = .; . += 4;

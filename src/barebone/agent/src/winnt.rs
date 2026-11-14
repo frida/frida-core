@@ -149,6 +149,13 @@ unsafe extern "C" fn thread_start(context: *mut c_void) {
 }
 
 unsafe fn start_on_own_stack(context: *mut c_void) {
+    learn_stack_bounds();
+
+    if !kernel_exports(core::ptr::addr_of!(_KeExpandKernelStackAndCalloutEx)) {
+        unsafe { run_on_allocated_stack(context) };
+        return;
+    }
+
     let status = unsafe {
         (_KeExpandKernelStackAndCalloutEx)(run_agent, context, THREAD_STACK_SIZE, 1,
             core::ptr::null_mut())
@@ -156,6 +163,92 @@ unsafe fn start_on_own_stack(context: *mut c_void) {
     if status < 0 {
         panic!("Unable to expand the kernel stack: {:#x}", status);
     }
+}
+
+fn learn_stack_bounds() {
+    unsafe {
+        if (*core::ptr::addr_of!(STACK_BOUNDS)).is_some() {
+            return;
+        }
+
+        let me = (_PsGetCurrentThread)() as usize;
+        let mut low = 0usize;
+        let mut high = 0usize;
+        (_IoGetStackLimits)(&mut low, &mut high);
+
+        let words = || {
+            (0..MAX_OBJECT_SIZE).step_by(POINTER_SIZE).map(move |at| (at, ((me + at) as *const usize).read()))
+        };
+        let (limit, _) = words().find(|&(_, value)| value == low).unwrap();
+        let top = words()
+            .map(|(_, value)| value)
+            .filter(|&value| value >= high && value - high < page_size())
+            .min()
+            .unwrap();
+
+        let mut bounds = StackBounds { limit, tops: [0; MAX_TOP_FIELDS], top_count: 0 };
+        for (at, _) in words().filter(|&(_, value)| value == top).take(MAX_TOP_FIELDS) {
+            bounds.tops[bounds.top_count] = at;
+            bounds.top_count += 1;
+        }
+        STACK_BOUNDS = Some(bounds);
+    }
+}
+
+unsafe fn run_on_allocated_stack(context: *mut c_void) {
+    let stack = alloc(THREAD_STACK_SIZE);
+    let bottom = stack as usize;
+    let top = bottom + THREAD_STACK_SIZE;
+    let first_frame = top - STACK_TOP_RESERVE;
+
+    let thread = unsafe { (_PsGetCurrentThread)() } as usize;
+    let (previous_bottom, previous_top) = adopt_stack(thread, bottom, top);
+
+    unsafe { frida_winnt_run_on_stack(first_frame as *mut u8, run_agent_on_allocated_stack, context) };
+
+    adopt_stack(thread, previous_bottom, previous_top);
+    free(stack, THREAD_STACK_SIZE);
+}
+
+fn adopt_stack(thread: usize, bottom: usize, top: usize) -> (usize, usize) {
+    let bounds = stack_bounds();
+    unsafe {
+        let limit = (thread + bounds.limit) as *mut usize;
+        let previous = (limit.read(), ((thread + bounds.tops[0]) as *const usize).read());
+        limit.write(bottom);
+        for &at in &bounds.tops[..bounds.top_count] {
+            ((thread + at) as *mut usize).write(top);
+        }
+        previous
+    }
+}
+
+unsafe extern "C" fn run_agent_on_allocated_stack(context: *mut c_void) {
+    unsafe { run_agent_body(context) }
+}
+
+unsafe extern "C" {
+    fn frida_winnt_run_on_stack(stack_top: *mut u8, entry: unsafe extern "C" fn(*mut c_void), context: *mut c_void);
+}
+
+fn stack_bounds() -> StackBounds {
+    unsafe { (*core::ptr::addr_of!(STACK_BOUNDS)).unwrap() }
+}
+
+#[derive(Clone, Copy)]
+struct StackBounds {
+    limit: usize,
+    tops: [usize; MAX_TOP_FIELDS],
+    top_count: usize,
+}
+
+static mut STACK_BOUNDS: Option<StackBounds> = None;
+
+const MAX_TOP_FIELDS: usize = 4;
+const STACK_TOP_RESERVE: usize = 0x400;
+
+fn kernel_exports<T>(slot: *const T) -> bool {
+    unsafe { slot.cast::<usize>().read() != 0 }
 }
 
 #[cfg(target_arch = "x86")]
@@ -4992,6 +5085,7 @@ kernel_abi! {
     static _PsGetThreadProcess: windows_fn!(*mut c_void => *mut c_void);
     static _PsGetThreadId: windows_fn!(*mut c_void => u32);
     static _PsGetThreadTeb: windows_fn!(*mut c_void => *mut c_void);
+    static _IoGetStackLimits: windows_fn!(*mut usize, *mut usize);
     static _PsGetContextThread: windows_fn!(*mut c_void, *mut u8, u8 => i32);
     static _PsSetContextThread: windows_fn!(*mut c_void, *mut u8, u8 => i32);
     static _KeStackAttachProcess: windows_fn!(*mut c_void, *mut u8);
