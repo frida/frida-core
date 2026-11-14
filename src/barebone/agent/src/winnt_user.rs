@@ -1140,7 +1140,7 @@ fn current_client_id(offset: u32) -> u32 {
 }
 
 #[cfg(target_arch = "x86")]
-fn peb() -> usize {
+pub(crate) fn peb() -> usize {
     let peb: usize;
     unsafe {
         core::arch::asm!("mov {0:e}, fs:[0x30]", out(reg) peb,
@@ -1150,7 +1150,7 @@ fn peb() -> usize {
 }
 
 #[cfg(target_arch = "x86_64")]
-fn peb() -> usize {
+pub(crate) fn peb() -> usize {
     let peb: usize;
     unsafe {
         core::arch::asm!("mov {0}, gs:[0x60]", out(reg) peb,
@@ -1165,7 +1165,7 @@ fn current_client_id(offset: u32) -> u32 {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn peb() -> usize {
+pub(crate) fn peb() -> usize {
     unsafe { ((thread_block() + BLOCK_PEB_OFFSET) as *const usize).read() }
 }
 

@@ -3983,7 +3983,9 @@ pub(crate) fn export(base: usize, wanted: &[u8]) -> usize {
                 DATA_DIRECTORIES_OFFSET_32
             };
 
-        let exports = base + read_u32(directories) as usize;
+        let directory = read_u32(directories);
+        let directory_end = directory + read_u32(directories + DATA_DIRECTORY_SIZE_OFFSET);
+        let exports = base + directory as usize;
         let count = read_u32(exports + EXPORT_NAME_COUNT_OFFSET) as usize;
         let functions = base + read_u32(exports + EXPORT_FUNCTIONS_OFFSET) as usize;
         let names = base + read_u32(exports + EXPORT_NAMES_OFFSET) as usize;
@@ -3993,13 +3995,34 @@ pub(crate) fn export(base: usize, wanted: &[u8]) -> usize {
             let name = base + read_u32(names + index * 4) as usize;
             if name_is(name, wanted) {
                 let ordinal = ((ordinals + index * 2) as *const u16).read() as usize;
-                return base + read_u32(functions + ordinal * 4) as usize;
+                let function = read_u32(functions + ordinal * 4);
+                if (directory..directory_end).contains(&function) {
+                    return forwarded_export(base + function as usize);
+                }
+                return base + function as usize;
             }
         }
     }
 
     0
 }
+fn forwarded_export(target: usize) -> usize {
+    if !in_copy() {
+        return 0;
+    }
+
+    let text = unsafe { core::ffi::CStr::from_ptr(target as *const core::ffi::c_char) }.to_bytes();
+    let dot = text.iter().position(|&c| c == b'.').unwrap();
+    let mut module = text[..dot].to_vec();
+    module.extend_from_slice(b".dll");
+
+    let base = module_base(crate::winnt_user::peb(), &module);
+    if base == 0 {
+        return 0;
+    }
+    export(base, &text[dot + 1..])
+}
+
 fn name_is(name: usize, wanted: &[u8]) -> bool {
     for (index, expected) in wanted.iter().enumerate() {
         if unsafe { ((name + index) as *const u8).read() } != *expected {
@@ -4045,6 +4068,7 @@ const OPTIONAL_HEADER_OFFSET: usize = 0x18;
 const PE32_PLUS_MAGIC: u16 = 0x20b;
 const DATA_DIRECTORIES_OFFSET_32: usize = 0x60;
 const DATA_DIRECTORIES_OFFSET_64: usize = 0x70;
+const DATA_DIRECTORY_SIZE_OFFSET: usize = 4;
 const EXPORT_NAME_COUNT_OFFSET: usize = 0x18;
 const IMPORT_DIRECTORY_INDEX: usize = 1;
 const IMPORT_DESCRIPTOR_SIZE: usize = 20;
