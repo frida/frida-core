@@ -251,6 +251,7 @@ pub fn inject_agent(pid: u32) -> u32 {
     }
 
     let (image_base, entry) = place_shared_agent();
+    crate::kprintln!("XXX image_base={:#x} entry={:#x}", image_base, entry);
 
     let mut payload = [
         0xff, 0x74, 0x24, 0x04,
@@ -844,6 +845,22 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
     resume_thread(arena + RESUME_STUB_OFFSET, arena);
     if !await_flag(arena + RUNNING_FLAG) {
         crate::kprintln!("XXX not running resumed={}", unsafe { ((arena + RESUMED_FLAG) as *const u32).read_volatile() });
+        for _ in 0..3 {
+            if let Some(state) = thread_cpu_state(thread) {
+                crate::kprintln!("XXX stuck eip={:#x} esp={:#x} ebp={:#x} eax={:#x} ecx={:#x} edx={:#x}", state.eip, state.esp, state.ebp, state.eax, state.ecx, state.edx);
+                if state.esp >= stack && state.esp < stack + INJECTION_STACK_SIZE as u32 {
+                    let mut words = alloc::string::String::new();
+                    let mut at = state.esp;
+                    while at < (state.esp + 0x200).min(stack + INJECTION_STACK_SIZE as u32) {
+                        use core::fmt::Write;
+                        write!(&mut words, "{:08x} ", unsafe { (at as *const u32).read() }).unwrap();
+                        at += 4;
+                    }
+                    crate::kprintln!("XXX stack {}", words);
+                }
+            }
+            await_flag(arena + RUNNING_FLAG);
+        }
         return Injection { arena, thread: 0, stack };
     }
     free_shared(start_stack);
