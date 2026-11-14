@@ -23,6 +23,14 @@ namespace Frida.Barebone {
 
 		yield add_export_symbols (machine, first, anchors.exports, symbols, cancellable);
 
+		bool hal_is_separate = !symbols.any_match (s => s.name == HAL_PROBE);
+		if (hal_is_separate) {
+			LoadedModule? hal = yield find_loaded_module (machine, anchors.module_list, HAL_NAME, shape,
+				cancellable);
+			if (hal != null)
+				yield add_export_symbols (machine, hal, null, symbols, cancellable);
+		}
+
 		if (anchors.process_list_head != 0) {
 			symbols.add (new SymbolInfo () {
 				name = PROCESS_LIST_HEAD,
@@ -370,12 +378,34 @@ namespace Frida.Barebone {
 
 	private static async LoadedModule? read_first_loaded_module (Machine machine, uint64 head, Shape shape,
 			Cancellable? cancellable) throws Efni.Error, IOError {
-		Debugger debugger = machine.debugger;
-
-		uint64 entry = read_pointer (debugger.make_buffer (yield machine.read_virtual (head, shape.pointer_size,
-			cancellable)), 0, shape);
+		uint64 entry = yield read_next_entry (machine, head, shape, cancellable);
 		if (entry == head || !is_kernel_address (entry, shape))
 			return null;
+
+		return yield read_loaded_module (machine, entry, shape, cancellable);
+	}
+
+	private static async LoadedModule? find_loaded_module (Machine machine, uint64 head, string name, Shape shape,
+			Cancellable? cancellable) throws Efni.Error, IOError {
+		uint64 entry = yield read_next_entry (machine, head, shape, cancellable);
+		for (uint i = 0; i != MAX_MODULES_SEARCHED && entry != head && is_kernel_address (entry, shape); i++) {
+			LoadedModule? module = yield read_loaded_module (machine, entry, shape, cancellable);
+			if (module != null && module.name.ascii_down () == name)
+				return module;
+			entry = yield read_next_entry (machine, entry, shape, cancellable);
+		}
+		return null;
+	}
+
+	private static async uint64 read_next_entry (Machine machine, uint64 entry, Shape shape, Cancellable? cancellable)
+			throws Efni.Error, IOError {
+		return read_pointer (machine.debugger.make_buffer (yield machine.read_virtual (entry, shape.pointer_size,
+			cancellable)), 0, shape);
+	}
+
+	private static async LoadedModule? read_loaded_module (Machine machine, uint64 entry, Shape shape,
+			Cancellable? cancellable) throws Efni.Error, IOError {
+		Debugger debugger = machine.debugger;
 
 		Buffer e = debugger.make_buffer (yield machine.read_virtual (entry, shape.table_entry_size, cancellable));
 
@@ -525,6 +555,9 @@ namespace Frida.Barebone {
 	private const uint MAX_IMAGE_PROBES = 4096;
 
 	private const string LOADED_MODULE_LIST = "PsLoadedModuleList";
+	private const string HAL_NAME = "hal.dll";
+	private const string HAL_PROBE = "HalGetInterruptVector";
+	private const uint MAX_MODULES_SEARCHED = 16;
 
 	private const uint64 RING_MASK = 3;
 	private const uint EXCEPTION_LEVEL_SHIFT = 2;
