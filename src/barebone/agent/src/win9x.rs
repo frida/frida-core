@@ -1077,7 +1077,7 @@ fn resume_thread(stub: u32, arena: u32) {
 
 fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
     let mut code = [
-        0x8b, 0x44, 0x24, 0x04,
+        0x8b, 0x44, 0x24, 0x08,
         0xbc, 0, 0, 0, 0,
         0x64, 0x8b, 0x0d, 0x18, 0x00, 0x00, 0x00,
         0x89, 0x61, 0x58,
@@ -1108,21 +1108,14 @@ fn redirect_to_trampoline(arena: u32, thread: u32) -> u32 {
         base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
         __VWIN32_Get_Thread_Context(thread, base);
     }
-    let esp = unsafe { base.add(CONTEXT_ESP).cast::<u32>().read_unaligned() };
-    let selector = |slot: u32| unsafe { ((esp + slot) as *const u32).read_volatile() };
+    let start_frame = unsafe { base.add(CONTEXT_ESP).cast::<u32>().read_unaligned() };
 
     let stack = alloc_shared(PAGE_SIZE as usize) as u32;
-    let top = stack + PAGE_SIZE - 0x40;
-    unsafe { ((top + 4) as *mut u32).write_volatile(arena) };
-
+    let frame = stack + PAGE_SIZE - START_FRAME_SIZE;
     unsafe {
-        base.add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL);
-        base.add(CONTEXT_DS).cast::<u32>().write_unaligned(selector(0));
-        base.add(CONTEXT_ES).cast::<u32>().write_unaligned(selector(4));
-        base.add(CONTEXT_FS).cast::<u32>().write_unaligned(selector(8));
-        base.add(CONTEXT_GS).cast::<u32>().write_unaligned(selector(12));
-        base.add(CONTEXT_EIP).cast::<u32>().write_unaligned(arena + TRAMPOLINE_OFFSET);
-        base.add(CONTEXT_ESP).cast::<u32>().write_unaligned(top);
+        core::ptr::copy_nonoverlapping(start_frame as *const u8, frame as *mut u8, START_FRAME_SIZE as usize);
+        ((frame + START_FRAME_RETURN) as *mut u32).write_volatile(arena + TRAMPOLINE_OFFSET);
+        base.add(CONTEXT_ESP).cast::<u32>().write_unaligned(frame);
         __VWIN32_Set_Thread_Context(thread, base);
     }
 
@@ -1694,6 +1687,8 @@ const ANY_THREAD: u32 = 0xffff_ffff;
 const RESUME_STUB_OFFSET: u32 = 0x140;
 const WAKE_STUB_OFFSET: u32 = 0x1c0;
 const TRAMPOLINE_OFFSET: u32 = 0x180;
+const START_FRAME_SIZE: u32 = 0x48;
+const START_FRAME_RETURN: u32 = 0x34;
 
 const INJECTION_STACK_SIZE: usize = 0x4000;
 const PDB_MEMORY_CONTEXT: usize = 0x1c;
@@ -1968,10 +1963,6 @@ pub(crate) unsafe fn write_cpu_state(base: *mut u8, state: &CpuState) {
 const CONTEXT_SIZE: usize = 0xcc;
 const CONTEXT_FULL: u32 = 0x0001_0007;
 const CONTEXT_FLAGS: usize = 0x00;
-const CONTEXT_GS: usize = 0x8c;
-const CONTEXT_FS: usize = 0x90;
-const CONTEXT_ES: usize = 0x94;
-const CONTEXT_DS: usize = 0x98;
 const CONTEXT_EDI: usize = 0x9c;
 const CONTEXT_ESI: usize = 0xa0;
 const CONTEXT_EBX: usize = 0xa4;
