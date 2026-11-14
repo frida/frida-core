@@ -38,6 +38,7 @@ namespace Frida.Barebone {
 		}
 
 		public uint arguments_in_registers = 0;
+		public uint64 call_landing_zone = 0;
 
 		private const string[] ARGUMENT_REGISTERS = { "eax", "edx", "ecx" };
 
@@ -150,7 +151,7 @@ namespace Frida.Barebone {
 			var regs = new Gee.HashMap<string, Variant> ();
 			regs.set_all (saved_regs);
 
-			uint64 landing_zone = saved_regs["eip"].get_uint64 ();
+			uint64 landing_zone = (call_landing_zone != 0) ? call_landing_zone : saved_regs["eip"].get_uint64 ();
 
 			uint in_registers = uint.min (arguments_in_registers, args.length);
 			uint on_stack = args.length - in_registers;

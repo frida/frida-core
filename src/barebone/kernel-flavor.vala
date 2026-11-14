@@ -401,6 +401,8 @@ namespace Frida.Barebone {
 			if (wait_semaphore == null)
 				throw new Efni.Error.NOT_SUPPORTED ("Missing symbol for Wait_Semaphore");
 			yield_point = wait_semaphore.offset;
+
+			((IA32Machine) machine).call_landing_zone = symbols["Fatal_Error_Handler"].offset;
 		}
 
 		public async void prepare (Cancellable? cancellable) throws Efni.Error, IOError {
