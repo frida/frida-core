@@ -490,6 +490,7 @@ def test_guest(name: str, args):
 
             if outcome.returncode == 0:
                 print(f"ok {index + 1} {test}", flush=True)
+                report_what_the_guest_said([("agent", agent_log_path)])
             else:
                 failed.append(test)
                 print(f"not ok {index + 1} {test}", flush=True)
