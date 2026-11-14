@@ -2302,6 +2302,16 @@ unsafe fn describe(process: *mut c_void) -> (*const u8, *const u8) {
 }
 
 unsafe fn read_from(process: *mut c_void, address: usize, out: &mut [u8]) -> bool {
+    if !kernel_exports(core::ptr::addr_of!(_MmCopyVirtualMemory)) {
+        return while_attached(process, || {
+            let present = range_is_valid(address, out.len());
+            if present {
+                unsafe { core::ptr::copy_nonoverlapping(address as *const u8, out.as_mut_ptr(), out.len()) };
+            }
+            present
+        });
+    }
+
     unsafe {
         let mut copied: usize = 0;
         let status = (_MmCopyVirtualMemory)(
@@ -2318,6 +2328,13 @@ unsafe fn read_from(process: *mut c_void, address: usize, out: &mut [u8]) -> boo
 }
 
 unsafe fn write_to(process: *mut c_void, address: usize, bytes: &[u8]) -> bool {
+    if !kernel_exports(core::ptr::addr_of!(_MmCopyVirtualMemory)) {
+        return while_attached(process, || {
+            unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), address as *mut u8, bytes.len()) };
+            true
+        });
+    }
+
     unsafe {
         let mut copied: usize = 0;
         let status = (_MmCopyVirtualMemory)(
@@ -2331,6 +2348,19 @@ unsafe fn write_to(process: *mut c_void, address: usize, bytes: &[u8]) -> bool {
         );
         status >= 0 && copied == bytes.len()
     }
+}
+
+fn while_attached(process: *mut c_void, work: impl FnOnce() -> bool) -> bool {
+    let mut apc_state = [0usize; APC_STATE_WORDS];
+    unsafe { (_KeStackAttachProcess)(process, apc_state.as_mut_ptr() as *mut u8) };
+    let outcome = work();
+    unsafe { (_KeUnstackDetachProcess)(apc_state.as_mut_ptr() as *mut u8) };
+    outcome
+}
+
+fn range_is_valid(start: usize, size: usize) -> bool {
+    let page = page_size();
+    (start & !(page - 1)..start + size).step_by(page).all(address_is_valid)
 }
 
 unsafe fn read_word_from(process: *mut c_void, address: usize) -> Option<usize> {
