@@ -1023,7 +1023,7 @@ pub(crate) unsafe fn set_own_range(base: u64, size: u64) {
     }
 }
 
-#[cfg(feature = "winnt")]
+#[cfg(all(feature = "winnt", any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub(crate) fn own_code() -> (usize, usize) {
     let start = entrypoint_blob::_start as *const () as usize;
 
