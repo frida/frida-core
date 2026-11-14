@@ -1105,7 +1105,7 @@ pub(crate) fn poke_loop_wakeup() {
 }
 
 const G_WAIT_WAKEUP_HANDLE: i32 = -43;
-const GWAKEUP_TOKEN: usize = 8;
+const GWAKEUP_TOKEN: usize = core::mem::size_of::<usize>();
 const POLL_IN: u16 = 1;
 const WAIT_ANY_OBJECT: u32 = 1;
 
