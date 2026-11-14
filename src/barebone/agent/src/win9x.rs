@@ -1925,20 +1925,39 @@ fn enumerate_thread_handles_of(pid: u32, found: &mut dyn FnMut(u32, u32)) {
     }
 }
 
+fn xxx_dump_win16_lock() {
+    let base = unsafe { core::ptr::addr_of!(_KERNEL32_Base).read() };
+    let headers = base + read_u32(base + DOS_HEADERS_OFFSET);
+    let directory = base + read_u32(headers + EXPORT_DIRECTORY_OFFSET);
+    let ordinal_base = read_u32(directory + 0x10);
+    let functions = base + read_u32(directory + 0x1c);
+    let getter = base + read_u32(functions + (93 - ordinal_base) * 4);
+    let mut code = alloc::string::String::new();
+    for i in 0..24 { use core::fmt::Write; write!(&mut code, "{:02x}", read_u8(getter + i)).unwrap(); }
+    crate::kprintln!("XXX ord93={:#x} code={}", getter, code);
+    let lock = read_u32(read_u32(getter + 2));
+    let mut words = alloc::string::String::new();
+    for w in 0..10 { use core::fmt::Write; write!(&mut words, "{:08x} ", read_u32(lock + w * 4)).unwrap(); }
+    crate::kprintln!("XXX win16lock {:#x}: {}", lock, words);
+}
+
 fn xxx_dump_threads() {
+    xxx_dump_win16_lock();
     let slot = thread_data_slot();
     let vm = unsafe { get_sys_vm_handle() };
     let first = unsafe { get_initial_thread_handle(vm) };
     let mut thread = first;
     while thread != 0 {
         let win32 = unsafe { (thread as *const u32).add(0x2c / 4).read() } == WIN32_THREAD;
-        let process = if win32 { unsafe { ((thread as *const u32).byte_add(slot as usize).read() as *const u32).add(1).read() } } else { 0 };
+        let block = if win32 { unsafe { (thread as *const u32).byte_add(slot as usize).read() } } else { 0 };
+        let process = if win32 { unsafe { (block as *const u32).add(1).read() } } else { 0 };
+        let tdb = if win32 { unsafe { (block as *const u32).read() } } else { 0 };
         let mut context = [0u8; CONTEXT_SIZE];
         unsafe { context.as_mut_ptr().add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL) };
         let ok = unsafe { __VWIN32_Get_Thread_Context(thread, context.as_mut_ptr()) } != 0;
         let field = |offset: usize| unsafe { context.as_ptr().add(offset).cast::<u32>().read_unaligned() };
         if ok {
-            crate::kprintln!("XXX thread {:#x} process={:#x} cs={:#x} eip={:#x} esp={:#x} eax={:#x} edx={:#x} ecx={:#x}", thread, process, field(0xbc), field(CONTEXT_EIP), field(CONTEXT_ESP), field(CONTEXT_EAX), field(CONTEXT_EDX), field(CONTEXT_ECX));
+            crate::kprintln!("XXX thread {:#x} tdb={:#x} process={:#x} cs={:#x} eip={:#x} esp={:#x} eax={:#x} edx={:#x} ecx={:#x}", thread, tdb, process, field(0xbc), field(CONTEXT_EIP), field(CONTEXT_ESP), field(CONTEXT_EAX), field(CONTEXT_EDX), field(CONTEXT_ECX));
         } else {
             crate::kprintln!("XXX thread {:#x} process={:#x} (no context)", thread, process);
         }
