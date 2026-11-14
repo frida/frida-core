@@ -1394,12 +1394,19 @@ fn find_thread(id: u32, with_registers: bool) -> Option<crate::kernel::ThreadInf
 
 fn for_each_thread(visit: &mut dyn FnMut(u32) -> bool) {
     let api = thread_list_api();
+    match api.next_thread {
+        Some(next_thread) => walk_thread_handles(api, next_thread, visit),
+        None => walk_thread_snapshot(api, visit),
+    }
+}
+
+fn walk_thread_handles(api: &ThreadListApi, next_thread: NextThread, visit: &mut dyn FnMut(u32) -> bool) {
     let mut thread: *mut c_void = core::ptr::null_mut();
 
     unsafe {
         for _ in 0..MAX_THREADS_PER_PROCESS {
             let mut next: *mut c_void = core::ptr::null_mut();
-            let status = (api.next_thread)(CURRENT_PROCESS, thread,
+            let status = (next_thread)(CURRENT_PROCESS, thread,
                 THREAD_QUERY_LIMITED_INFORMATION, 0, 0, &mut next);
             if !thread.is_null() {
                 (api.close)(thread);
@@ -1427,6 +1434,35 @@ fn for_each_thread(visit: &mut dyn FnMut(u32) -> bool) {
 }
 
 const MAX_THREADS_PER_PROCESS: usize = 4096;
+
+fn walk_thread_snapshot(api: &ThreadListApi, visit: &mut dyn FnMut(u32) -> bool) {
+    unsafe {
+        let snapshot = (api.create_snapshot)(SNAP_THREAD, 0);
+        if snapshot == INVALID_HANDLE {
+            return;
+        }
+
+        let ours = current_process_id();
+        let mut entry = [0u32; THREAD_ENTRY_WORDS];
+        entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
+        let mut more = (api.first)(snapshot, entry.as_mut_ptr() as *mut u8);
+        while more != 0 {
+            if entry[THREAD_ENTRY_OWNER] == ours && !visit(entry[THREAD_ENTRY_ID]) {
+                break;
+            }
+            entry[0] = (THREAD_ENTRY_WORDS * 4) as u32;
+            more = (api.next)(snapshot, entry.as_mut_ptr() as *mut u8);
+        }
+
+        (api.close)(snapshot);
+    }
+}
+
+const SNAP_THREAD: u32 = 0x4;
+const INVALID_HANDLE: *mut c_void = usize::MAX as *mut c_void;
+const THREAD_ENTRY_WORDS: usize = 7;
+const THREAD_ENTRY_ID: usize = 2;
+const THREAD_ENTRY_OWNER: usize = 3;
 
 unsafe fn id_of_thread(api: &ThreadListApi, thread: *mut c_void) -> Option<u32> {
     let mut basic = [0u8; THREAD_BASIC_INFORMATION_SIZE];
@@ -1508,6 +1544,10 @@ fn thread_list_api() -> &'static ThreadListApi {
             THREAD_LIST_API = Some(ThreadListApi {
                 next_thread: core::mem::transmute(
                     export(loader_library(), b"NtGetNextThread")),
+                create_snapshot: core::mem::transmute(
+                    export(library, b"CreateToolhelp32Snapshot")),
+                first: core::mem::transmute(export(library, b"Thread32First")),
+                next: core::mem::transmute(export(library, b"Thread32Next")),
                 query_thread: core::mem::transmute(
                     export(loader_library(), b"NtQueryInformationThread")),
                 open: core::mem::transmute(export(library, b"OpenThread")),
@@ -1525,7 +1565,10 @@ fn thread_list_api() -> &'static ThreadListApi {
 }
 
 struct ThreadListApi {
-    next_thread: windows_fn!(*mut c_void, *mut c_void, u32, u32, u32, *mut *mut c_void => i32),
+    next_thread: Option<NextThread>,
+    create_snapshot: windows_fn!(u32, u32 => *mut c_void),
+    first: windows_fn!(*mut c_void, *mut u8 => i32),
+    next: windows_fn!(*mut c_void, *mut u8 => i32),
     query_thread: windows_fn!(*mut c_void, u32, *mut u8, u32, *mut u32 => i32),
     open: windows_fn!(u32, i32, u32 => *mut c_void),
     get_context: windows_fn!(*mut c_void, *mut u8 => i32),
@@ -1534,6 +1577,8 @@ struct ThreadListApi {
     resume: windows_fn!(*mut c_void, *mut u32 => i32),
     close: windows_fn!(*mut c_void => i32),
 }
+
+type NextThread = windows_fn!(*mut c_void, *mut c_void, u32, u32, u32, *mut *mut c_void => i32);
 
 static mut THREAD_LIST_API: Option<ThreadListApi> = None;
 
