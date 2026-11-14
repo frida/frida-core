@@ -323,10 +323,10 @@ pub extern "C" fn gum_try_mprotect(
 pub extern "C" fn gum_memory_allocate(
     _address: gpointer,
     size: gsize,
-    _alignment: gsize,
+    alignment: gsize,
     prot: GumPageProtection,
 ) -> gpointer {
-    let ptr = kernel::alloc_code(size as usize);
+    let ptr = allocate_whole_pages(size as usize, alignment as usize);
     if ptr.is_null() {
         return ptr::null_mut();
     }
@@ -343,13 +343,42 @@ pub extern "C" fn gum_memory_allocate(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn gum_memory_free(address: gpointer, size: gsize) -> gboolean {
+pub extern "C" fn gum_memory_free(address: gpointer, _size: gsize) -> gboolean {
     if gum::is_agent_slab(address as u64) {
         gum::unregister_slab(address as u64);
     }
-    kernel::free_code(address as *mut u8, size as usize);
+    free_whole_pages(address as *mut u8);
     1
 }
+
+fn allocate_whole_pages(size: usize, alignment: usize) -> *mut u8 {
+    let page = kernel::page_size();
+    let alignment = alignment.max(page);
+    let total = size.next_multiple_of(page) + alignment + WHOLE_PAGES_HEADER;
+
+    let original = kernel::alloc_code(total);
+    if original.is_null() {
+        return original;
+    }
+
+    let start = (original as usize + WHOLE_PAGES_HEADER).next_multiple_of(alignment);
+    unsafe {
+        let header = (start - WHOLE_PAGES_HEADER) as *mut usize;
+        header.write(original as usize);
+        header.add(1).write(total);
+    }
+
+    start as *mut u8
+}
+
+fn free_whole_pages(start: *mut u8) {
+    unsafe {
+        let header = (start as usize - WHOLE_PAGES_HEADER) as *const usize;
+        kernel::free_code(header.read() as *mut u8, header.add(1).read());
+    }
+}
+
+const WHOLE_PAGES_HEADER: usize = 2 * core::mem::size_of::<usize>();
 
 #[unsafe(no_mangle)]
 pub extern "C" fn gum_barebone_on_registry_activating(registry: *mut GumModuleRegistry) {
