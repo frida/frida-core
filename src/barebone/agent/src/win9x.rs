@@ -1939,6 +1939,10 @@ fn xxx_dump_win16_lock() {
     let mut words = alloc::string::String::new();
     for w in 0..10 { use core::fmt::Write; write!(&mut words, "{:08x} ", read_u32(lock + w * 4)).unwrap(); }
     crate::kprintln!("XXX win16lock {:#x}: {}", lock, words);
+    let internal = read_u32(lock + 0x14);
+    let mut words = alloc::string::String::new();
+    for w in 0..12 { use core::fmt::Write; write!(&mut words, "{:08x} ", read_u32(internal + w * 4)).unwrap(); }
+    crate::kprintln!("XXX win16lock internal {:#x}: {}", internal, words);
 }
 
 fn xxx_dump_threads() {
@@ -1958,6 +1962,21 @@ fn xxx_dump_threads() {
         let field = |offset: usize| unsafe { context.as_ptr().add(offset).cast::<u32>().read_unaligned() };
         if ok {
             crate::kprintln!("XXX thread {:#x} tdb={:#x} process={:#x} cs={:#x} eip={:#x} esp={:#x} eax={:#x} edx={:#x} ecx={:#x}", thread, tdb, process, field(0xbc), field(CONTEXT_EIP), field(CONTEXT_ESP), field(CONTEXT_EAX), field(CONTEXT_EDX), field(CONTEXT_ECX));
+            if field(0xbc) & 4 != 0 {
+                let selector_base = |selector: u32| {
+                    let descriptor = 0x8009c000 + (selector & !7);
+                    read_u32(descriptor + 2) & 0xffffff | (read_u8(descriptor + 7) as u32) << 24
+                };
+                let code_base = selector_base(field(0xbc));
+                let stack_base = selector_base(field(0xc8));
+                let eip = field(CONTEXT_EIP) & 0xffff;
+                let mut code = alloc::string::String::new();
+                for i in 0..64u32 { use core::fmt::Write; write!(&mut code, "{:02x}", read_u8(code_base + eip - 48 + i)).unwrap(); }
+                crate::kprintln!("XXX   code16 {:#x}:{:#x} base={:#x} from -48: {}", field(0xbc), eip, code_base, code);
+                let mut words = alloc::string::String::new();
+                for i in 0..64u32 { use core::fmt::Write; write!(&mut words, "{:04x} ", read_u16(stack_base + (field(CONTEXT_ESP) & 0xffff) + i * 2)).unwrap(); }
+                crate::kprintln!("XXX   stack16 ss={:#x} base={:#x}: {}", field(0xc8), stack_base, words);
+            }
         } else {
             crate::kprintln!("XXX thread {:#x} process={:#x} (no context)", thread, process);
         }
