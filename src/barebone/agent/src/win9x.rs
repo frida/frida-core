@@ -1079,13 +1079,13 @@ fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
     let mut code = [
         0x8b, 0x44, 0x24, 0x04,
         0xbc, 0, 0, 0, 0,
+        0x64, 0x8b, 0x0d, 0x18, 0x00, 0x00, 0x00,
+        0x89, 0x61, 0x58,
+        0x89, 0x61, 0x04,
+        0xc7, 0x41, 0x08, 0, 0, 0, 0,
         0x50,
         0xba, 0, 0, 0, 0,
         0xff, 0xd2,
-        0x64, 0xa1, 0x18, 0x00, 0x00, 0x00,
-        0x89, 0x60, 0x58,
-        0x89, 0x60, 0x04,
-        0xc7, 0x40, 0x08, 0, 0, 0, 0,
         0x6a, 0x00,
         0xba, 0, 0, 0, 0,
         0xff, 0xd2,
@@ -1094,9 +1094,9 @@ fn write_trampoline(trampoline: u32, entry: u32, stack_top: u32) {
     let aligned_argument = stack_top - 16;
     let sp_before_push = aligned_argument + 4;
     code[5..9].copy_from_slice(&sp_before_push.to_le_bytes());
-    code[11..15].copy_from_slice(&entry.to_le_bytes());
-    code[32..36].copy_from_slice(&stack_bottom.to_le_bytes());
-    code[39..43].copy_from_slice(&kernel32_export(b"ExitThread").to_le_bytes());
+    code[25..29].copy_from_slice(&stack_bottom.to_le_bytes());
+    code[31..35].copy_from_slice(&entry.to_le_bytes());
+    code[40..44].copy_from_slice(&kernel32_export(b"ExitThread").to_le_bytes());
 
     unsafe { core::ptr::copy_nonoverlapping(code.as_ptr(), trampoline as *mut u8, code.len()) };
 }
