@@ -853,19 +853,19 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
                 unsafe { __VWIN32_Get_Thread_Context(thread, context.as_mut_ptr()) };
                 let field = |offset: usize| unsafe { context.as_ptr().add(offset).cast::<u32>().read_unaligned() };
                 crate::kprintln!("XXX stuck cs={:#x} efl={:#x} ss={:#x} ds={:#x} fs={:#x} tdb={:#x} tcb={:#x}", field(0xbc), field(0xc0), field(0xc8), field(CONTEXT_DS), field(CONTEXT_FS), database, thread);
-                let getter = kernel32_export(b"GetpWin16Lock");
+                let selector_base = |selector: u32| {
+                    let descriptor = 0x8009c000 + (selector & !7);
+                    read_u32(descriptor + 2) & 0xffffff | (read_u8(descriptor + 7) as u32) << 24
+                };
+                let code_base = selector_base(field(0xbc));
+                let stack_base = selector_base(field(0xc8));
+                crate::kprintln!("XXX bases code={:#x} stack={:#x}", code_base, stack_base);
                 let mut code = alloc::string::String::new();
-                for i in 0..24 { use core::fmt::Write; write!(&mut code, "{:02x}", read_u8(getter + i)).unwrap(); }
-                crate::kprintln!("XXX GetpWin16Lock={:#x} code={}", getter, code);
-                for i in 0..20 {
-                    if read_u8(getter + i) == 0xc7 && read_u8(getter + i + 1) == 0x00 {
-                        let lock = read_u32(getter + i + 2);
-                        let mut words = alloc::string::String::new();
-                        for w in 0..10 { use core::fmt::Write; write!(&mut words, "{:08x} ", read_u32(lock + w * 4)).unwrap(); }
-                        crate::kprintln!("XXX win16lock {:#x}: {}", lock, words);
-                        break;
-                    }
-                }
+                for i in 0..48u32 { use core::fmt::Write; write!(&mut code, "{:02x}", read_u8(code_base + (state.eip - 32) + i)).unwrap(); }
+                crate::kprintln!("XXX code16 from {:#x}: {}", state.eip - 32, code);
+                let mut words = alloc::string::String::new();
+                for i in 0..64u32 { use core::fmt::Write; write!(&mut words, "{:04x} ", read_u16(stack_base + (state.esp & 0xffff) + i * 2)).unwrap(); }
+                crate::kprintln!("XXX stack16 {}", words);
                 if state.esp >= stack && state.esp < stack + INJECTION_STACK_SIZE as u32 {
                     let mut words = alloc::string::String::new();
                     let mut at = state.esp;
