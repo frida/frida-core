@@ -848,6 +848,24 @@ pub fn inject(process: u32, payload: &[u8]) -> Injection {
         for _ in 0..3 {
             if let Some(state) = thread_cpu_state(thread) {
                 crate::kprintln!("XXX stuck eip={:#x} esp={:#x} ebp={:#x} eax={:#x} ecx={:#x} edx={:#x}", state.eip, state.esp, state.ebp, state.eax, state.ecx, state.edx);
+                let mut context = [0u8; CONTEXT_SIZE];
+                unsafe { context.as_mut_ptr().add(CONTEXT_FLAGS).cast::<u32>().write_unaligned(CONTEXT_FULL) };
+                unsafe { __VWIN32_Get_Thread_Context(thread, context.as_mut_ptr()) };
+                let field = |offset: usize| unsafe { context.as_ptr().add(offset).cast::<u32>().read_unaligned() };
+                crate::kprintln!("XXX stuck cs={:#x} efl={:#x} ss={:#x} ds={:#x} fs={:#x} tdb={:#x} tcb={:#x}", field(0xbc), field(0xc0), field(0xc8), field(CONTEXT_DS), field(CONTEXT_FS), database, thread);
+                let getter = kernel32_export(b"GetpWin16Lock");
+                let mut code = alloc::string::String::new();
+                for i in 0..24 { use core::fmt::Write; write!(&mut code, "{:02x}", read_u8(getter + i)).unwrap(); }
+                crate::kprintln!("XXX GetpWin16Lock={:#x} code={}", getter, code);
+                for i in 0..20 {
+                    if read_u8(getter + i) == 0xc7 && read_u8(getter + i + 1) == 0x00 {
+                        let lock = read_u32(getter + i + 2);
+                        let mut words = alloc::string::String::new();
+                        for w in 0..10 { use core::fmt::Write; write!(&mut words, "{:08x} ", read_u32(lock + w * 4)).unwrap(); }
+                        crate::kprintln!("XXX win16lock {:#x}: {}", lock, words);
+                        break;
+                    }
+                }
                 if state.esp >= stack && state.esp < stack + INJECTION_STACK_SIZE as u32 {
                     let mut words = alloc::string::String::new();
                     let mut at = state.esp;
