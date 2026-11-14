@@ -1509,6 +1509,7 @@ const CREATE_CALL_SITE: [u8; 25] = [
 ];
 const RESUME_SEARCH_RANGE: u32 = 0x60;
 const DOS_HEADERS_OFFSET: u32 = 0x3c;
+const IMAGE_BASE_OFFSET: u32 = 0x34;
 const IMAGE_SIZE_OFFSET: u32 = 0x50;
 
 // The host cannot resolve these, because parts of the export names of KERNEL32 are out of
@@ -2044,12 +2045,8 @@ fn publish_module_list(pdb: u32) -> u32 {
         return 0;
     }
 
-    // The list runs both ways from the entry that the process keeps, thus follow both. An image
-    // of the process is mapped in the space of that process alone, thus read it from there.
+    // The list runs both ways from the entry that the process keeps, thus follow both.
     let mut modules = alloc::vec::Vec::new();
-    let context = unsafe { (pdb as *const u32).byte_add(PDB_MEMORY_CONTEXT).read() };
-    let saved = unsafe { __GetCurrentContext() };
-    unsafe { __ContextSwitch(context) };
     collect_modules(table, first, MODREF_NEXT_OFFSET, &mut modules);
     let previous = unsafe { (first as *const u32).byte_add(MODREF_PREVIOUS_OFFSET).read() };
     collect_modules(table, previous, MODREF_PREVIOUS_OFFSET, &mut modules);
@@ -2061,7 +2058,6 @@ fn publish_module_list(pdb: u32) -> u32 {
         list.extend_from_slice(&module.size.to_le_bytes());
         write_text(&mut list, module.path);
     }
-    unsafe { __ContextSwitch(saved) };
 
     let published = alloc_shared(list.len());
     unsafe { core::ptr::copy_nonoverlapping(list.as_ptr(), published, list.len()) };
@@ -2075,12 +2071,12 @@ fn collect_modules(table: u32, first: u32, step: usize, modules: &mut alloc::vec
         let index = unsafe { (entry as *const u16).byte_add(MODREF_MTE_INDEX_OFFSET).read() };
         let row = unsafe { (table as *const u32).add(index as usize).read() };
         if row >= ARENA_FLOOR {
-            let base = unsafe { (row as *const u32).byte_add(IMTE_BASE_OFFSET).read() };
+            let headers = unsafe { (row as *const u32).byte_add(IMTE_NT_HEADERS_OFFSET).read() };
             let path = unsafe { (row as *const u32).byte_add(IMTE_FILE_NAME_OFFSET).read() };
-            if base >= ARENA_FLOOR && path >= ARENA_FLOOR {
+            if headers >= ARENA_FLOOR && path >= ARENA_FLOOR {
                 modules.push(ListedModule {
-                    base,
-                    size: image_size(base),
+                    base: read_u32(headers + IMAGE_BASE_OFFSET),
+                    size: read_u32(headers + IMAGE_SIZE_OFFSET),
                     path: path as *const u8,
                 });
             }
@@ -2187,7 +2183,7 @@ const ENVIRONMENT_COMMAND_LINE_OFFSET: usize = 0x08;
 pub(crate) const MODREF_MTE_INDEX_OFFSET: usize = 0x10;
 pub(crate) const MODREF_NEXT_OFFSET: usize = 0x00;
 pub(crate) const MODREF_PREVIOUS_OFFSET: usize = 0x04;
-pub(crate) const IMTE_BASE_OFFSET: usize = 0x24;
+pub(crate) const IMTE_NT_HEADERS_OFFSET: usize = 0x04;
 pub(crate) const IMTE_FILE_NAME_OFFSET: usize = 0x0c;
 
 pub fn identify_image(path: *const u8) -> *const u8 {
