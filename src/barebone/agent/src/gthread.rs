@@ -209,7 +209,7 @@ unsafe fn rec_mutex_try_acquire(impl_: &mut RecMutexImpl) -> bool {
 
     if current_count == 0 {
         if impl_.count
-            .compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
+            .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
             impl_.owner.store(crate::kernel::current_thread_id() as usize, Ordering::Relaxed);
@@ -218,17 +218,8 @@ unsafe fn rec_mutex_try_acquire(impl_: &mut RecMutexImpl) -> bool {
     } else {
         let current_owner = impl_.owner.load(Ordering::Relaxed);
         if current_owner == crate::kernel::current_thread_id() as usize {
-            if impl_.count
-                .compare_exchange_weak(
-                    current_count,
-                    current_count + 1,
-                    Ordering::Acquire,
-                    Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                return true;
-            }
+            impl_.count.fetch_add(1, Ordering::Relaxed);
+            return true;
         }
     }
     false
