@@ -1367,10 +1367,7 @@ pub fn install_fault_reporter() {
         }
 
         let slot = vectors_in_use();
-        if slot.is_null() {
-            return;
-        }
-        let live = slot.read() as usize;
+        let live = if slot.is_null() { current_vectors() } else { slot.read() as usize };
 
         let memory = alloc_vectors();
         if memory == 0 {
@@ -1420,7 +1417,9 @@ pub fn install_fault_reporter() {
         FAULT_CONTROL.base = own_base as u64;
         FAULT_CONTROL.size = own_size as u64;
         if !hook_the_synchronous_handler(live) {
-            slot.write(shadow as u64);
+            if !slot.is_null() {
+                slot.write(shadow as u64);
+            }
             adopt_everywhere(shadow);
         }
 
@@ -1445,7 +1444,9 @@ pub fn release_fault_reporter() {
             return;
         }
 
-        VECTORS_SLOT.write(LIVE_VECTORS as u64);
+        if !VECTORS_SLOT.is_null() {
+            VECTORS_SLOT.write(LIVE_VECTORS as u64);
+        }
         (_KeIpiGenericCall)(restore_vectors, 0);
         SHADOW_VECTORS = 0;
     }
@@ -1823,6 +1824,9 @@ fn section_named(image: usize, wanted: &[u8; 8]) -> Option<(usize, usize)> {
 
 #[cfg(target_arch = "aarch64")]
 fn alloc_vectors() -> usize {
+    if !kernel_exports(core::ptr::addr_of!(_ExAllocatePool2)) {
+        return alloc(VECTOR_TABLE_ALLOCATION) as usize;
+    }
     unsafe { (_ExAllocatePool2)(POOL_NON_PAGED_EXECUTE, VECTOR_TABLE_ALLOCATION, POOL_TAG) as usize }
 }
 
@@ -3048,8 +3052,18 @@ pub fn release_interrupt() {
 
     unsafe {
         INTERRUPT_OBJECT = core::ptr::null_mut();
-        (_IoDisconnectInterrupt)(interrupt);
+        disconnect_interrupt(interrupt);
     }
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+unsafe fn disconnect_interrupt(interrupt: *mut c_void) {
+    unsafe { (_IoDisconnectInterrupt)(interrupt) };
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn disconnect_interrupt(_interrupt: *mut c_void) {
+    unsafe { (_HalDisableInterrupt)(core::ptr::addr_of_mut!(LINE_CONNECTION)) };
 }
 
 pub fn detach_from_process(pid: u32) -> bool {
