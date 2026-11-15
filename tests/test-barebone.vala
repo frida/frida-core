@@ -5133,15 +5133,23 @@ FAIL: %s
 				});
 
 				const k32 = Process.getModuleByName('kernel32.dll');
+				const abi = { ia32: 'stdcall', x64: 'win64', arm64: 'default' }[Process.arch];
 				const createThread = new NativeFunction(k32.getExportByName('CreateThread'),
-					'pointer', ['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer'],
-					{ abi: Process.arch === 'ia32' ? 'stdcall' : 'win64' });
+					'pointer', ['pointer', 'uint', 'pointer', 'pointer', 'uint', 'pointer'], { abi });
 				const closeHandle = new NativeFunction(k32.getExportByName('CloseHandle'),
-					'int', ['pointer'], { abi: Process.arch === 'ia32' ? 'stdcall' : 'win64' });
+					'int', ['pointer'], { abi });
 
 				const body = Memory.alloc(Process.pageSize);
 				Memory.protect(body, Process.pageSize, 'rwx');
 				Memory.patchCode(body, 16, code => {
+					if (Process.arch === 'arm64') {
+						const w = new Arm64Writer(code, { pc: body });
+						w.putLdrRegU64('x0', 0);
+						w.putRet();
+						w.flush();
+						return;
+					}
+
 					const w = new X86Writer(code, { pc: body });
 					w.putXorRegReg('eax', 'eax');
 					if (Process.arch === 'ia32')
@@ -5356,10 +5364,11 @@ FAIL: %s
 	private async void winnt_enumerates_ranges_in_live_guest (Harness h, string prefix) {
 		yield run_script_in_live_guest (h, winnt_config_from_environment (h, prefix), """
 			const kernel = Process.enumerateModules().find(m => m.name === 'ntoskrnl.exe');
+			const upper = kernel.enumerateExports().find(e => e.name === 'RtlUpperChar').address;
 			const ranges = Process.enumerateRanges('r--');
 
-			const covering = ranges.find(r => r.base.compare(kernel.base) <= 0 &&
-				r.base.add(r.size).compare(kernel.base) > 0);
+			const covering = ranges.find(r => r.base.compare(upper) <= 0 &&
+				r.base.add(r.size).compare(upper) > 0);
 			const kernelSpace = ranges.every(r => r.base.compare(ptr('0x80000000')) >= 0);
 			const sorted = ranges.every((r, i) =>
 				i === 0 || ranges[i - 1].base.add(ranges[i - 1].size).compare(r.base) <= 0);
@@ -5381,8 +5390,11 @@ FAIL: %s
 
 			// The kernel gives the registers of a thread only if the thread has a user-mode part. Thus
 			// the threads that run only in the kernel give none.
-			const pc = (Process.pointerSize === 4) ? 'eip' : 'rip';
-			const sp = (Process.pointerSize === 4) ? 'esp' : 'rsp';
+			const { pc, sp } = {
+				ia32: { pc: 'eip', sp: 'esp' },
+				x64: { pc: 'rip', sp: 'rsp' },
+				arm64: { pc: 'pc', sp: 'sp' },
+			}[Process.arch];
 			const contextual = threads.filter(t => t.context !== undefined);
 
 			send({
@@ -5438,7 +5450,7 @@ FAIL: %s
 			});
 			Interceptor.flush();
 
-			const abi = (Process.pointerSize === 4) ? 'stdcall' : 'win64';
+			const abi = { ia32: 'stdcall', x64: 'win64', arm64: 'default' }[Process.arch];
 			const call = new NativeFunction(upper, 'uint8', ['uint8'], { abi });
 			const result = call(0x61);
 			send({ seen: seen, result: result });
@@ -6120,6 +6132,14 @@ FAIL: %s
 				const body = Memory.alloc(Process.pageSize);
 				Memory.protect(body, Process.pageSize, 'rwx');
 				Memory.patchCode(body, 16, code => {
+					if (Process.arch === 'arm64') {
+						const w = new Arm64Writer(code, { pc: body });
+						w.putLdrRegU64('x0', 0);
+						w.putRet();
+						w.flush();
+						return;
+					}
+
 					const w = new X86Writer(code, { pc: body });
 					w.putXorRegReg('eax', 'eax');
 					if (Process.pointerSize === 8)
@@ -6252,6 +6272,22 @@ FAIL: %s
 					return bytes;
 				};
 				Memory.patchCode(body, 96, code => {
+					if (Process.arch === 'arm64') {
+						const w = new Arm64Writer(code, { pc: body });
+						w.putPushRegReg('x29', 'x30');
+						w.putCallAddressWithArguments(setEvent, [running]);
+						w.putLabel('wait');
+						w.putCallAddressWithArguments(sleep, [100]);
+						w.putLdrRegAddress('x0', flag);
+						w.putLdrRegRegOffset('w0', 'x0', 0);
+						w.putCbzRegLabel('w0', 'wait');
+						w.putPopRegReg('x29', 'x30');
+						w.putLdrRegU64('x0', 0);
+						w.putRet();
+						w.flush();
+						return;
+					}
+
 					code.writeByteArray((Process.pointerSize === 4)
 						? [0x68, ...little(running.toUInt32()),
 							0xe8, ...little(setEvent.sub(body.add(10)).toInt32()),
@@ -6691,6 +6727,7 @@ FAIL: %s
 		var transport = new BareboneHostlinkTransportConfig () {
 			qmp = "unix:" + qmp_path,
 			bus = Environment.get_variable (@"FRIDA_TEST_$(prefix)_BUS"),
+			fabric = hostlink_fabric_from_environment (Environment.get_variable (@"FRIDA_TEST_$(prefix)_ECAM"), null),
 		};
 		try {
 			config.agent = new BareboneInjectedAgentConfig.from_file (agent_path, transport);
