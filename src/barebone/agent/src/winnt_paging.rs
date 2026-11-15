@@ -384,28 +384,27 @@ mod arch {
 
     pub fn walk_kernel_space(ranges: &mut Ranges) {
         let space = kernel_space();
-        for index in 0..space.entries {
-            descend(space.base | (index << LEVEL_SHIFTS[TOP_LEVEL]), TOP_LEVEL, table_base(),
-                ranges);
-        }
+        walk_table(space.base, TOP_LEVEL, table_base(), space.entries, ranges);
     }
 
-    fn descend(address: usize, level: usize, table: u64, ranges: &mut Ranges) {
-        let descriptor = read_descriptor(table, level, address);
-        if !describes_memory(descriptor) {
+    fn walk_table(base: usize, level: usize, table: u64, entries: usize, ranges: &mut Ranges) {
+        let Some(view) = table_view(table) else {
             return;
-        }
+        };
 
         let span = 1usize << LEVEL_SHIFTS[level];
-        if level == TABLE_LEVEL || describes_block(descriptor) {
-            ranges.add(address, span, protection_of_descriptor(descriptor, address));
-            return;
-        }
+        for index in 0..entries {
+            let address = base.wrapping_add(index * span);
+            let descriptor = unsafe { view.add(index).read_volatile() };
+            if !describes_memory(descriptor) {
+                continue;
+            }
 
-        let child_span = span / ENTRIES_PER_TABLE;
-        for index in 0..ENTRIES_PER_TABLE {
-            descend(address.wrapping_add(index * child_span), level + 1,
-                output_address(descriptor), ranges);
+            if level == TABLE_LEVEL || describes_block(descriptor) {
+                ranges.add(address, span, protection_of_descriptor(descriptor, address));
+            } else {
+                walk_table(address, level + 1, output_address(descriptor), ENTRIES_PER_TABLE, ranges);
+            }
         }
     }
 
@@ -426,7 +425,7 @@ mod arch {
     fn resolve(address: usize) -> Option<(*mut u64, usize)> {
         let mut table = table_base_for(address);
         for level in TOP_LEVEL..=TABLE_LEVEL {
-            let at = descriptor_pointer_in(table, level, address);
+            let at = descriptor_pointer_in(table, level, address)?;
             let descriptor = unsafe { at.read_volatile() };
             if !describes_memory(descriptor) {
                 return None;
@@ -439,13 +438,14 @@ mod arch {
         None
     }
 
-    fn read_descriptor(table: u64, level: usize, address: usize) -> u64 {
-        unsafe { descriptor_pointer_in(table, level, address).read_volatile() }
+    fn descriptor_pointer_in(table: u64, level: usize, address: usize) -> Option<*mut u64> {
+        let index = (address >> LEVEL_SHIFTS[level]) & index_mask(level);
+        table_view(table).map(|view| unsafe { view.add(index) })
     }
 
-    fn descriptor_pointer_in(table: u64, level: usize, address: usize) -> *mut u64 {
-        let index = (address >> LEVEL_SHIFTS[level]) & index_mask(level);
-        unsafe { crate::winnt::virtual_for_physical(table).cast::<u64>().add(index) }
+    fn table_view(table: u64) -> Option<*mut u64> {
+        let view = crate::winnt::virtual_for_physical(table).cast::<u64>();
+        (!view.is_null()).then_some(view)
     }
 
     fn index_mask(level: usize) -> usize {
