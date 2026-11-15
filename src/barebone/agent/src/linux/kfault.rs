@@ -342,8 +342,8 @@ pub fn uninstall() {
 
     let target = unsafe { _fixup_exception } as *mut u32;
     unsafe {
-        _patch_text(target.add(1) as *mut c_void, PROLOGUE[1]);
         _patch_text(target as *mut c_void, PROLOGUE[0]);
+        _patch_text(target.add(1) as *mut c_void, PROLOGUE[1]);
     }
 }
 
