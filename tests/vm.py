@@ -636,7 +636,8 @@ def prepare_win95(workdir: Path) -> (Path, dict):
 def prepare_winxp(workdir: Path) -> (Path, dict):
     image = workdir / "winxp.qcow2"
     convert_to_qcow2(fetch_verified(WINXP_DISK), image)
-    snapshot_windows_desktop(WINDOWS_GUESTS["winxp"], image, workdir, [
+    guest = WINDOWS_GUESTS["winxp"]
+    snapshot_windows_desktop(lambda listeners: windows_guest_arguments(guest, image, listeners), workdir, [
         (WINXP_WELCOME_SCREEN, ["down", "ret"]),
         (WINXP_DESKTOP, []),
     ])
@@ -649,20 +650,40 @@ def prepare_winxp64(workdir: Path) -> (Path, dict):
                    stdout=subprocess.DEVNULL)
     image = workdir / "winxp64.qcow2"
     convert_to_qcow2(workdir / WINXP64_DISK_NAME, image)
-    snapshot_windows_desktop(WINDOWS_GUESTS["winxp64"], image, workdir, [
+    guest = WINDOWS_GUESTS["winxp64"]
+    snapshot_windows_desktop(lambda listeners: windows_guest_arguments(guest, image, listeners), workdir, [
         (WINXP64_DESKTOP, []),
     ])
     return image, {}
 
 
-def convert_to_qcow2(source: Path, image: Path):
-    subprocess.run([require_program("qemu-img"), "convert", "-O", "qcow2", source, image], check=True)
+def prepare_winarm64(workdir: Path) -> (Path, dict):
+    seven_zip = require_any_program(SEVEN_ZIP_PROGRAMS)
+    archive = fetch_verified_into(workdir, WINARM64_ARCHIVE)
+    subprocess.run([seven_zip, "e", "-y", f"-o{workdir}", archive, WINARM64_DISK_NAME], check=True,
+                   stdout=subprocess.DEVNULL)
+    archive.unlink()
+
+    disk = workdir / WINARM64_DISK_NAME
+    image = workdir / "winarm64.qcow2"
+    convert_to_qcow2(disk, image, "-c")
+    disk.unlink()
+
+    details = {"firmware": str(fetch_verified(WINARM64_FIRMWARE))}
+    snapshot_windows_desktop(lambda listeners: winarm64_guest_arguments(image, details, listeners), workdir, [
+        (WINARM64_DESKTOP, []),
+    ])
+    return image, details
 
 
-def snapshot_windows_desktop(guest: "WindowsGuest", image: Path, workdir: Path, stages: [("ScreenMark", [str])]):
+def convert_to_qcow2(source: Path, image: Path, *options: str):
+    subprocess.run([require_program("qemu-img"), "convert", *options, "-O", "qcow2", source, image], check=True)
+
+
+def snapshot_windows_desktop(arguments, workdir: Path, stages: [("ScreenMark", [str])]):
     control_path = workdir / "control.sock"
     with Listeners(control_path) as listeners:
-        process = subprocess.Popen(windows_guest_arguments(guest, image, listeners), pass_fds=listeners.fds,
+        process = subprocess.Popen(arguments(listeners), pass_fds=listeners.fds,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             control = Qmp(control_path, process)
@@ -688,7 +709,11 @@ def wait_for_screen(qmp: "Qmp", screen: "ScreenMark"):
 
 
 def fetch_verified(download: "Download") -> Path:
-    cached = cache_root() / "downloads" / download.name
+    return fetch_verified_into(cache_root() / "downloads", download)
+
+
+def fetch_verified_into(directory: Path, download: "Download") -> Path:
+    cached = directory / download.name
     if not cached.exists():
         cached.parent.mkdir(parents=True, exist_ok=True)
         staging = cached.with_suffix(".partial")
@@ -761,6 +786,23 @@ def windows_guest_arguments(guest: "WindowsGuest", image: Path, listeners: "List
         "-display", "none",
         "-monitor", "none",
         "-device", "virtio-serial-pci,id=" + VIRTIO_SERIAL_ID,
+    ] + listener_arguments(listeners)
+
+
+def winarm64_guest_arguments(image: Path, details: dict, listeners: "Listeners") -> [str]:
+    return [
+        require_program("qemu-system-aarch64"),
+        "-machine", "virt,accel=tcg",
+        "-cpu", "max,pauth-impdef=on",
+        "-smp", str(WINARM64_PROCESSORS),
+        "-m", str(WINARM64_MEMORY),
+        "-bios", details["firmware"],
+        "-drive", f"file={image},format=qcow2,if=virtio",
+        "-device", "ramfb",
+        "-nic", "none",
+        "-display", "none",
+        "-monitor", "none",
+        "-device", f"virtio-serial-pci,id={VIRTIO_SERIAL_ID},addr={WINARM64_SERIAL_SLOT:#x}",
     ] + listener_arguments(listeners)
 
 
@@ -1207,6 +1249,10 @@ PREPARATIONS = {
     "win95": windows_preparation("win95", "Win9x", "WIN9X", prepare_win95),
     "winxp": windows_preparation("winxp", "WinNt", "WINNT", prepare_winxp),
     "winxp64": windows_preparation("winxp64", "WinNt64", "WINNT64", prepare_winxp64),
+    "winarm64": Preparation("Windows 10 (arm64)", "WinNt64", "WINNT64", prepare_winarm64,
+                            winarm64_guest_arguments,
+                            lambda details: {"ECAM": hex(QEMU_VIRT_ECAM)},
+                            lambda path: []),
     "linux-x86": linux_preparation("x86", "IA32", "LINUX_X86"),
     "linux-x86_64": linux_preparation("x86_64", "X64", "LINUX_X86_64"),
     "linux-arm": linux_preparation("arm", "ARM", "LINUX_ARM"),
@@ -1249,6 +1295,20 @@ WINXP64_ARCHIVE = Download(
     "df2625a8754768ed000f90f0e00013abca7a171ba2c8c0ca547b4959435f37ef")
 WINXP64_DISK_NAME = "Windows XP SP2 VL x64.vhd"
 
+WINARM64_ARCHIVE = Download(
+    "winarm64-1709.7z",
+    "https://archive.org/download/w-101709-a.-7z/W101709A.7z",
+    "2ea420a205838baaf7442d3724348a4bfcc2c1cfc1ba828bf42b6dddb0ea8970")
+WINARM64_DISK_NAME = "a.vhd"
+WINARM64_FIRMWARE = Download(
+    "winarm64-efi.fd",
+    "https://archive.org/download/nt10_aarch64_tianoefi/QEMU_EFI.fd",
+    "451bd73598c73bf517374802ac5fd749e816bd59a1015e34fc5754a2815ffcf3")
+WINARM64_PROCESSORS = 2
+WINARM64_MEMORY = 2048
+WINARM64_SERIAL_SLOT = 0x10
+QEMU_VIRT_ECAM = 0x4010000000
+
 SEVEN_ZIP_PROGRAMS = ["7z", "7zz"]
 
 
@@ -1262,6 +1322,7 @@ class ScreenMark(NamedTuple):
 WINXP_WELCOME_SCREEN = ScreenMark("welcome screen", 20, 465, (55, 51, 172))
 WINXP_DESKTOP = ScreenMark("desktop", 20, 465, (212, 208, 200))
 WINXP64_DESKTOP = ScreenMark("desktop", 30, 466, (59, 165, 59))
+WINARM64_DESKTOP = ScreenMark("desktop", 24, 578, (255, 255, 255))
 WINXP_BOOT_TIMEOUT_SECONDS = 1800
 WINXP_SCREEN_POLL_SECONDS = 5
 WINXP_INPUT_SETTLE_SECONDS = 5
