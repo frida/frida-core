@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	tscore "github.com/frida/TypeScript/tsc/pkg/core"
+	"github.com/frida/TypeScript/tsc/pkg/json"
 	"github.com/frida/TypeScript/tsc/pkg/locale"
 	"github.com/frida/TypeScript/tsc/pkg/tsoptions"
 	"github.com/frida/TypeScript/tsc/pkg/tspath"
@@ -133,7 +133,10 @@ func (c *TSConfigCache) GetCompilerOptions(
 		newOpts.Strict = tscore.TSTrue
 	}
 
-	tsconfigData, _ := json.Marshal(parsedCommandLine.ParsedConfig)
+	tsconfigData, err := json.Marshal(parsedCommandLine.ParsedConfig)
+	if err != nil {
+		return nil, "", fmt.Errorf("Unable to serialize %q: %w", c.tsconfigPath, err)
+	}
 	tsconfigText = string(tsconfigData)
 
 	hadPreviousOpts := c.cachedOpts != nil
