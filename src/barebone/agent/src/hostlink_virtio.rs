@@ -62,9 +62,10 @@ const PCI_DEVICE_CONSOLE_MODERN: u16 = 0x1043;
 
 const PCI_COMMAND: u8 = 0x04;
 const PCI_CAP_LIST_POINTER: u8 = 0x34;
+#[cfg(not(all(feature = "winnt", target_arch = "aarch64")))]
 const PCI_INTERRUPT_LINE: u8 = 0x3c;
 const PCI_BASE_ADDRESS_0: u8 = 0x10;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", all(feature = "winnt", target_arch = "aarch64")))]
 const PCI_INTERRUPT_PIN: u8 = 0x3d;
 const PCI_COMMAND_INTX_DISABLE: u32 = 0x400;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -73,6 +74,8 @@ const ISA_BRIDGE_DEVFN: u8 = 0x08;
 const ECAM_DEVFN_SHIFT: usize = 12;
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 const ECAM_BUS_SIZE: u64 = 256 * 4096;
+#[cfg(all(feature = "winnt", target_arch = "aarch64"))]
+const QEMU_VIRT_INTA_GSIV: u32 = 35;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const PIRQ_ROUTE: u8 = 0x60;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -1058,7 +1061,7 @@ impl Bus {
         PciDevice {
             #[cfg(feature = "linux-injected")]
             bus: self.number,
-            #[cfg(feature = "linux-injected")]
+            #[cfg(any(feature = "linux-injected", feature = "winnt"))]
             devfn,
             config: unsafe { self.config.add((devfn as usize) << ECAM_DEVFN_SHIFT) },
         }
@@ -1069,7 +1072,7 @@ impl Bus {
 struct PciDevice {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64", feature = "linux-injected"))]
     bus: u8,
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64", feature = "linux-injected"))]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", feature = "linux-injected", feature = "winnt"))]
     devfn: u8,
     #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
     config: *mut u8,
@@ -1152,7 +1155,14 @@ impl PciDevice {
         self.line_in_config().or_else(|| kernel::pci_interrupt(self.bus, self.devfn))
     }
 
-    #[cfg(not(feature = "linux-injected"))]
+    #[cfg(all(feature = "winnt", target_arch = "aarch64"))]
+    fn irq_line(&self) -> Option<u32> {
+        let pin = self.read_config_byte(PCI_INTERRUPT_PIN) as u32;
+        let slot = (self.devfn >> 3) as u32;
+        Some(QEMU_VIRT_INTA_GSIV + (slot + pin - 1) % 4)
+    }
+
+    #[cfg(not(any(feature = "linux-injected", all(feature = "winnt", target_arch = "aarch64"))))]
     fn irq_line(&self) -> Option<u32> {
         Some(self.read_config_byte(PCI_INTERRUPT_LINE) as u32)
     }

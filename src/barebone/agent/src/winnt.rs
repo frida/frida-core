@@ -513,6 +513,11 @@ pub fn install_interrupt_handler(
         WAKE_DPC = dpc;
     }
 
+    if connect_interrupt(irq) { 0 } else { -1 }
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn connect_interrupt(irq: u32) -> bool {
     let mut irql: u8 = 0;
     let mut affinity: usize = 0;
     let vector = unsafe {
@@ -534,8 +539,133 @@ pub fn install_interrupt_handler(
             0,
         )
     };
-    if status < 0 { -1 } else { 0 }
+    status >= 0
 }
+
+#[cfg(target_arch = "aarch64")]
+fn connect_interrupt(gsiv: u32) -> bool {
+    let previous = unsafe { (_KeSetSystemAffinityThreadEx)(FIRST_PROCESSOR.mask) };
+    let connected = route_line_to_own_vector(gsiv);
+    unsafe { (_KeRevertToUserAffinityThreadEx)(previous) };
+    connected
+}
+
+#[cfg(target_arch = "aarch64")]
+fn route_line_to_own_vector(gsiv: u32) -> bool {
+    let Some((vector, irql)) = allocate_vector() else {
+        return false;
+    };
+
+    attach_interrupt_object(vector, irql) && enable_line(gsiv, vector, irql)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn allocate_vector() -> Option<(u32, u8)> {
+    let mut vector = 0;
+    let mut irql = 0;
+    let mut idt_entry = 0;
+    let status = unsafe {
+        let allocate = ((_HalPrivateDispatchTable + HAL_ALLOCATE_MESSAGE_TARGET_SLOT * size_of::<usize>())
+            as *const HalAllocateMessageTarget).read();
+        allocate(core::ptr::null_mut(), &FIRST_PROCESSOR, 1, LEVEL_TRIGGERED, 0, &mut vector, &mut irql,
+            &mut idt_entry)
+    };
+    (status >= 0).then_some((vector, irql))
+}
+
+#[cfg(target_arch = "aarch64")]
+fn attach_interrupt_object(vector: u32, irql: u8) -> bool {
+    unsafe {
+        let object = alloc(INTERRUPT_OBJECT_SIZE) as *mut c_void;
+        (_KeInitializeInterrupt)(object, on_hw_int, core::ptr::null_mut(), core::ptr::null_mut(), 0,
+            core::ptr::addr_of_mut!(INTERRUPT_LOCK), vector, irql, irql, LEVEL_TRIGGERED, 0, 0);
+        if (_KiConnectHalInterrupt)(object) < 0 {
+            return false;
+        }
+        INTERRUPT_OBJECT = object;
+    }
+    true
+}
+
+#[cfg(target_arch = "aarch64")]
+fn enable_line(gsiv: u32, vector: u32, irql: u8) -> bool {
+    unsafe {
+        LINE_CONNECTION = InterruptConnectionData {
+            count: 1,
+            vector: InterruptVectorData {
+                kind: INTERRUPT_TYPE_CONTROLLER_INPUT,
+                vector,
+                irql,
+                polarity: INTERRUPT_ACTIVE_HIGH,
+                mode: LEVEL_TRIGGERED,
+                target_processors: FIRST_PROCESSOR,
+                remapping: [0; 2],
+                gsiv,
+                flags: 0,
+                hv_device_id: 0,
+                message: [0; 2],
+            },
+        };
+        (_HalEnableInterrupt)(core::ptr::addr_of_mut!(LINE_CONNECTION)) >= 0
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+type HalAllocateMessageTarget = unsafe extern "C" fn(*mut c_void, *const GroupAffinity, u32, u32, u8, *mut u32,
+    *mut u8, *mut u32) -> i32;
+
+#[cfg(target_arch = "aarch64")]
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct GroupAffinity {
+    mask: usize,
+    group: u16,
+    reserved: [u16; 3],
+}
+
+#[cfg(target_arch = "aarch64")]
+#[repr(C)]
+struct InterruptConnectionData {
+    count: u32,
+    vector: InterruptVectorData,
+}
+
+#[cfg(target_arch = "aarch64")]
+#[repr(C)]
+struct InterruptVectorData {
+    kind: u32,
+    vector: u32,
+    irql: u8,
+    polarity: u32,
+    mode: u32,
+    target_processors: GroupAffinity,
+    remapping: [u64; 2],
+    gsiv: u32,
+    flags: u32,
+    hv_device_id: u64,
+    message: [u64; 2],
+}
+
+#[cfg(target_arch = "aarch64")]
+static FIRST_PROCESSOR: GroupAffinity = GroupAffinity {
+    mask: 1,
+    group: 0,
+    reserved: [0; 3],
+};
+#[cfg(target_arch = "aarch64")]
+static mut LINE_CONNECTION: InterruptConnectionData = unsafe { core::mem::zeroed() };
+#[cfg(target_arch = "aarch64")]
+static mut INTERRUPT_LOCK: usize = 0;
+#[cfg(target_arch = "aarch64")]
+const INTERRUPT_OBJECT_SIZE: usize = 0x200;
+#[cfg(target_arch = "aarch64")]
+const HAL_ALLOCATE_MESSAGE_TARGET_SLOT: usize = 27;
+#[cfg(target_arch = "aarch64")]
+const INTERRUPT_TYPE_CONTROLLER_INPUT: u32 = 0;
+#[cfg(target_arch = "aarch64")]
+const INTERRUPT_ACTIVE_HIGH: u32 = 1;
+#[cfg(target_arch = "aarch64")]
+const LEVEL_TRIGGERED: u32 = 0;
 
 #[cfg(target_arch = "x86")]
 unsafe extern "stdcall" fn on_hw_int(interrupt: *mut c_void, context: *mut c_void) -> u8 {
@@ -600,7 +730,9 @@ static mut HW_INT_HANDLER: Option<InterruptHandler> = None;
 static mut HW_INT_TARGET: *mut c_void = core::ptr::null_mut();
 static mut HW_INT_REFCON: *mut c_void = core::ptr::null_mut();
 
+#[cfg(not(target_arch = "aarch64"))]
 const PCI_BUS: u32 = 5;
+#[cfg(not(target_arch = "aarch64"))]
 const LEVEL_SENSITIVE: u32 = 1;
 
 pub type InterruptHandler =
@@ -5675,6 +5807,14 @@ unsafe extern "C" {
     static _MmMapIoSpace: unsafe extern "C" fn(i64, usize, u32) -> *mut c_void;
     static _DbgPrint: unsafe extern "C" fn(*const u8, *const u8) -> u32;
     static _MmGetVirtualForPhysical: unsafe extern "C" fn(i64) -> *mut c_void;
+    static _HalPrivateDispatchTable: usize;
+    static _KeSetSystemAffinityThreadEx: unsafe extern "C" fn(usize) -> usize;
+    static _KeRevertToUserAffinityThreadEx: unsafe extern "C" fn(usize);
+    static _KeInitializeInterrupt: unsafe extern "C" fn(*mut c_void, ServiceRoutine, *mut c_void, *mut c_void,
+        u32, *mut usize, u32, u8, u8, u32, u8, u32);
+    static _KiConnectHalInterrupt: unsafe extern "C" fn(*mut c_void) -> i32;
+    static _HalEnableInterrupt: unsafe extern "C" fn(*mut InterruptConnectionData) -> i32;
+    static _HalDisableInterrupt: unsafe extern "C" fn(*mut InterruptConnectionData) -> i32;
 }
 
 #[cfg(target_arch = "aarch64")]

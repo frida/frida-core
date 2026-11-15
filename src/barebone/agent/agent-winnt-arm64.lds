@@ -76,6 +76,13 @@ SECTIONS {
     _MmBuildMdlForNonPagedPool = .; . += 8;
     _MmMapLockedPagesSpecifyCache = .; . += 8;
     _MmUnmapLockedPages = .; . += 8;
+    _HalPrivateDispatchTable = .; . += 8;
+    _KeSetSystemAffinityThreadEx = .; . += 8;
+    _KeRevertToUserAffinityThreadEx = .; . += 8;
+    _KeInitializeInterrupt = .; . += 8;
+    _KiConnectHalInterrupt = .; . += 8;
+    _HalEnableInterrupt = .; . += 8;
+    _HalDisableInterrupt = .; . += 8;
   }
   . = ALIGN(4096);
   _agent_private_start = .;
