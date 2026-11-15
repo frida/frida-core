@@ -633,7 +633,7 @@ fn watch_the_threads() {
         let interceptor = crate::bindings::gum_interceptor_obtain();
         crate::bindings::gum_interceptor_begin_transaction(interceptor);
         crate::bindings::gum_interceptor_replace(interceptor, entries.start as gpointer,
-            kernel::on_thread_start as gpointer, kernel::thread_start_slot(), ptr::null());
+            entries.on_start as gpointer, kernel::thread_start_slot(), ptr::null());
         crate::bindings::gum_interceptor_replace(interceptor, entries.exit as gpointer,
             kernel::on_thread_exit as gpointer, kernel::thread_exit_slot(), ptr::null());
         crate::bindings::gum_interceptor_end_transaction(interceptor);

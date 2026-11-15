@@ -457,12 +457,14 @@ pub unsafe extern "stdcall" fn on_module_unload(handle: u32) -> u32 {
 pub fn thread_entry_points() -> Option<ThreadEntryPoints> {
     Some(ThreadEntryPoints {
         start: thread_starter()?,
+        on_start: crate::win9x::on_thread_start as *const () as usize,
         exit: kernel32_export(b"ExitThread") as usize,
     })
 }
 
 pub struct ThreadEntryPoints {
     pub start: usize,
+    pub on_start: usize,
     pub exit: usize,
 }
 

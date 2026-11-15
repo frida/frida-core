@@ -332,15 +332,37 @@ static mut MENU_API: Option<MenuApi> = None;
 
 const MAX_FOLDER: usize = 260;
 
+#[cfg(target_arch = "x86")]
 pub fn thread_entry_points() -> Option<ThreadEntryPoints> {
     Some(ThreadEntryPoints {
         start: thread_starter()?,
+        on_start: on_thread_start as *const () as usize,
         exit: export(module_base(peb(), b"kernel32.dll"), b"ExitThread"),
+    })
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub fn thread_entry_points() -> Option<ThreadEntryPoints> {
+    let library = module_base(peb(), b"kernel32.dll");
+    let starter = export(library, b"BaseThreadStart");
+    if starter != 0 {
+        return Some(ThreadEntryPoints {
+            start: starter,
+            on_start: on_thread_start as *const () as usize,
+            exit: export(library, b"ExitThread"),
+        });
+    }
+
+    Some(ThreadEntryPoints {
+        start: export(library, b"BaseThreadInitThunk"),
+        on_start: on_thread_init as *const () as usize,
+        exit: export(loader_library(), b"RtlExitUserThread"),
     })
 }
 
 pub struct ThreadEntryPoints {
     pub start: usize,
+    pub on_start: usize,
     pub exit: usize,
 }
 
@@ -376,6 +398,25 @@ unsafe fn start_thread(routine: usize, parameter: usize) -> ! {
     let original: windows_fn!(usize, usize => !) =
         unsafe { core::mem::transmute(THREAD_START) };
     unsafe { original(routine, parameter) }
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn on_thread_init(reserved: u32, routine: usize, parameter: usize) -> u32 {
+    unsafe { init_thread(reserved, routine, parameter) }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn on_thread_init(reserved: u32, routine: usize, parameter: usize) -> u32 {
+    unsafe { init_thread(reserved, routine, parameter) }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+unsafe fn init_thread(reserved: u32, routine: usize, parameter: usize) -> u32 {
+    crate::gum_windows::thread_appeared_at(current_thread_id() as u32, routine, parameter);
+
+    let original: windows_fn!(u32, usize, usize => u32) =
+        unsafe { core::mem::transmute(THREAD_START) };
+    unsafe { original(reserved, routine, parameter) }
 }
 
 #[cfg(target_arch = "x86")]
@@ -421,11 +462,6 @@ fn thread_starter() -> Option<usize> {
 
 #[cfg(target_arch = "x86")]
 const THREAD_THUNK: [u8; 7] = [0x33, 0xed, 0x53, 0x50, 0x6a, 0x00, 0xe9];
-
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn thread_starter() -> Option<usize> {
-    Some(export(module_base(peb(), b"kernel32.dll"), b"BaseThreadStart"))
-}
 
 #[cfg(target_arch = "x86")]
 fn image_size(base: usize) -> usize {
