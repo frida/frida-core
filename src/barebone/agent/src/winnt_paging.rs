@@ -251,8 +251,8 @@ mod arch {
         }
     }
 
-    // The kernel maps its pool with large pages, which have no page table. Thus the self-map has
-    // no entry to change, and such a mapping is left alone, being already writable and executable.
+    // A large page maps more than what was asked for, such as the pool around our allocation. Thus
+    // a change to one only adds rights, and takes none away from its neighbors.
     pub fn reprotect(address: usize, gum_prot: u32) -> usize {
         for level in TOP_LEVEL..TABLE_LEVEL {
             let entry = entry_pointer(level, address);
@@ -265,7 +265,7 @@ mod arch {
             }
 
             unsafe {
-                entry.write_volatile(apply_protection(value, gum_prot as u64,
+                entry.write_volatile(widen_protection(value, gum_prot as u64,
                     PAGE_WRITEABLE as u64, PAGE_NO_EXECUTE));
             }
 
@@ -603,6 +603,21 @@ fn apply_protection(entry: u64, gum_prot: u64, writeable: u64, no_execute: u64) 
         } else {
             value |= no_execute;
         }
+    }
+
+    value
+}
+
+#[cfg(target_arch = "x86_64")]
+fn widen_protection(entry: u64, gum_prot: u64, writeable: u64, no_execute: u64) -> u64 {
+    let mut value = entry;
+
+    if (gum_prot & GUM_PAGE_WRITE as u64) != 0 {
+        value |= writeable;
+    }
+
+    if (gum_prot & GUM_PAGE_EXECUTE as u64) != 0 {
+        value &= !no_execute;
     }
 
     value
