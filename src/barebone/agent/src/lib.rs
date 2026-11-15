@@ -311,6 +311,8 @@ mod entrypoint_blob {
             SYMBOL_TABLE = symbol_table;
             OWN_RANGE = own_range;
 
+            #[cfg(feature = "winnt")]
+            kernel::patch_code_with_the_others_waiting();
             kernel::install_fault_reporter();
             #[cfg(feature = "winnt")]
             #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]

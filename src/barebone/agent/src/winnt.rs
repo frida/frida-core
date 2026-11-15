@@ -659,6 +659,83 @@ fn thread_changed(_process: usize, thread: usize, created: u8) {
 static mut THREAD_APPEARED: Option<fn(u32)> = None;
 static mut THREAD_VANISHED: Option<fn(u32)> = None;
 
+pub fn patch_code_with_the_others_waiting() {
+    if !kernel_exports(core::ptr::addr_of!(_KeIpiGenericCall)) {
+        return;
+    }
+
+    let hooks = crate::bindings::GumMemoryHooks {
+        allocate: None,
+        protect: None,
+        patch_code: Some(patch_code_while_the_others_wait),
+        user_data: core::ptr::null_mut(),
+    };
+    unsafe { crate::bindings::gum_memory_set_hooks(&hooks) };
+}
+
+unsafe extern "C" fn patch_code_while_the_others_wait(
+    address: crate::bindings::gpointer,
+    data: crate::bindings::gconstpointer,
+    size: crate::bindings::gsize,
+    _user_data: crate::bindings::gpointer,
+) -> crate::bindings::gboolean {
+    let size = size as usize;
+    let Some(region) = region_at(address as usize) else {
+        return 0;
+    };
+
+    let patch = CodePatch {
+        target: address as *mut u8,
+        source: data as *const u8,
+        size,
+        claimed: AtomicUsize::new(0),
+        applied: AtomicUsize::new(0),
+    };
+    protect(address as u64, size, crate::winnt_paging::GUM_PAGE_READ | crate::winnt_paging::GUM_PAGE_WRITE
+        | crate::winnt_paging::GUM_PAGE_EXECUTE);
+    unsafe { (_KeIpiGenericCall)(apply_code_patch, &patch as *const CodePatch as usize) };
+    protect(address as u64, size, region.protection);
+
+    1
+}
+
+#[cfg(target_arch = "x86")]
+unsafe extern "stdcall" fn apply_code_patch(context: usize) -> usize {
+    apply_code_patch_on_this_processor(context)
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe extern "win64" fn apply_code_patch(context: usize) -> usize {
+    apply_code_patch_on_this_processor(context)
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn apply_code_patch(context: usize) -> usize {
+    apply_code_patch_on_this_processor(context)
+}
+
+fn apply_code_patch_on_this_processor(context: usize) -> usize {
+    let patch = unsafe { &*(context as *const CodePatch) };
+    if patch.claimed.swap(1, Ordering::AcqRel) == 0 {
+        unsafe { core::ptr::copy_nonoverlapping(patch.source, patch.target, patch.size) };
+        crate::gum::gum_clear_cache(patch.target as *mut c_void, patch.size as crate::bindings::gsize);
+        patch.applied.store(1, Ordering::Release);
+    } else {
+        while patch.applied.load(Ordering::Acquire) == 0 {
+            core::hint::spin_loop();
+        }
+    }
+    0
+}
+
+struct CodePatch {
+    target: *mut u8,
+    source: *const u8,
+    size: usize,
+    claimed: AtomicUsize,
+    applied: AtomicUsize,
+}
+
 #[cfg(target_arch = "x86")]
 pub fn install_fault_reporter() {
     unsafe {
@@ -5419,6 +5496,7 @@ macro_rules! kernel_abi {
 
         type ThreadStartRoutine = unsafe extern "stdcall" fn(*mut c_void);
         type ServiceRoutine = unsafe extern "stdcall" fn(*mut c_void, *mut c_void) -> u8;
+        type IpiRoutine = unsafe extern "stdcall" fn(usize) -> usize;
         type DeferredRoutine =
             unsafe extern "stdcall" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
         type StackCallout = unsafe extern "stdcall" fn(*mut c_void);
@@ -5434,6 +5512,7 @@ macro_rules! kernel_abi {
 
         type ThreadStartRoutine = unsafe extern "win64" fn(*mut c_void);
         type ServiceRoutine = unsafe extern "win64" fn(*mut c_void, *mut c_void) -> u8;
+        type IpiRoutine = unsafe extern "win64" fn(usize) -> usize;
         type DeferredRoutine =
             unsafe extern "win64" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
         type StackCallout = unsafe extern "win64" fn(*mut c_void);
@@ -5449,6 +5528,7 @@ macro_rules! kernel_abi {
 
         type ThreadStartRoutine = unsafe extern "C" fn(*mut c_void);
         type ServiceRoutine = unsafe extern "C" fn(*mut c_void, *mut c_void) -> u8;
+        type IpiRoutine = unsafe extern "C" fn(usize) -> usize;
         type DeferredRoutine =
             unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void);
         type StackCallout = unsafe extern "C" fn(*mut c_void);
@@ -5547,7 +5627,7 @@ kernel_abi! {
     static _ExAllocatePool2: windows_fn!(u64, usize, u32 => *mut c_void);
     static _MmCopyVirtualMemory: windows_fn!(*mut c_void, *const c_void, *mut c_void, *mut c_void,
         usize, u8, *mut usize => i32);
-    static _KeIpiGenericCall: windows_fn!(unsafe extern "C" fn(usize) -> usize, usize => usize);
+    static _KeIpiGenericCall: windows_fn!(IpiRoutine, usize => usize);
     static _MmIsAddressValid: windows_fn!(*const c_void => u8);
     static _ZwAllocateVirtualMemory: windows_fn!(
         *mut c_void, *mut *mut u8, usize, *mut usize, u32, u32 => i32);
