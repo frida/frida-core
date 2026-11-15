@@ -743,8 +743,14 @@ const CREATE_SUSPENDED: u32 = 0x4;
 const PROCESS_BASIC_INFORMATION: u32 = 0;
 const PE_SIGNATURE_OFFSET: usize = 0x3c;
 const PE_ENTRY_POINT_OFFSET: usize = 0x28;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const HOLD_SIZE: usize = 2;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 const HOLD_INSTRUCTION: [u8; HOLD_SIZE] = [0xeb, 0xfe];
+#[cfg(target_arch = "aarch64")]
+const HOLD_SIZE: usize = 4;
+#[cfg(target_arch = "aarch64")]
+const HOLD_INSTRUCTION: [u8; HOLD_SIZE] = 0x1400_0000u32.to_le_bytes();
 const HOLD_ATTEMPTS: u32 = 5000;
 const HOLD_SLICE_US: i64 = 1000;
 
