@@ -610,9 +610,7 @@ public class HelperBackend {
 				}
 
 				if (scope == Scope.FULL && appInfo != null) {
-					JSONArray icons = new JSONArray();
-					icons.put(fetchAppIcon(appInfo));
-					parameters.put("$icons", icons);
+					addAppIcons(parameters, appInfo);
 				}
 
 				if (pid == frontmostPid) {
@@ -940,9 +938,7 @@ public class HelperBackend {
 			}
 
 			if (scope == Scope.FULL) {
-				JSONArray icons = new JSONArray();
-				icons.put(fetchAppIcon(appInfo));
-				parameters.put("$icons", icons);
+				addAppIcons(parameters, appInfo);
 			}
 		} catch (JSONException e) {
 			throw new RuntimeException(e);
@@ -968,6 +964,19 @@ public class HelperBackend {
 		}
 
 		return sources;
+	}
+
+	private void addAppIcons(JSONObject parameters, ApplicationInfo appInfo) throws JSONException {
+		String icon;
+		try {
+			icon = fetchAppIcon(appInfo);
+		} catch (RuntimeException e) {
+			return;
+		}
+
+		JSONArray icons = new JSONArray();
+		icons.put(icon);
+		parameters.put("$icons", icons);
 	}
 
 	private String fetchAppIcon(ApplicationInfo appInfo) {
