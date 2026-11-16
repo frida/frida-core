@@ -115,6 +115,18 @@ pub fn told_the_cache_shape(shape: u64) {
 
 static mut CACHE_SHAPE: u64 = 0;
 
+pub fn told_where_the_loader_keeps_its_list(list: u64) {
+    unsafe { LOADER_LIST = list };
+}
+
+pub fn where_the_loader_keeps_its_list() -> Option<u64> {
+    let list = unsafe { LOADER_LIST };
+
+    (list != 0).then_some(list)
+}
+
+static mut LOADER_LIST: u64 = 0;
+
 pub fn told_the_page_size(size: usize) {
     unsafe { PAGE_SIZE = size };
 }

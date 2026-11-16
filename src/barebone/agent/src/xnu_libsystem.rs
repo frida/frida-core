@@ -75,7 +75,52 @@ pub struct AskingAboutThreads {
 static mut ASKING: Option<AskingAboutThreads> = None;
 
 pub fn image_named(wanted: &[u8]) -> Option<u64> {
-    let cache = crate::xnu_user_calls::where_the_shared_code_is()?;
+    crate::xnu_user_calls::where_the_shared_code_is()
+        .and_then(|cache| image_in_the_cache(cache, wanted))
+        .or_else(|| image_the_loader_lists(wanted))
+}
+
+pub fn where_the_loader_keeps_its_list() -> Option<u64> {
+    if let Some(list) = crate::xnu_user_calls::where_the_loader_keeps_its_list() {
+        return Some(list);
+    }
+
+    let asking = asking_about_threads()?;
+    let about: unsafe extern "C" fn(u32, u32, *mut u32, *mut u32) -> i32 =
+        unsafe { core::mem::transmute(function_named(b"/libsystem_kernel.dylib", b"_task_info")?) };
+
+    let task = unsafe { (asking.this_task as *const u32).read_volatile() };
+    let mut said = [0u32; ABOUT_THE_LOADER_WORDS];
+    let mut room = said.len() as u32;
+    let told = unsafe { about(task, ABOUT_THE_LOADER, said.as_mut_ptr(), &mut room) };
+    if told != 0 {
+        return None;
+    }
+
+    let list = (said[0] as u64) | ((said[1] as u64) << 32);
+
+    (list != 0).then_some(list)
+}
+
+pub fn listed_images(list: u64) -> impl Iterator<Item = (u64, u64)> {
+    let images = read_word(list + HOW_MANY_LISTED) as u64;
+    let at = read_long(list + WHERE_THE_LISTED_ARE);
+
+    (0..images.min(MOST_LISTED))
+        .map(move |step| {
+            let each = at + (step * A_LISTED_IMAGE);
+            (read_long(each), read_long(each + WHAT_IT_CAME_FROM))
+        })
+        .filter(|&(base, path)| base != 0 && path != 0)
+}
+
+fn image_the_loader_lists(wanted: &[u8]) -> Option<u64> {
+    let list = where_the_loader_keeps_its_list()?;
+
+    listed_images(list).find(|&(_, path)| name_here(path, wanted)).map(|(base, _)| base)
+}
+
+fn image_in_the_cache(cache: u64, wanted: &[u8]) -> Option<u64> {
     let read_word = |at: u64| unsafe { ((cache + at) as *const u32).read_volatile() };
     let read_long = |at: u64| unsafe { ((cache + at) as *const u64).read_volatile() };
 
@@ -144,6 +189,7 @@ pub fn function_in(image: u64, wanted: &[u8]) -> Option<u64> {
 fn what_the_image_offers(image: u64) -> Option<(u64, u64)> {
     let commands = read_word(image + HOW_MANY_COMMANDS);
     let mut at = image + PAST_THE_HEADER;
+    let mut text = None;
     let mut linkedit = None;
     let mut offers = None;
 
@@ -151,6 +197,9 @@ fn what_the_image_offers(image: u64) -> Option<(u64, u64)> {
         let kind = read_word(at);
         let length = read_word(at + 4) as u64;
 
+        if kind == A_SEGMENT && name_here(at + 8, b"__TEXT") {
+            text = Some(read_long(at + 24));
+        }
         if kind == A_SEGMENT && name_here(at + 8, b"__LINKEDIT") {
             linkedit = Some((read_long(at + 24), read_long(at + 40)));
         }
@@ -161,16 +210,11 @@ fn what_the_image_offers(image: u64) -> Option<(u64, u64)> {
         at += length;
     }
 
+    let slide = image.wrapping_sub(text?);
     let ((where_it_wants_to_be, where_it_is_in_the_file), (offered_at, size)) =
         (linkedit?, offers?);
 
-    Some((where_it_wants_to_be + slide_of() + (offered_at - where_it_is_in_the_file), size))
-}
-
-fn slide_of() -> u64 {
-    let cache = crate::xnu_user_calls::where_the_shared_code_is().unwrap_or(0);
-
-    cache.wrapping_sub(read_long(cache + read_word(cache + SPANS_ARE_AT) as u64))
+    Some((where_it_wants_to_be.wrapping_add(slide) + (offered_at - where_it_is_in_the_file), size))
 }
 
 fn read_word(at: u64) -> u32 {
@@ -235,3 +279,11 @@ const HOW_MANY_IMAGES: u64 = 0x1c4;
 const AN_IMAGE: u64 = 32;
 const WHAT_IT_IS_CALLED: u64 = 24;
 const LONGEST_NAME: usize = 256;
+
+const ABOUT_THE_LOADER: u32 = 17;
+const ABOUT_THE_LOADER_WORDS: usize = 8;
+const HOW_MANY_LISTED: u64 = 4;
+const WHERE_THE_LISTED_ARE: u64 = 8;
+const A_LISTED_IMAGE: u64 = 24;
+const WHAT_IT_CAME_FROM: u64 = 8;
+const MOST_LISTED: u64 = 4096;

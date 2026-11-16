@@ -8,6 +8,8 @@ pub extern "C" fn frida_xnu_user_entry(arena: usize) -> ! {
     unsafe { ARENA = arena };
 
     crate::xnu_user_calls::told_the_cache_shape(word_at(arena + crate::xnu_relay::CACHE_SHAPE));
+    crate::xnu_user_calls::told_where_the_loader_keeps_its_list(
+        word_at(arena + crate::xnu_relay::LOADER_LIST));
     crate::xnu_user_calls::told_the_page_size(
         word_at(arena + crate::xnu_relay::PAGE_SIZE) as usize);
     crate::xnu::select_user();

@@ -93,20 +93,11 @@ fn what_is_loaded() -> Vec<Image> {
         return found;
     }
 
-    let Some(list) = where_the_loader_keeps_its_list() else {
+    let Some(list) = crate::xnu_libsystem::where_the_loader_keeps_its_list() else {
         return found;
     };
 
-    let images = read_word(list + HOW_MANY_IMAGES) as usize;
-    let at = read_long(list + WHERE_THE_IMAGES_ARE);
-    for step in 0..images.min(MOST_IMAGES) {
-        let each = at + (step * AN_IMAGE) as u64;
-        let base = read_long(each);
-        let path = read_long(each + WHAT_IT_CAME_FROM);
-        if base == 0 || path == 0 {
-            continue;
-        }
-
+    for (base, path) in crate::xnu_libsystem::listed_images(list) {
         let path = text_at(path);
         let size = how_much_of_it_there_is(base, &path);
         if size == 0 {
@@ -125,25 +116,6 @@ fn what_is_loaded() -> Vec<Image> {
     }
 
     found
-}
-
-fn where_the_loader_keeps_its_list() -> Option<u64> {
-    let asking = crate::xnu_libsystem::asking_about_threads()?;
-    let about: unsafe extern "C" fn(u32, u32, *mut u32, *mut u32) -> i32 =
-        unsafe { core::mem::transmute(crate::xnu_libsystem::function_named(
-            b"/libsystem_kernel.dylib", b"_task_info")?) };
-
-    let task = unsafe { (asking.this_task as *const u32).read_volatile() };
-    let mut said = [0u32; ABOUT_THE_LOADER_WORDS];
-    let mut room = said.len() as u32;
-    let told = unsafe { about(task, ABOUT_THE_LOADER, said.as_mut_ptr(), &mut room) };
-    if told != 0 {
-        return None;
-    }
-
-    let list = (said[0] as u64) | ((said[1] as u64) << 32);
-
-    (list != 0).then_some(list)
 }
 
 fn read_the_image(base: u64, name: &str) -> Option<*mut GumMachoModule> {
@@ -202,25 +174,14 @@ fn text_at(at: u64) -> String {
     core::str::from_utf8(&said).unwrap_or("?").to_string()
 }
 
-fn read_word(at: u64) -> u32 {
-    unsafe { (at as *const u32).read_volatile() }
-}
-
 fn read_long(at: u64) -> u64 {
     unsafe { (at as *const u64).read_volatile() }
 }
 
 const NO_TASK_TO_ASK: u32 = 0;
 
-const ABOUT_THE_LOADER: u32 = 17;
-const ABOUT_THE_LOADER_WORDS: usize = 8;
-const HOW_MANY_IMAGES: u64 = 4;
 const WHERE_THE_LOADER_IS: u64 = 32;
 const WHAT_THE_LOADER_IS_CALLED: &str = "/usr/lib/dyld";
-const WHERE_THE_IMAGES_ARE: u64 = 8;
-const AN_IMAGE: usize = 24;
-const WHAT_IT_CAME_FROM: u64 = 8;
-const MOST_IMAGES: usize = 4096;
 
 const LONGEST_NAME: usize = 1024;
 

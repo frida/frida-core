@@ -9,7 +9,7 @@ pub fn inject_into_process(id: u32) -> u32 {
         return 0;
     };
 
-    let placed = give_the_copy_a_home(id, process.map);
+    let placed = give_the_copy_a_home(id, &process);
     unsafe { release_process(process.handle) };
 
     let Some(home) = placed else {
@@ -494,7 +494,8 @@ pub fn process_with_id(id: u32) -> Option<Process> {
     Some(Process { handle, task, map: unsafe { map_of(task) } })
 }
 
-fn give_the_copy_a_home(id: u32, map: *mut c_void) -> Option<Home> {
+fn give_the_copy_a_home(id: u32, process: &Process) -> Option<Home> {
+    let map = process.map;
     let (base, size) = crate::own_range();
     let shared = crate::writable_half_start() - base;
 
@@ -531,6 +532,8 @@ fn give_the_copy_a_home(id: u32, map: *mut c_void) -> Option<Home> {
             .write(crate::gum::page_size_the_kernel_runs_with() as u64);
         ((arena_here + crate::xnu_relay::CACHE_SHAPE) as *mut u64)
             .write(crate::xnu::kernel_cache_shape());
+        ((arena_here + crate::xnu_relay::LOADER_LIST) as *mut u64)
+            .write(where_the_loader_keeps_its_list(process.task));
         ((arena_here + crate::xnu_relay::HAS_RUN) as *mut u32).write(1);
     }
 
@@ -629,6 +632,20 @@ fn put(map: *mut c_void, bytes: &[u8]) -> Option<u64> {
     }
 
     Some(landed)
+}
+
+fn where_the_loader_keeps_its_list(task: *mut c_void) -> u64 {
+    let Some(about) = (unsafe { _task_info }) else {
+        return 0;
+    };
+
+    let mut said = [0u32; ABOUT_THE_LOADER_WORDS];
+    let mut room = said.len() as u32;
+    if unsafe { about(task, ABOUT_THE_LOADER, said.as_mut_ptr() as *mut u8, &mut room) } != KERN_SUCCESS {
+        return 0;
+    }
+
+    (said[0] as u64) | ((said[1] as u64) << 32)
 }
 
 fn ourselves() -> Option<*mut c_void> {
@@ -802,6 +819,8 @@ fn set_thread_state(thread: *mut c_void, flavor: c_int, state: *const u32, count
 const PAGE: u64 = 0x4000;
 pub(crate) const STACK: u64 = 512 * 1024;
 const KERN_SUCCESS: c_int = 0;
+const ABOUT_THE_LOADER: u32 = 17;
+const ABOUT_THE_LOADER_WORDS: usize = 8;
 const ANYWHERE: c_int = 1;
 const AS_HIGH_AS_IT_GOES: c_int = 1;
 const A_COPY_OF_ITS_OWN: c_int = 0x10;
@@ -847,5 +866,6 @@ unsafe extern "C" {
         unsafe extern "C" fn(*mut c_void, c_int, *const u32, c_int, *const u32, c_int, u32) -> c_int,
     >;
     static _thread_resume: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
+    static _task_info: Option<unsafe extern "C" fn(*mut c_void, u32, *mut u8, *mut u32) -> c_int>;
     static _thread_terminate: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
 }
