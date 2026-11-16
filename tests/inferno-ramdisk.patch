@@ -1,3 +1,43 @@
+diff --git a/hw/arm/iboot/kernel_patches.c b/hw/arm/iboot/kernel_patches.c
+index 4cd99e8..f727a77 100644
+--- a/hw/arm/iboot/kernel_patches.c
++++ b/hw/arm/iboot/kernel_patches.c
+@@ -837,6 +837,27 @@ static void ck_kp_cs_patches(CKPatcherRange* range)
+                             1, repl, NULL, 0, sizeof(repl));
+ }
+ 
++static void ck_kp_vm_prot_exec_patch(CKPatcherRange* range)
++{
++    // In vm_map_entry_cs_associate: when a page first becomes executable and the code-signing
++    // monitor refuses a debug-region association, the VM strips execute from the entry
++    // (protection and max_protection). Keep execute so that instrumentation can run code it
++    // placed, matching what a debugged / developer-mode address space is allowed.
++    //   ldr w8, [x?, #0x48] ; mov w?, #0xFFFFDDFF ; and w?, w?, w?
++    static const uint8_t pattern[] = {
++        0xE8, 0x4A, 0x40, 0xB9,    // ldr w8, [x23, #0x48]
++        0x09, 0x40, 0x84, 0x12,    // mov w9, #0xFFFFDDFF
++        0x08, 0x01, 0x09, 0x0A,    // and w8, w8, w9
++    };
++    static const uint8_t mask[] = {
++        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
++    };
++    QEMU_BUILD_BUG_ON(sizeof(pattern) != sizeof(mask));
++    static const uint8_t repl[] = {NOP_BYTES};
++    ck_patcher_find_replace(range, "keep execute when becoming executable", pattern, mask, sizeof(pattern),
++                            sizeof(uint32_t), 1, repl, NULL, 8, sizeof(repl));
++}
++
+ static void ck_kp_pmap_cs_enforce_patch(CKPatcherRange* range)
+ {
+     // in pmap_enter_options_internal
+@@ -1164,6 +1185,7 @@ void ck_patch_kernel(MachoHeader64* hdr, KernelPatchset patchset, uint64_t patch
+     if (patchset >= KERNEL_PATCHSET_DEBUG) { ck_kp_kprintf_patch(kernel_text); }
+     ck_kp_amx_patch(kernel_text);
+     ck_kp_cs_patches(kernel_text);
++    ck_kp_vm_prot_exec_patch(kernel_text);
+     kernel_const = ck_kp_get_kernel_section(hdr, "__TEXT", "__const");
+     ck_kp_hactivation_patch(kernel_const);
+ 
 diff --git a/hw/arm/t8030.c b/hw/arm/t8030.c
 index 70f57fc..8c05493 100644
 --- a/hw/arm/t8030.c
