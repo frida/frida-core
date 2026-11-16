@@ -1431,13 +1431,16 @@ namespace Frida.BareboneTest {
 			return;
 
 		string? path = Environment.get_variable ("FRIDA_PROBE_JS");
-		if (path == null)
+		if (path == null) {
+			h.done ();
 			return;
+		}
 
 		string source;
 		try {
 			FileUtils.get_contents (path, out source);
 		} catch (GLib.Error e) {
+			h.done ();
 			return;
 		}
 
@@ -1475,13 +1478,16 @@ namespace Frida.BareboneTest {
 			return;
 
 		string? path = Environment.get_variable ("FRIDA_PROBE_JS");
-		if (path == null)
+		if (path == null) {
+			h.done ();
 			return;
+		}
 
 		string source;
 		try {
 			FileUtils.get_contents (path, out source);
 		} catch (GLib.Error e) {
+			h.done ();
 			return;
 		}
 
