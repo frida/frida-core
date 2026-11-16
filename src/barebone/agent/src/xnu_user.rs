@@ -132,7 +132,12 @@ unsafe extern "C" fn user_worker(parameter: *mut core::ffi::c_void, _wait_result
 
     }
 
+    unsafe { glib_shutdown() };
     unsafe { ((arena + crate::xnu_relay::WORKER_STOPPED) as *mut u32).write_volatile(1) };
+}
+
+unsafe extern "C" {
+    fn glib_shutdown();
 }
 
 fn copy_has_work() -> bool {
