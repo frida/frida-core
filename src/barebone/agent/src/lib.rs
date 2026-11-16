@@ -88,6 +88,8 @@ mod gum_injected;
 mod hostlink_virtio;
 #[cfg(feature = "winnt")]
 mod hostlink_serial;
+#[cfg(feature = "xnu")]
+mod hostlink_uart;
 #[cfg(feature = "xnu-core")]
 mod hostlink_vsock;
 #[cfg(feature = "xnu-core")]
@@ -370,6 +372,12 @@ mod entrypoint_blob {
                 TransportConfig::Serial => Transport::Serial(
                     hostlink_serial::Hostlink::init(Some(on_frame_from_host), wake_token).unwrap(),
                 ),
+                #[cfg(feature = "xnu")]
+                TransportConfig::Uart { mmio, irq, interrupt_parent } => Transport::Uart(
+                    hostlink_uart::Hostlink::init(mmio, irq, interrupt_parent, Some(on_frame_from_host),
+                        wake_token)
+                    .unwrap(),
+                ),
             };
             transport_set(transport);
 
@@ -504,6 +512,21 @@ mod entrypoint_blob {
                     { TransportConfig::CharDevice }
                     #[cfg(not(feature = "linux-injected"))]
                     { panic!("the character device is linux-injected's") }
+                }
+                7 => {
+                    let mmio_variant = g_variant_get_child_value(transport_cfg_inner, 0);
+                    let mmio = g_variant_get_uint64(mmio_variant);
+                    let irq_variant = g_variant_get_child_value(transport_cfg_inner, 1);
+                    let irq = g_variant_get_uint32(irq_variant);
+                    let parent_variant = g_variant_get_child_value(transport_cfg_inner, 2);
+                    let interrupt_parent = g_variant_get_uint32(parent_variant);
+                    g_variant_unref(parent_variant);
+                    g_variant_unref(irq_variant);
+                    g_variant_unref(mmio_variant);
+                    #[cfg(feature = "xnu")]
+                    { TransportConfig::Uart { mmio, irq, interrupt_parent } }
+                    #[cfg(not(feature = "xnu"))]
+                    { let _ = (mmio, irq, interrupt_parent); panic!("the UART is XNU's") }
                 }
                 _ => panic!("Unsupported transport kind: {}", transport_kind),
             };
@@ -718,6 +741,8 @@ pub enum Transport {
     Virtio(hostlink_virtio::Hostlink),
     #[cfg(feature = "winnt")]
     Serial(hostlink_serial::Hostlink),
+    #[cfg(feature = "xnu")]
+    Uart(hostlink_uart::Hostlink),
     #[cfg(feature = "xnu-core")]
     Vsock(hostlink_vsock::Hostlink),
     #[cfg(feature = "linux-injected")]
@@ -735,6 +760,8 @@ impl Transport {
             Transport::Virtio(h) => h.send(payload),
             #[cfg(feature = "winnt")]
             Transport::Serial(h) => h.send(payload),
+            #[cfg(feature = "xnu")]
+            Transport::Uart(h) => h.send(payload),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(h) => h.send(payload),
             #[cfg(feature = "linux-injected")]
@@ -752,6 +779,8 @@ impl Transport {
             Transport::Virtio(h) => h.shutdown(),
             #[cfg(feature = "winnt")]
             Transport::Serial(h) => h.shutdown(),
+            #[cfg(feature = "xnu")]
+            Transport::Uart(h) => h.shutdown(),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(_) => {}
             #[cfg(feature = "linux-injected")]
@@ -769,6 +798,8 @@ impl Transport {
             Transport::Virtio(h) => h.process(),
             #[cfg(feature = "winnt")]
             Transport::Serial(h) => h.process(),
+            #[cfg(feature = "xnu")]
+            Transport::Uart(h) => h.process(),
             #[cfg(feature = "xnu-core")]
             Transport::Vsock(h) => h.process(),
             #[cfg(feature = "linux-injected")]
@@ -806,6 +837,8 @@ pub enum TransportConfig {
     Virtio { mmio: u64, irq: u32 },
     #[cfg(feature = "winnt")]
     Serial,
+    #[cfg(feature = "xnu")]
+    Uart { mmio: u64, irq: u32, interrupt_parent: u32 },
     #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected"))]
     VirtioPci { ecam: u64 },
     #[cfg(feature = "xnu-core")]
@@ -1224,6 +1257,11 @@ fn kernel_half_has_work() -> bool {
 
     #[cfg(feature = "winnt")]
     if hostlink_serial::a_turn_is_wanted() {
+        return true;
+    }
+
+    #[cfg(feature = "xnu")]
+    if hostlink_uart::a_turn_is_wanted() {
         return true;
     }
 

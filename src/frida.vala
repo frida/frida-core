@@ -2866,6 +2866,9 @@ namespace Frida {
 					case "serial":
 						t = typeof (BareboneSerialTransportConfig);
 						break;
+					case "uart":
+						t = typeof (BareboneUartTransportConfig);
+						break;
 					case "pipe-vsock":
 						t = typeof (BareboneVsockPipeTransportConfig);
 						break;
@@ -3074,6 +3077,44 @@ namespace Frida {
 		public override void check () throws Error {
 			if (path == null)
 				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.path' is missing");
+		}
+	}
+
+	/**
+	 * A UART of the guest that its kernel leaves alone, driven by the agent itself. The host
+	 * reaches the other end of it through the UNIX socket at `path`.
+	 */
+	public sealed class BareboneUartTransportConfig : BareboneInjectingTransportConfig {
+		public string path {
+			get;
+			set;
+		}
+
+		/** Physical address of the UART's registers. */
+		public uint64 mmio {
+			get;
+			set;
+		}
+
+		/** The UART's line on its interrupt controller. */
+		public uint irq {
+			get;
+			set;
+		}
+
+		/** Device tree phandle of that interrupt controller. */
+		public uint interrupt_parent {
+			get;
+			set;
+		}
+
+		public override void check () throws Error {
+			if (path == null)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.path' is missing");
+			if (mmio == 0)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.mmio' is missing");
+			if (interrupt_parent == 0)
+				throw new Error.NOT_SUPPORTED ("Config for 'agent.transport.interrupt_parent' is missing");
 		}
 	}
 

@@ -106,6 +106,7 @@ namespace Frida.Barebone {
 		private const uint8 TRANSPORT_KIND_SERIAL = 3;
 		private const uint8 TRANSPORT_KIND_PIPE_VSOCK = 4;
 		private const uint8 TRANSPORT_KIND_PIPE_GOLDFISH = 5;
+		private const uint8 TRANSPORT_KIND_UART = 7;
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Efni.Error, IOError {
 			progress ("Preparing the agent", 0.0);
@@ -384,11 +385,24 @@ namespace Frida.Barebone {
 				});
 			}
 			if (agent_config.transport is BareboneSerialTransportConfig) {
-				yield connect_serial_transport ((BareboneSerialTransportConfig) agent_config.transport,
-					cancellable);
+				var config = (BareboneSerialTransportConfig) agent_config.transport;
+				yield connect_serial_transport (config.path, cancellable);
 				return new Variant.tuple ({
 					new Variant.byte (TRANSPORT_KIND_SERIAL),
 					new Variant.variant (new Variant.uint32 (0))
+				});
+			}
+			if (agent_config.transport is BareboneUartTransportConfig) {
+				var config = (BareboneUartTransportConfig) agent_config.transport;
+				yield connect_serial_transport (config.path, cancellable);
+				Variant[] uart_cfg = {
+					new Variant.uint64 (config.mmio),
+					new Variant.uint32 (config.irq),
+					new Variant.uint32 (config.interrupt_parent)
+				};
+				return new Variant.tuple ({
+					new Variant.byte (TRANSPORT_KIND_UART),
+					new Variant.variant (new Variant.tuple (uart_cfg))
 				});
 			}
 			if (agent_config.transport is BareboneVsockPipeTransportConfig) {
@@ -412,15 +426,13 @@ namespace Frida.Barebone {
 			throw new Efni.Error.NOT_SUPPORTED ("Unsupported transport config");
 		}
 
-		private async void connect_serial_transport (BareboneSerialTransportConfig config,
-				Cancellable? cancellable) throws Efni.Error, IOError {
+		private async void connect_serial_transport (string path, Cancellable? cancellable) throws Efni.Error, IOError {
 			try {
 #if WINDOWS
-				adopt_hostlink_streams (WindowsNamedPipe.open_client (config.path));
+				adopt_hostlink_streams (WindowsNamedPipe.open_client (path));
 #else
 				var client = new SocketClient ();
-				adopt_hostlink_streams (yield client.connect_async (new UnixSocketAddress (config.path),
-					cancellable));
+				adopt_hostlink_streams (yield client.connect_async (new UnixSocketAddress (path), cancellable));
 #endif
 			} catch (GLib.Error e) {
 				throw new Efni.Error.TRANSPORT ("Unable to reach the serial port of the guest: %s", e.message);
