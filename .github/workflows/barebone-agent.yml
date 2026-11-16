@@ -6,6 +6,7 @@ on:
       - 'src/barebone/**'
       - 'tests/test-barebone.vala'
       - 'tests/vm.py'
+      - 'tests/inferno-ramdisk.patch'
       - '.github/workflows/barebone-agent.yml'
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
       - 'src/barebone/**'
       - 'tests/test-barebone.vala'
       - 'tests/vm.py'
+      - 'tests/inferno-ramdisk.patch'
       - '.github/workflows/barebone-agent.yml'
   workflow_dispatch:
 
@@ -232,14 +234,19 @@ jobs:
     strategy:
       matrix:
         include:
-          - { guest: win95,        agent: win9x-x86,    qemu: qemu-system-x86 }
-          - { guest: winxp,        agent: winnt-x86,    qemu: qemu-system-x86 }
-          - { guest: winxp64,      agent: winnt-x86_64, qemu: qemu-system-x86 }
-          - { guest: winarm64,     agent: winnt-arm64,  qemu: qemu-system-arm }
-          - { guest: linux-x86,    agent: linux-x86,    qemu: qemu-system-x86 }
-          - { guest: linux-x86_64, agent: linux-x86_64, qemu: qemu-system-x86 }
-          - { guest: linux-arm,    agent: linux-arm,    qemu: qemu-system-arm }
-          - { guest: linux-arm64,  agent: linux-arm64,  qemu: qemu-system-arm }
+          - { guest: win95,        agent: win9x-x86,    packages: qemu-system-x86 qemu-utils mtools }
+          - { guest: winxp,        agent: winnt-x86,    packages: qemu-system-x86 qemu-utils mtools }
+          - { guest: winxp64,      agent: winnt-x86_64, packages: qemu-system-x86 qemu-utils mtools }
+          - { guest: winarm64,     agent: winnt-arm64,  packages: qemu-system-arm qemu-utils mtools }
+          - { guest: linux-x86,    agent: linux-x86,    packages: qemu-system-x86 qemu-utils mtools }
+          - { guest: linux-x86_64, agent: linux-x86_64, packages: qemu-system-x86 qemu-utils mtools }
+          - { guest: linux-arm,    agent: linux-arm,    packages: qemu-system-arm qemu-utils mtools }
+          - { guest: linux-arm64,  agent: linux-arm64,  packages: qemu-system-arm qemu-utils mtools }
+          - guest: xnu
+            agent: xnu-arm64
+            packages: >-
+              build-essential pkg-config ninja-build libglib2.0-dev libpixman-1-dev libslirp-dev liblzfse-dev
+              libpng-dev libzstd-dev zlib1g-dev libbz2-dev libgnutls28-dev
       fail-fast: false
     runs-on: ubuntu-latest
     env:
@@ -248,10 +255,10 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v6
-      - name: Install QEMU
+      - name: Install emulator
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.qemu }} qemu-utils mtools
+          sudo apt-get install -y ${{ matrix.packages }}
       - name: Download agent
         uses: actions/download-artifact@v8
         with:
@@ -267,7 +274,12 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/frida-tests
-          key: live-guest-${{ matrix.guest }}-${{ hashFiles('tests/vm.py') }}
+          key: live-guest-${{ matrix.guest }}-${{ hashFiles('tests/vm.py', 'tests/inferno-ramdisk.patch') }}
+      - name: Set up xmake
+        if: matrix.guest == 'xnu' && steps.guest.outputs.cache-hit != 'true'
+        uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
       - name: Prepare guest
         if: steps.guest.outputs.cache-hit != 'true'
         run: python3 tests/vm.py prepare-${{ matrix.guest }}
@@ -276,7 +288,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: ~/.cache/frida-tests
-          key: live-guest-${{ matrix.guest }}-${{ hashFiles('tests/vm.py') }}
+          key: live-guest-${{ matrix.guest }}-${{ hashFiles('tests/vm.py', 'tests/inferno-ramdisk.patch') }}
       - name: Test
         run: >-
           chmod +x "$TESTS_DIR/frida-tests" &&
