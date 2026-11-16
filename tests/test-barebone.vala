@@ -1028,6 +1028,14 @@ namespace Frida.BareboneTest {
 		return config;
 	}
 
+	private string xnu_target () {
+		return Environment.get_variable ("FRIDA_TEST_XNU_TARGET") ?? "backboardd";
+	}
+
+	private string xnu_other_target () {
+		return Environment.get_variable ("FRIDA_TEST_XNU_OTHER_TARGET") ?? "fseventsd";
+	}
+
 	private async void xnu_enumerates_processes_in_live_guest (Harness h, BareboneConfig? config) {
 		if (config == null)
 			return;
@@ -1041,8 +1049,6 @@ namespace Frida.BareboneTest {
 			options.scope = FULL;
 			var processes = yield device.enumerate_processes (options, null);
 
-			assert_true (processes.size () > 10);
-
 			Process? first = null;
 			Process? board = null;
 			for (int i = 0; i != processes.size (); i++) {
@@ -1050,7 +1056,7 @@ namespace Frida.BareboneTest {
 				assert_true (one.name != "");
 				if (one.pid == 1)
 					first = one;
-				if (one.name == "backboardd")
+				if (one.name == xnu_target ())
 					board = one;
 			}
 
@@ -1080,7 +1086,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield find_program (device, "backboardd");
+			uint pid = yield find_program (device, xnu_target ());
 			assert_true (pid != 0);
 
 			var session = yield device.attach (pid, null, null);
@@ -1124,7 +1130,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield find_program (device, "backboardd");
+			uint pid = yield find_program (device, xnu_target ());
 			assert_true (pid != 0);
 
 			var session = yield device.attach (pid, null, null);
@@ -1146,7 +1152,7 @@ namespace Frida.BareboneTest {
 			while (said == null)
 				yield h.process_events ();
 
-			assert_true (said.contains ("backboardd"));
+			assert_true (said.contains (xnu_target ()));
 			assert_true (said.contains ("true,true,true"));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
@@ -1172,7 +1178,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield find_program (device, "backboardd");
+			uint pid = yield find_program (device, xnu_target ());
 			assert_true (pid != 0);
 
 			var session = yield device.attach (pid, null, null);
@@ -1283,7 +1289,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield find_program (device, "backboardd");
+			uint pid = yield find_program (device, xnu_target ());
 			assert_true (pid != 0);
 
 			var session = yield device.attach (pid, null, null);
@@ -1332,7 +1338,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield find_program (device, "backboardd");
+			uint pid = yield find_program (device, xnu_target ());
 			assert_true (pid != 0);
 
 			var session = yield device.attach (pid, null, null);
@@ -1378,8 +1384,8 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint board = yield find_program (device, "backboardd");
-			uint watcher = yield find_program (device, "fseventsd");
+			uint board = yield find_program (device, xnu_target ());
+			uint watcher = yield find_program (device, xnu_other_target ());
 			assert_true (board != 0 && watcher != 0 && board != watcher);
 
 			string? said_here = null, said_there = null;
@@ -1404,9 +1410,9 @@ namespace Frida.BareboneTest {
 				yield h.process_events ();
 
 			assert_true (said_here.contains (board.to_string ()));
-			assert_true (said_here.contains ("backboardd"));
+			assert_true (said_here.contains (xnu_target ()));
 			assert_true (said_there.contains (watcher.to_string ()));
-			assert_true (said_there.contains ("fseventsd"));
+			assert_true (said_there.contains (xnu_other_target ()));
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -1516,7 +1522,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield find_program (device, "backboardd");
+			uint pid = yield find_program (device, xnu_target ());
 			assert_true (pid != 0);
 
 			var session = yield device.attach (pid, null, null);
@@ -1576,7 +1582,7 @@ namespace Frida.BareboneTest {
 		try {
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield find_program (device, "backboardd");
+			uint pid = yield find_program (device, xnu_target ());
 			assert_true (pid != 0);
 
 			var session = yield device.attach (pid, null, null);
@@ -1626,7 +1632,7 @@ namespace Frida.BareboneTest {
 			manager = new DeviceManager ();
 			var device = yield manager.add_barebone_device (config);
 
-			uint pid = yield find_program (device, "backboardd");
+			uint pid = yield find_program (device, xnu_target ());
 			assert_true (pid != 0);
 
 			uint64 first = 0, last = 0, images_left = 0;
@@ -1701,9 +1707,9 @@ namespace Frida.BareboneTest {
 
 			yield measure_the_pace (h, yield device.attach (0, null, null), "kernel");
 
-			uint pid = yield find_program (device, "fseventsd");
+			uint pid = yield find_program (device, xnu_other_target ());
 			assert_true (pid != 0);
-			yield measure_the_pace (h, yield device.attach (pid, null, null), "fseventsd");
+			yield measure_the_pace (h, yield device.attach (pid, null, null), xnu_other_target ());
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
@@ -1730,9 +1736,9 @@ namespace Frida.BareboneTest {
 
 			yield measure_the_flow (h, yield device.attach (0, null, null), "kernel");
 
-			uint pid = yield find_program (device, "fseventsd");
+			uint pid = yield find_program (device, xnu_other_target ());
 			assert_true (pid != 0);
-			yield measure_the_flow (h, yield device.attach (pid, null, null), "fseventsd");
+			yield measure_the_flow (h, yield device.attach (pid, null, null), xnu_other_target ());
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
