@@ -450,7 +450,7 @@ pub(crate) fn loader_unload() -> gpointer {
 
 #[cfg(feature = "win9x")]
 pub(crate) fn module_arrived(base: u64, path: &str) {
-    if !known_mut().insert(base) {
+    if !newly_known(base) {
         return;
     }
 
@@ -460,26 +460,21 @@ pub(crate) fn module_arrived(base: u64, path: &str) {
     };
 
     unsafe {
-        let registry = crate::bindings::gum_module_registry_obtain();
-        crate::bindings::gum_module_registry_lock(registry);
-
         let native = gum::gum_native_module_new_with_pe(path, &range);
-        gum_barebone_register_module(registry, native);
+        gum_barebone_register_module(crate::bindings::gum_module_registry_obtain(), native);
         g_object_unref(native as gpointer);
-
-        crate::bindings::gum_module_registry_unlock(registry);
     }
 }
 
 // A module arrived, thus tell the registry where it is.
 #[cfg(feature = "winnt")]
 pub(crate) fn module_arrived(base: u64) {
-    if !known_mut().insert(base) {
+    if !newly_known(base) {
         return;
     }
 
     let Some(module) = kernel::describe_module(base) else {
-        known_mut().remove(&base);
+        no_longer_known(base);
         return;
     };
 
@@ -489,31 +484,43 @@ pub(crate) fn module_arrived(base: u64) {
     };
 
     unsafe {
-        let registry = crate::bindings::gum_module_registry_obtain();
-        crate::bindings::gum_module_registry_lock(registry);
-
         let native = gum::gum_native_module_new_with_pe(&module.path, &range);
-        gum_barebone_register_module(registry, native);
+        gum_barebone_register_module(crate::bindings::gum_module_registry_obtain(), native);
         g_object_unref(native as gpointer);
-
-        crate::bindings::gum_module_registry_unlock(registry);
     }
 }
 
 // A module went away, thus take it out of the registry while its name is still known.
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 pub(crate) fn module_left(base: u64) {
-    if !known_mut().remove(&base) {
+    if !no_longer_known(base) {
         return;
     }
 
     unsafe {
+        crate::bindings::gum_barebone_unregister_module(
+            crate::bindings::gum_module_registry_obtain(), base);
+    }
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+fn newly_known(base: u64) -> bool {
+    with_known(|known| known.insert(base))
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+fn no_longer_known(base: u64) -> bool {
+    with_known(|known| known.remove(&base))
+}
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+fn with_known<R>(work: impl FnOnce(&mut alloc::collections::BTreeSet<u64>) -> R) -> R {
+    unsafe {
         let registry = crate::bindings::gum_module_registry_obtain();
         crate::bindings::gum_module_registry_lock(registry);
-
-        crate::bindings::gum_barebone_unregister_module(registry, base);
-
+        let result = work(known_mut());
         crate::bindings::gum_module_registry_unlock(registry);
+        result
     }
 }
 
