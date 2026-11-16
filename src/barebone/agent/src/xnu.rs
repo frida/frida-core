@@ -954,53 +954,31 @@ pub fn install_interrupt_handler(
     handler: IOInterruptHandler,
     refcon: *mut c_void,
 ) -> i32 {
-    let pe = unsafe { __ZN9IOService11getPlatformEv() };
-
-    let name =
-        unsafe { __ZN8OSSymbol17withCStringNoCopyEPKc(c"IOInterruptController0000001A".as_ptr()) };
-
-    let lookup: extern "C" fn(*mut IOPlatformExpert, *mut OSSymbol) -> *mut IOInterruptController =
-        vf(pe as _, VT_LOOKUP_IC);
-    let ic = lookup(pe as *mut IOPlatformExpert, name as *mut OSSymbol);
-    if ic.is_null() {
-        panic!("Failed to lookup IOInterruptController");
+    match hook_interrupt(IOS_14_T8030_AIC_PHANDLE, irq, target, handler, refcon) {
+        Ok(line) => line.enable(),
+        Err(kr) => kr,
     }
+}
 
-    let nub = kalloc(0x88);
-    unsafe {
-        core::ptr::write_bytes(nub, 0, 0x88);
-        __ZN9IOServiceC2Ev(nub as *mut core::ffi::c_void);
-    }
+#[cfg(feature = "blob")]
+pub fn hook_interrupt(
+    interrupt_parent: u32,
+    irq: u32,
+    target: *mut c_void,
+    handler: IOInterruptHandler,
+    refcon: *mut c_void,
+) -> Result<InterruptLine, i32> {
+    let controller = interrupt_controller_with_phandle(interrupt_parent);
+    let nub = nub_for_line(controller, irq);
 
-    type IOServiceInitFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
-    let init_fn: IOServiceInitFn = vf(nub as *mut c_void, 21);
-    unsafe { init_fn(nub as *mut c_void, core::ptr::null_mut()) };
-
-    let interrupt_sources =
-        kalloc(core::mem::size_of::<IOInterruptSource>()) as *mut IOInterruptSource;
-
-    let source_bytes = irq.to_ne_bytes();
-    let vector_data =
-        unsafe { __ZN6OSData9withBytesEPKvj(source_bytes.as_ptr() as *const core::ffi::c_void, 4) };
-
-    unsafe {
-        (*interrupt_sources).interrupt_controller = ic;
-        (*interrupt_sources).vector_data = vector_data;
-    }
-
-    unsafe {
-        let interrupt_sources_ptr = (nub as *mut u8).offset(0x80) as *mut *mut IOInterruptSource;
-        *interrupt_sources_ptr = interrupt_sources;
-    }
-
-    let reg: extern "C" fn(
-        *mut _,
+    let register: extern "C" fn(
+        *mut IOInterruptController,
         *mut c_void,
         i32,
         *mut c_void,
         IOInterruptHandler,
         *mut c_void,
-    ) -> i32 = vf(ic as _, VT_REGISTER_INT);
+    ) -> i32 = vf(controller as _, VT_REGISTER_INT);
 
     let signed_handler = unsafe {
         let handler_ptr = crate::pac::ptrauth_sign(handler as *const u8,
@@ -1008,13 +986,72 @@ pub fn install_interrupt_handler(
         core::mem::transmute::<*const u8, IOInterruptHandler>(handler_ptr)
     };
 
-    let kr = reg(ic, nub as *mut c_void, 0, target, signed_handler, refcon);
+    let kr = register(controller, nub, 0, target, signed_handler, refcon);
     if kr != 0 {
-        return kr;
+        return Err(kr);
     }
 
-    let en: extern "C" fn(*mut _, *mut c_void, i32) -> i32 = vf(ic as _, VT_ENABLE_INT);
-    en(ic, nub as *mut c_void, 0)
+    Ok(InterruptLine { controller, nub })
+}
+
+#[cfg(feature = "blob")]
+#[derive(Clone, Copy)]
+pub struct InterruptLine {
+    controller: *mut IOInterruptController,
+    nub: *mut c_void,
+}
+
+#[cfg(feature = "blob")]
+impl InterruptLine {
+    pub fn enable(&self) -> i32 {
+        let enable: extern "C" fn(*mut IOInterruptController, *mut c_void, i32) -> i32 =
+            vf(self.controller as _, VT_ENABLE_INT);
+        enable(self.controller, self.nub, 0)
+    }
+
+    pub fn disable(&self) -> i32 {
+        let disable: extern "C" fn(*mut IOInterruptController, *mut c_void, i32) -> i32 =
+            vf(self.controller as _, VT_DISABLE_INT);
+        disable(self.controller, self.nub, 0)
+    }
+}
+
+#[cfg(feature = "blob")]
+fn interrupt_controller_with_phandle(phandle: u32) -> *mut IOInterruptController {
+    let mut name = *b"IOInterruptController00000000\0";
+    let digits = name.len() - 1;
+    for i in 0..8 {
+        name[digits - 1 - i] = b"0123456789ABCDEF"[((phandle >> (i * 4)) & 0xf) as usize];
+    }
+    let symbol = unsafe { __ZN8OSSymbol11withCStringEPKc(name.as_ptr() as *const core::ffi::c_char) };
+
+    let pe = unsafe { __ZN9IOService11getPlatformEv() };
+    let look_up: extern "C" fn(*mut IOPlatformExpert, *mut OSSymbol) -> *mut IOInterruptController =
+        vf(pe as _, VT_LOOKUP_IC);
+    look_up(pe as *mut IOPlatformExpert, symbol as *mut OSSymbol)
+}
+
+#[cfg(feature = "blob")]
+fn nub_for_line(controller: *mut IOInterruptController, irq: u32) -> *mut c_void {
+    let nub = kalloc(IO_SERVICE_SIZE) as *mut c_void;
+    unsafe {
+        core::ptr::write_bytes(nub as *mut u8, 0, IO_SERVICE_SIZE);
+        __ZN9IOServiceC2Ev(nub);
+    }
+
+    type IOServiceInitFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool;
+    let init: IOServiceInitFn = vf(nub, VT_INIT);
+    unsafe { init(nub, core::ptr::null_mut()) };
+
+    let line = irq.to_ne_bytes();
+    let sources = kalloc(core::mem::size_of::<IOInterruptSource>()) as *mut IOInterruptSource;
+    unsafe {
+        (*sources).interrupt_controller = controller;
+        (*sources).vector_data = __ZN6OSData9withBytesEPKvj(line.as_ptr() as *const c_void, 4);
+        *((nub as *mut u8).add(IO_SERVICE_INTERRUPT_SOURCES) as *mut *mut IOInterruptSource) = sources;
+    }
+
+    nub
 }
 
 #[cfg(feature = "blob")]
@@ -1065,11 +1102,22 @@ where
 const IO_SERVICE_VTABLE_LENGTH: isize = 168;
 
 #[cfg(feature = "blob")]
-const VT_LOOKUP_IC: isize = IO_SERVICE_VTABLE_LENGTH + 25; // IOPlatformExpert
+const IO_SERVICE_SIZE: usize = 0x88;
+#[cfg(feature = "blob")]
+const IO_SERVICE_INTERRUPT_SOURCES: usize = 0x80;
+#[cfg(feature = "blob")]
+const IOS_14_T8030_AIC_PHANDLE: u32 = 0x1a;
+
+#[cfg(feature = "blob")]
+const VT_INIT: isize = 21; // IOService
+#[cfg(feature = "blob")]
+const VT_LOOKUP_IC: isize = IO_SERVICE_VTABLE_LENGTH + 23; // IOPlatformExpert
 #[cfg(feature = "blob")]
 const VT_REGISTER_INT: isize = IO_SERVICE_VTABLE_LENGTH + 0; // IOInterruptController
 #[cfg(feature = "blob")]
 const VT_ENABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 3; // IOInterruptController
+#[cfg(feature = "blob")]
+const VT_DISABLE_INT: isize = IO_SERVICE_VTABLE_LENGTH + 4; // IOInterruptController
 
 type ContinuationFn = ThreadEntry;
 
@@ -1104,7 +1152,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     static __ZN9IOService11getPlatformEv: unsafe extern "C" fn() -> *mut c_void;
     static __ZN9IOServiceC2Ev: unsafe extern "C" fn(*mut core::ffi::c_void);
-    static __ZN8OSSymbol17withCStringNoCopyEPKc:
+    static __ZN8OSSymbol11withCStringEPKc:
         unsafe extern "C" fn(*const core::ffi::c_char) -> *const OSSymbol;
     static __ZN6OSData9withBytesEPKvj:
         unsafe extern "C" fn(*const core::ffi::c_void, u32) -> *mut OSData;

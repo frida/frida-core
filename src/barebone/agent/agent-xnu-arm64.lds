@@ -55,7 +55,7 @@ SECTIONS {
     _ml_static_vtop = .; . += 8;
     __ZN9IOService11getPlatformEv = .; . += 8;
     __ZN9IOServiceC2Ev = .; . += 8;
-    __ZN8OSSymbol17withCStringNoCopyEPKc = .; . += 8;
+    __ZN8OSSymbol11withCStringEPKc = .; . += 8;
     __ZN6OSData9withBytesEPKvj = .; . += 8;
     _kalloc_data = .; . += 8;
     _kfree_data = .; . += 8;
