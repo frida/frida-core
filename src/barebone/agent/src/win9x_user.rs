@@ -6,7 +6,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering};
 
 use crate::gum_windows::{FileApi, TextApi};
 use crate::kernel::{MemoryRegion, ThreadEntry};
@@ -210,13 +210,9 @@ pub(crate) unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD
         fd.revents = 0;
 
         if fd.fd == G_WAIT_WAKEUP_HANDLE {
-            if !fd.user_data.is_null() {
-                if unsafe { (fd.user_data as *const i32).read_volatile() } != 0 {
-                    fd.revents = POLL_IN;
-                    ready += 1;
-                }
-                let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
-                unsafe { token.write(fd.user_data) };
+            if !fd.user_data.is_null() && signalled_once_armed(fd.user_data) {
+                fd.revents = POLL_IN;
+                ready += 1;
             }
         } else if fd.fd != -1 && fd.fd as u32 != wake && count < MAX_HANDLES {
             handles[count] = fd.fd as u32;
@@ -243,12 +239,22 @@ pub(crate) unsafe extern "C" fn poll_handles(ufds: *mut crate::bindings::GPollFD
 
     for fd in fds.iter() {
         if fd.fd == G_WAIT_WAKEUP_HANDLE && !fd.user_data.is_null() {
-            let token = (fd.user_data as usize + GWAKEUP_TOKEN) as *mut *mut c_void;
-            unsafe { token.write(core::ptr::null_mut()) };
+            unsafe { token_of(fd.user_data).store(core::ptr::null_mut(), Ordering::SeqCst) };
         }
     }
 
     ready
+}
+
+fn signalled_once_armed(wakeup: *mut c_void) -> bool {
+    unsafe {
+        token_of(wakeup).store(wakeup, Ordering::SeqCst);
+        AtomicI32::from_ptr(wakeup as *mut i32).load(Ordering::SeqCst) != 0
+    }
+}
+
+unsafe fn token_of<'a>(wakeup: *mut c_void) -> &'a AtomicPtr<c_void> {
+    unsafe { AtomicPtr::from_ptr((wakeup as usize + GWAKEUP_TOKEN) as *mut *mut c_void) }
 }
 
 const G_WAIT_WAKEUP_HANDLE: i32 = -43;
