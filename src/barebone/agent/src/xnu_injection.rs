@@ -765,9 +765,8 @@ fn answer(arena: u64, asked_at: u64, answer_at: u64, went_well: bool) {
 
 fn start_a_thread(task: *mut c_void, code: u64, stack: u64, argument: u64) -> Option<*mut c_void> {
     let create = unsafe { _thread_create };
-    let set_state = unsafe { _thread_set_state };
     let resume = unsafe { _thread_resume };
-    let (Some(create), Some(set_state), Some(resume)) = (create, set_state, resume) else {
+    let (Some(create), Some(resume)) = (create, resume) else {
         return None;
     };
 
@@ -785,13 +784,19 @@ fn start_a_thread(task: *mut c_void, code: u64, stack: u64, argument: u64) -> Op
         (places.add(FLAGS) as *mut u32).write(PLAIN_ADDRESSES);
     }
 
-    if unsafe { set_state(thread, ARM_THREAD_STATE64, state.as_ptr(), STATE_WORDS as c_int) }
-        != KERN_SUCCESS
-    {
+    if set_thread_state(thread, ARM_THREAD_STATE64, state.as_ptr(), STATE_WORDS as c_int)? != KERN_SUCCESS {
         return None;
     }
 
     (unsafe { resume(thread) } == KERN_SUCCESS).then_some(thread)
+}
+
+fn set_thread_state(thread: *mut c_void, flavor: c_int, state: *const u32, count: c_int) -> Option<c_int> {
+    if let Some(set_state) = unsafe { _thread_set_state } {
+        return Some(unsafe { set_state(thread, flavor, state, count) });
+    }
+    let set_state = unsafe { _thread_set_state_internal }?;
+    Some(unsafe { set_state(thread, flavor, state, count, core::ptr::null(), 0, 0) })
 }
 
 const PAGE: u64 = 0x4000;
@@ -838,6 +843,9 @@ unsafe extern "C" {
     static _vm_map_copyout: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut c_void) -> c_int>;
     static _thread_create: Option<unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> c_int>;
     static _thread_set_state: Option<unsafe extern "C" fn(*mut c_void, c_int, *const u32, c_int) -> c_int>;
+    static _thread_set_state_internal: Option<
+        unsafe extern "C" fn(*mut c_void, c_int, *const u32, c_int, *const u32, c_int, u32) -> c_int,
+    >;
     static _thread_resume: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
     static _thread_terminate: Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
 }

@@ -33,6 +33,7 @@ SECTIONS {
     _vm_map_copyout = .; . += 8;
     _thread_create = .; . += 8;
     _thread_set_state = .; . += 8;
+    _thread_set_state_internal = .; . += 8;
     _thread_resume = .; . += 8;
     _thread_terminate = .; . += 8;
     _task_suspend = .; . += 8;
