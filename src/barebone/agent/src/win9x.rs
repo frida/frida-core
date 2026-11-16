@@ -2790,11 +2790,6 @@ static SEMAPHORES: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; N
 static OWNERS: [AtomicUsize; NUM_SEMAPHORES] = [const { AtomicUsize::new(0) }; NUM_SEMAPHORES];
 static SLEEPERS: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
 static WOKEN_EARLY: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
-pub(crate) static EVENTS: [AtomicU32; NUM_SEMAPHORES] = [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
-pub(crate) static EVENT_OWNERS: [AtomicUsize; NUM_SEMAPHORES] =
-    [const { AtomicUsize::new(0) }; NUM_SEMAPHORES];
-pub(crate) static EVENT_SLEEPERS: [AtomicU32; NUM_SEMAPHORES] =
-    [const { AtomicU32::new(0) }; NUM_SEMAPHORES];
 
 unsafe extern "C" {
     fn wait_semaphore(semaphore: u32, flags: u32);

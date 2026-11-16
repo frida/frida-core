@@ -6,7 +6,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
 use crate::gum_windows::{FileApi, TextApi};
 use crate::kernel::{MemoryRegion, ThreadEntry};
@@ -603,6 +603,8 @@ fn resolve_user_api() {
             resume_thread: kernel32_export(b"ResumeThread"),
             create_event: kernel32_export(b"CreateEventA"),
             set_event: kernel32_export(b"SetEvent"),
+            create_semaphore: kernel32_export(b"CreateSemaphoreA"),
+            release_semaphore: kernel32_export(b"ReleaseSemaphore"),
             wait_for_single_object_ex: kernel32_export(b"WaitForSingleObjectEx"),
             wait_for_multiple_objects_ex: kernel32_export(b"WaitForMultipleObjectsEx"),
             close_handle: kernel32_export(b"CloseHandle"),
@@ -693,6 +695,8 @@ struct UserApi {
     resume_thread: u32,
     create_event: u32,
     set_event: u32,
+    create_semaphore: u32,
+    release_semaphore: u32,
     wait_for_single_object_ex: u32,
     wait_for_multiple_objects_ex: u32,
     close_handle: u32,
@@ -733,6 +737,8 @@ static mut USER_API: UserApi = UserApi {
     resume_thread: 0,
     create_event: 0,
     set_event: 0,
+    create_semaphore: 0,
+    release_semaphore: 0,
     wait_for_single_object_ex: 0,
     wait_for_multiple_objects_ex: 0,
     close_handle: 0,
@@ -753,52 +759,6 @@ static mut USER_API: UserApi = UserApi {
     tls_get_value: 0,
     tls_set_value: 0,
 };
-
-fn slot_for_token(token: *const u8) -> usize {
-    let start = (token as usize / core::mem::align_of::<usize>()) % EVENTS.len();
-    for step in 0..EVENTS.len() {
-        let slot = (start + step) % EVENTS.len();
-
-        let owner = EVENT_OWNERS[slot].load(Ordering::Acquire);
-        if owner == token as usize {
-            return slot;
-        }
-        if owner == 0
-                && EVENT_OWNERS[slot].compare_exchange(0, token as usize, Ordering::AcqRel,
-                    Ordering::Acquire).is_ok() {
-            return slot;
-        }
-    }
-
-    0
-}
-
-fn slot_owned_by(token: *const u8) -> Option<usize> {
-    let start = (token as usize / core::mem::align_of::<usize>()) % EVENTS.len();
-    for step in 0..EVENTS.len() {
-        let slot = (start + step) % EVENTS.len();
-        if EVENT_OWNERS[slot].load(Ordering::Acquire) == token as usize {
-            return Some(slot);
-        }
-    }
-
-    None
-}
-
-fn event_in(slot: usize) -> u32 {
-    let existing = EVENTS[slot].load(Ordering::Acquire);
-    if existing != 0 {
-        return existing;
-    }
-
-    let create_event: unsafe extern "stdcall" fn(u32, u32, u32, u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().create_event as usize) };
-    let created = unsafe { create_event(0, 0, 0, 0) };
-    match EVENTS[slot].compare_exchange(0, created, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => created,
-        Err(raced) => raced,
-    }
-}
 
 // What a process has mapped is written down where only ring 0 can read it. Thus the kernel half
 // hands the list over, and this side only reads it.
@@ -1250,11 +1210,10 @@ pub fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
 }
 
 pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-    let slot = slot_for_token(token);
-    EVENT_SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
-    let event = event_in(slot);
+    let slot = join_slot(token);
+    let semaphore = semaphore_in(slot);
     if check() {
-        release_slot(slot, token);
+        leave_slot(slot);
         return;
     }
 
@@ -1264,42 +1223,100 @@ pub fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -
         None => INFINITE,
         Some(us) => (us / 1000).max(1) as u32,
     };
-    unsafe { wait_for_single_object_ex(event, timeout, 1) };
-    release_slot(slot, token);
+    unsafe { wait_for_single_object_ex(semaphore, timeout, 1) };
+    leave_slot(slot);
+}
+
+pub fn wake(token: *const u8) {
+    let release_semaphore: unsafe extern "stdcall" fn(u32, i32, *mut i32) -> u32 =
+        unsafe { core::mem::transmute(user_api().release_semaphore as usize) };
+
+    for slot in 0..NUM_SLOTS {
+        let sleepers = sleepers_in(slot, token);
+        if sleepers != 0 {
+            unsafe { release_semaphore(semaphore_in(slot), sleepers as i32, core::ptr::null_mut()) };
+        }
+    }
 }
 
 // A token names one wait of one thread, and the next wait has a token of its own. Thus a slot
 // belongs to a token only while somebody waits on it: a table that never let go filled after a
 // few dozen waits, and every token after that shared the first slot, where a wake meant for one
 // thread released another.
-fn release_slot(slot: usize, token: *const u8) {
-    if EVENT_SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel) != 1 {
-        return;
-    }
-    if core::ptr::eq(token, crate::glib::wakeup_token()) {
-        return;
+fn join_slot(token: *const u8) -> usize {
+    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_SLOTS;
+    for step in 0..NUM_SLOTS {
+        let slot = (start + step) % NUM_SLOTS;
+
+        let joined = guarding(slot, || {
+            let owner = OWNERS[slot].load(Ordering::Relaxed);
+            if owner != token as usize && owner != 0 {
+                return false;
+            }
+            OWNERS[slot].store(token as usize, Ordering::Relaxed);
+            SLEEPERS[slot].fetch_add(1, Ordering::Relaxed);
+            true
+        });
+        if joined {
+            return slot;
+        }
     }
 
-    let _ = EVENT_OWNERS[slot].compare_exchange(token as usize, 0, Ordering::AcqRel,
-        Ordering::Acquire);
+    0
 }
 
-pub fn wake(token: *const u8) {
-    let Some(slot) = slot_owned_by(token) else {
-        return;
-    };
+fn semaphore_in(slot: usize) -> u32 {
+    let existing = SEMAPHORES[slot].load(Ordering::Acquire);
+    if existing != 0 {
+        return existing;
+    }
 
-    let set_event: unsafe extern "stdcall" fn(u32) -> u32 =
-        unsafe { core::mem::transmute(user_api().set_event as usize) };
-
-    let event = event_in(slot);
-
-    let mut sleepers = EVENT_SLEEPERS[slot].load(Ordering::Acquire).max(1);
-    while sleepers != 0 {
-        unsafe { set_event(event) };
-        sleepers -= 1;
+    let create_semaphore: unsafe extern "stdcall" fn(u32, i32, i32, u32) -> u32 =
+        unsafe { core::mem::transmute(user_api().create_semaphore as usize) };
+    let created = unsafe { create_semaphore(0, 0, i32::MAX, 0) };
+    match SEMAPHORES[slot].compare_exchange(0, created, Ordering::AcqRel, Ordering::Acquire) {
+        Ok(_) => created,
+        Err(raced) => {
+            let close_handle: unsafe extern "stdcall" fn(u32) -> u32 =
+                unsafe { core::mem::transmute(user_api().close_handle as usize) };
+            unsafe { close_handle(created) };
+            raced
+        }
     }
 }
+
+fn leave_slot(slot: usize) {
+    guarding(slot, || {
+        if SLEEPERS[slot].fetch_sub(1, Ordering::Relaxed) == 1 {
+            OWNERS[slot].store(0, Ordering::Relaxed);
+        }
+    });
+}
+
+fn sleepers_in(slot: usize, token: *const u8) -> u32 {
+    guarding(slot, || {
+        if OWNERS[slot].load(Ordering::Relaxed) == token as usize {
+            SLEEPERS[slot].load(Ordering::Relaxed)
+        } else {
+            0
+        }
+    })
+}
+
+fn guarding<R>(slot: usize, work: impl FnOnce() -> R) -> R {
+    while GUARDS[slot].swap(true, Ordering::Acquire) {
+        yield_now();
+    }
+    let result = work();
+    GUARDS[slot].store(false, Ordering::Release);
+    result
+}
+
+const NUM_SLOTS: usize = 64;
+static OWNERS: [AtomicUsize; NUM_SLOTS] = [const { AtomicUsize::new(0) }; NUM_SLOTS];
+static SLEEPERS: [AtomicU32; NUM_SLOTS] = [const { AtomicU32::new(0) }; NUM_SLOTS];
+static GUARDS: [AtomicBool; NUM_SLOTS] = [const { AtomicBool::new(false) }; NUM_SLOTS];
+static SEMAPHORES: [AtomicU32; NUM_SLOTS] = [const { AtomicU32::new(0) }; NUM_SLOTS];
 
 pub fn yield_now() {
     let sleep: unsafe extern "stdcall" fn(u32) =
