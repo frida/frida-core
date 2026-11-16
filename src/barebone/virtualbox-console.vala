@@ -405,11 +405,11 @@ namespace Frida.Barebone {
 		}
 
 		private string format_location (uint64 address) {
-			return (physical_addressing ? "%%%%%016llx" : "0x%016llx").printf (address);
+			return ((physical_addressing ? "%%%%%016" : "0x%016") + uint64.FORMAT_MODIFIER + "x").printf (address);
 		}
 
 		private static string format_address (uint64 address) {
-			return "0x%016llx".printf (address);
+			return ("0x%016" + uint64.FORMAT_MODIFIER + "x").printf (address);
 		}
 
 		private const string PROMPT = "VBoxDbg>";

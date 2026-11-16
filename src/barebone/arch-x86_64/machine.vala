@@ -62,7 +62,6 @@ namespace Frida.Barebone {
 		private const string[] ARG_REG_NAMES_SYSV = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
 		private const string[] ARG_REG_NAMES_MS = { "rcx", "rdx", "r8", "r9" };
 		private const size_t RED_ZONE_SIZE = 128;
-		private const uint8[] SPIN_IN_PLACE = { 0xeb, 0xfe };
 		private const uint LANDING_POLL_INTERVAL_MS = 1;
 		private const int64 LANDING_TIMEOUT_USEC = 60000000;
 		private const size_t SHADOW_SPACE_SIZE = 32;
