@@ -1,0 +1,60 @@
+diff --git a/hw/arm/t8030.c b/hw/arm/t8030.c
+index 70f57fc..8c05493 100644
+--- a/hw/arm/t8030.c
++++ b/hw/arm/t8030.c
+@@ -1708,6 +1708,7 @@ static void t8030_set_kernel_patches(Object* obj, const char* value, Error** err
+ { ck_kernel_patches_parse(value, &APPLE_T8030(obj)->boot_info.kernel_patches, errp); }
+ 
+ PROP_GETTER_SETTER(bool, force_dfu);
++PROP_BOOT_STR_GETTER_SETTER(trustcache_filename);
+ PROP_BOOT_STR_GETTER_SETTER(seprom_filename);
+ PROP_BOOT_STR_GETTER_SETTER(securerom_filename);
+ PROP_STR_GETTER_SETTER(usb_uplink_addr);
+@@ -1738,6 +1739,9 @@ static void t8030_class_init(ObjectClass* klass, const void* data)
+     mc->fixup_ram_size    = t8030_fixup_ram_size;
+     mc->default_ram_id    = "t8030.ram";
+ 
++    object_class_property_add_str(klass, "trustcache", t8030_get_trustcache_filename,
++                                  t8030_set_trustcache_filename);
++    object_class_property_set_description(klass, "trustcache", "TrustCache");
+     object_class_property_add_str(klass, "sep-rom", t8030_get_seprom_filename, t8030_set_seprom_filename);
+     object_class_property_set_description(klass, "sep-rom", "SEP ROM");
+     object_class_property_add_str(klass, "securerom", t8030_get_securerom_filename, t8030_set_securerom_filename);
+diff --git a/hw/char/apple_uart.c b/hw/char/apple_uart.c
+index 55a7d1b..ffe45de 100644
+--- a/hw/char/apple_uart.c
++++ b/hw/char/apple_uart.c
+@@ -397,7 +397,7 @@ static void apple_uart_write(void* opaque, hwaddr offset, uint64_t val, unsigned
+             break;
+ 
+         case UTRSTAT:
+-            val                 &= (UTRSTAT_Tx_EMPTY);
++            val                 &= (UTRSTAT_Tx_EMPTY | UTRSTAT_Tx_THRESH);
+             s->reg[I_(UTRSTAT)] &= ~val;
+             trace_apple_uart_intclr(s->channel, s->reg[I_(UTRSTAT)]);
+             apple_uart_update_irq(s);
+@@ -409,7 +409,10 @@ static void apple_uart_write(void* opaque, hwaddr offset, uint64_t val, unsigned
+         case UFSTAT:
+         case UMSTAT:
+         case URXH  : trace_apple_uart_ro_write(s->channel, apple_uart_regname(offset), offset); break;
+-        case UCON  : apple_uart_update_irq(s); break;
++        case UCON  :
++            s->reg[I_(UCON)] = val;
++            apple_uart_update_irq(s);
++            break;
+         case UMCON :
+         default    : s->reg[I_(offset)] = val; break;
+     }
+diff --git a/include/hw/arm/iboot/iboot.h b/include/hw/arm/iboot/iboot.h
+index cf1445a..8488e0a 100644
+--- a/include/hw/arm/iboot/iboot.h
++++ b/include/hw/arm/iboot/iboot.h
+@@ -21,7 +21,7 @@
+ #pragma once
+ 
+ // #define ENABLE_BASEBAND
+-#define ENABLE_DATA_ENCRYPTION
++// #define ENABLE_DATA_ENCRYPTION
+ 
+ #include "qemu/osdep.h"
+ #include "exec/hwaddr.h"

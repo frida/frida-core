@@ -9,6 +9,7 @@ from pathlib import Path
 import shlex
 import shutil
 import socket
+import struct
 import subprocess
 import threading
 import sys
@@ -16,6 +17,7 @@ import tempfile
 import time
 from typing import NamedTuple
 import urllib.request
+import zlib
 
 
 def main():
@@ -83,6 +85,15 @@ def main():
             test.add_argument("--tests", type=Path, required=True)
             test.add_argument("names", nargs="*")
 
+        subparsers.add_parser("prepare-xnu",
+                              help="fetch an iOS restore ramdisk and build the emulator that boots it")
+
+        xnu = subparsers.add_parser("test-xnu",
+                                    help="run the Xnu live tests against an iOS restore ramdisk")
+        xnu.add_argument("--agent", type=Path, required=True)
+        xnu.add_argument("--tests", type=Path, required=True)
+        xnu.add_argument("names", nargs="*")
+
         subparsers.add_parser("check-kmod",
                               help="verify that a kmod guest can be booted, fetching what it needs")
 
@@ -97,7 +108,12 @@ def main():
 
         args = parser.parse_args()
         action, target = args.command.split("-", maxsplit=1)
-        if action == "prepare":
+        if target == "xnu":
+            if action == "prepare":
+                prepare_xnu()
+            else:
+                test_xnu(args)
+        elif action == "prepare":
             image, _ = prepare_guest(target)
             print(image)
         elif action == "test":
@@ -944,6 +960,230 @@ def require_windows_emulator(guest: "WindowsGuest") -> str:
     return qemu
 
 
+def prepare_xnu() -> "XnuGuest":
+    directory = cache_root() / "xnu"
+    emulator = build_inferno(directory / "inferno")
+    kernelcache, device_tree, ramdisk, trust_cache = [fetch_from_restore_image(directory, member)
+                                                      for member in IOS_RESTORE_MEMBERS]
+    return XnuGuest(emulator, kernelcache, device_tree, ramdisk, trust_cache)
+
+
+def test_xnu(args):
+    guest = prepare_xnu()
+    image_tool = guest.emulator.with_name("inferno-img")
+
+    names = [test for test in live_tests(args.tests, "Xnu")
+             if not args.names or any(wanted in test for wanted in args.names)]
+
+    failed = []
+    with tempfile.TemporaryDirectory() as workdir:
+        workdir = Path(workdir)
+        nvram = workdir / "nvram.qcow2"
+        uart = workdir / "uart.sock"
+        qmp_path = workdir / "qmp.sock"
+        config_path = workdir / "config.json"
+        console_path = workdir / "console.log"
+        emulator_path = workdir / "emulator.log"
+
+        for index, test in enumerate(names):
+            reason = XNU_TESTS_THE_RAMDISK_CANNOT_RUN.get(test.rsplit("/", maxsplit=1)[1])
+            if reason is not None:
+                print(f"ok {index + 1} {test} # SKIP {reason}", flush=True)
+                continue
+
+            nvram.unlink(missing_ok=True)
+            uart.unlink(missing_ok=True)
+            subprocess.run([image_tool, "create", "-q", "-f", "qcow2", nvram, XNU_NVRAM_SIZE], check=True)
+
+            with Listeners(qmp_path) as listeners, console_path.open("wb") as console, \
+                    emulator_path.open("wb") as emulator_output:
+                process = subprocess.Popen(xnu_guest_arguments(guest, nvram, uart, listeners),
+                                           pass_fds=listeners.fds, stdin=subprocess.DEVNULL,
+                                           stdout=subprocess.PIPE, stderr=emulator_output)
+                copying = None
+                try:
+                    copying = follow_console(process, console, XNU_READY_MARKER)
+                    config_path.write_text(json.dumps(xnu_config(guest, args.agent, uart, listeners.gdb_port)))
+                    environment = os.environ | {"FRIDA_BAREBONE_CONFIG": str(config_path)} | XNU_TEST_TARGETS
+                    outcome = subprocess.run([args.tests, "-p", test], env=environment,
+                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    emulator_gave_up = process.poll() is not None
+                finally:
+                    process.terminate()
+                    process.wait()
+                    if copying is not None:
+                        copying.join()
+
+            if outcome.returncode == 0:
+                print(f"ok {index + 1} {test}", flush=True)
+            else:
+                failed.append(test)
+                print(f"not ok {index + 1} {test}", flush=True)
+                print(outcome.stdout.decode(errors="replace"), file=sys.stderr)
+                said = [("guest console", console_path)]
+                if emulator_gave_up:
+                    said.append(("emulator", emulator_path))
+                report_what_the_guest_said(said)
+
+    print(f"1..{len(names)}")
+    if failed:
+        sys.exit(1)
+
+
+def xnu_guest_arguments(guest: "XnuGuest", nvram: Path, uart: Path, listeners: "Listeners") -> [str]:
+    return [
+        str(guest.emulator),
+        "-M", f"t8030,trustcache={guest.trust_cache},kaslr-off=true,kernel-patchset=debug,boot-mode=exit_recovery",
+        "-m", XNU_MEMORY_SIZE,
+        "-accel", "tcg",
+        "-kernel", str(guest.kernelcache),
+        "-dtb", str(guest.device_tree),
+        "-initrd", str(guest.ramdisk),
+        "-append", XNU_BOOT_ARGUMENTS,
+        "-drive", f"file={nvram},if=none,format=qcow2,id=nvram",
+        "-device", "apple-nvram,drive=nvram,bus=nvme-bus.0,nsid=5,nstype=5,id=nvram,"
+                   "logical_block_size=4096,physical_block_size=4096",
+        "-display", "none",
+        "-monitor", "none",
+        "-serial", "stdio",
+        "-serial", f"unix:{uart},server=on,wait=off",
+    ] + listener_arguments(listeners)
+
+
+def xnu_config(guest: "XnuGuest", agent: Path, uart: Path, gdb_port: int) -> dict:
+    config = json.loads(XNU_CONFIG.read_text())
+    config["connection"]["port"] = gdb_port
+    config["agent"]["image"] = str(agent)
+    config["agent"]["transport"]["path"] = str(uart)
+    config["image"]["file"] = str(guest.kernelcache)
+    return config
+
+
+def follow_console(process, console, marker: str) -> threading.Thread:
+    for line in process.stdout:
+        console.write(line)
+        if marker in line.decode(errors="replace"):
+            copying = threading.Thread(target=shutil.copyfileobj, args=(process.stdout, console))
+            copying.start()
+            return copying
+    raise Unavailable(f"guest exited before it said {marker}")
+
+
+def build_inferno(directory: Path) -> Path:
+    emulator = directory / "inferno-aarch64"
+    if emulator.exists():
+        return emulator
+
+    git = require_program("git")
+    xmake = require_program("xmake")
+    with tempfile.TemporaryDirectory() as workdir:
+        source = Path(workdir) / "inferno"
+        subprocess.run([git, "clone", "-q", INFERNO_REPO, source], check=True)
+        subprocess.run([git, "-C", source, "checkout", "-q", INFERNO_COMMIT], check=True)
+        subprocess.run([git, "-C", source, "apply", INFERNO_PATCH], check=True)
+        subprocess.run([xmake, "f", "-m", "release", "-y", "--wxwidgets=n"], cwd=source, stdin=subprocess.DEVNULL,
+                       check=True)
+        subprocess.run([xmake, "-y", f"-j{os.cpu_count()}"], cwd=source, stdin=subprocess.DEVNULL, check=True)
+
+        built = next(source.glob("build/*/*/release/inferno-aarch64")).parent
+        staging = directory.with_suffix(".partial")
+        shutil.rmtree(staging, ignore_errors=True)
+        shutil.copytree(built, staging, ignore=shutil.ignore_patterns("*.a"))
+        staging.replace(directory)
+
+    return emulator
+
+
+def fetch_from_restore_image(directory: Path, member: "RestoreMember") -> Path:
+    cached = directory / Path(member.path).name
+    if not cached.exists():
+        directory.mkdir(parents=True, exist_ok=True)
+        staging = cached.with_suffix(".partial")
+        try:
+            fetch_zip_member(IOS_RESTORE_IMAGE, member.path, staging)
+        except Exception as e:
+            staging.unlink(missing_ok=True)
+            raise Unavailable(f"unable to fetch {member.path} from {IOS_RESTORE_IMAGE}: {e}")
+        staging.replace(cached)
+
+    with cached.open("rb") as f:
+        digest = hashlib.file_digest(f, "sha256").hexdigest()
+    if digest != member.sha256:
+        cached.unlink()
+        raise Unavailable(f"{member.path} is not what it was: its SHA-256 is {digest}")
+    return cached
+
+
+def fetch_zip_member(url: str, name: str, destination: Path):
+    entry = next((entry for entry in zip_entries(url) if entry.name == name), None)
+    if entry is None:
+        raise Unavailable(f"{url} has no {name}")
+
+    header = fetch_range(url, entry.offset, ZIP_LOCAL_HEADER_SIZE)
+    name_length, extra_length = struct.unpack_from("<HH", header, 26)
+    start = entry.offset + ZIP_LOCAL_HEADER_SIZE + name_length + extra_length
+    end = start + entry.compressed_size
+
+    inflater = zlib.decompressobj(-zlib.MAX_WBITS) if entry.method == ZIP_DEFLATED else None
+    with destination.open("wb") as f:
+        for at in range(start, end, ZIP_FETCH_SIZE):
+            data = fetch_range(url, at, min(end - at, ZIP_FETCH_SIZE))
+            f.write(inflater.decompress(data) if inflater is not None else data)
+        if inflater is not None:
+            f.write(inflater.flush())
+
+
+def zip_entries(url: str) -> ["ZipEntry"]:
+    request = urllib.request.Request(url, method="HEAD")
+    with urllib.request.urlopen(request, timeout=60) as response:
+        size = int(response.headers["Content-Length"])
+
+    tail_start = max(0, size - ZIP_TAIL_SIZE)
+    tail = fetch_range(url, tail_start, size - tail_start)
+    end_of_directory = tail.rfind(ZIP_END_OF_DIRECTORY)
+    directory_size, directory_offset = struct.unpack_from("<II", tail, end_of_directory + 12)
+    locator = tail.rfind(ZIP64_LOCATOR)
+    if directory_offset == ZIP_FIELD_IN_ZIP64 and locator != -1:
+        record_offset = struct.unpack_from("<Q", tail, locator + 8)[0]
+        record = fetch_range(url, record_offset, ZIP64_END_OF_DIRECTORY_SIZE)
+        directory_size, directory_offset = struct.unpack_from("<QQ", record, 40)
+
+    directory = fetch_range(url, directory_offset, directory_size)
+    entries = []
+    at = 0
+    while directory[at:at + 4] == ZIP_DIRECTORY_ENTRY:
+        method, = struct.unpack_from("<H", directory, at + 10)
+        compressed_size, = struct.unpack_from("<I", directory, at + 20)
+        name_length, extra_length, comment_length = struct.unpack_from("<HHH", directory, at + 28)
+        offset, = struct.unpack_from("<I", directory, at + 42)
+        name = directory[at + 46:at + 46 + name_length].decode()
+
+        extra = directory[at + 46 + name_length:at + 46 + name_length + extra_length]
+        uncompressed_size, = struct.unpack_from("<I", directory, at + 24)
+        e = 0
+        while e + 4 <= len(extra):
+            tag, length = struct.unpack_from("<HH", extra, e)
+            if tag == ZIP64_EXTRA_FIELD:
+                values = list(struct.unpack_from(f"<{length // 8}Q", extra, e + 4))
+                if uncompressed_size == ZIP_FIELD_IN_ZIP64:
+                    values.pop(0)
+                if compressed_size == ZIP_FIELD_IN_ZIP64:
+                    compressed_size = values.pop(0)
+                if offset == ZIP_FIELD_IN_ZIP64:
+                    offset = values.pop(0)
+            e += 4 + length
+
+        entries.append(ZipEntry(name, method, compressed_size, offset))
+        at += 46 + name_length + extra_length + comment_length
+    return entries
+
+
+def fetch_range(url: str, start: int, length: int) -> bytes:
+    request = urllib.request.Request(url, headers={"Range": f"bytes={start}-{start + length - 1}"})
+    with urllib.request.urlopen(request, timeout=120) as response:
+        return response.read()
+
+
 def check_kmod_guest():
     guest = GUESTS[KMOD_GUEST_ARCH]
     require_qemu(guest)
@@ -1260,6 +1500,71 @@ PREPARATIONS = {
 }
 
 PREPARED_SNAPSHOT = "ready"
+
+
+class XnuGuest(NamedTuple):
+    emulator: Path
+    kernelcache: Path
+    device_tree: Path
+    ramdisk: Path
+    trust_cache: Path
+
+
+class RestoreMember(NamedTuple):
+    path: str
+    sha256: str
+
+
+class ZipEntry(NamedTuple):
+    name: str
+    method: int
+    compressed_size: int
+    offset: int
+
+
+IOS_RESTORE_IMAGE = ("https://updates.cdn-apple.com/2025FallFCS/fullrestores/089-13850/"
+                     "153DB905-D800-4CFF-80F0-E043747BCDF0/iPhone12,1_26.1_23B85_Restore.ipsw")
+IOS_RESTORE_MEMBERS = [
+    RestoreMember("kernelcache.research.iphone12b",
+                  "fb49f5eb3508a871b73550ef7678b6ffd1095e8d0b2c8dfcb308147faafedd13"),
+    RestoreMember("Firmware/all_flash/DeviceTree.n104ap.im4p",
+                  "743478b8535c4fb85a98727bd693187a9203d6bb6c6120b6ff75778b8d1ecd9f"),
+    RestoreMember("043-53775-129.dmg",
+                  "3fb1558e5e4692f9eb5056148c8c80aa17ad1e1d37603bf5b81d008d1a30b8aa"),
+    RestoreMember("Firmware/043-53775-129.dmg.trustcache",
+                  "ebe105ba218eb8e2c7be4299fb67c7926038051a2c72df497e6a248f503687f1"),
+]
+
+INFERNO_REPO = "https://git.chefkiss.dev/AppleHax/Inferno.git"
+INFERNO_COMMIT = "3b475102371838b512abea3705bfad24ebd1eb2c"
+INFERNO_PATCH = Path(__file__).parent / "inferno-ramdisk.patch"
+
+XNU_CONFIG = Path(__file__).parent.parent / "src" / "barebone" / "agent" / "etc" / "xnu.json"
+XNU_MEMORY_SIZE = "4G"
+XNU_NVRAM_SIZE = "1M"
+XNU_BOOT_ARGUMENTS = "rd=md0 -restore serial=3 -v debug=0x8 wdt=-1"
+XNU_READY_MARKER = "standardRestore"
+XNU_TEST_TARGETS = {
+    "FRIDA_TEST_XNU_TARGET": "restored_external",
+    "FRIDA_TEST_XNU_OTHER_TARGET": "driverkitd",
+}
+XNU_TESTS_THE_RAMDISK_CANNOT_RUN = {
+    "enumerates-applications-in-live-guest": "a restore ramdisk has no applications",
+    "hooks-before-resume-in-live-guest": "a restore ramdisk has no applications to spawn",
+    "hides-itself-from-the-process-in-live-guest": "the code-signing monitor refuses code that hooks generate",
+    "hooks-its-own-process-in-live-guest": "the code-signing monitor refuses code that hooks generate",
+}
+
+ZIP_TAIL_SIZE = 65536 + 22
+ZIP_END_OF_DIRECTORY = b"PK\x05\x06"
+ZIP64_LOCATOR = b"PK\x06\x07"
+ZIP64_END_OF_DIRECTORY_SIZE = 56
+ZIP_DIRECTORY_ENTRY = b"PK\x01\x02"
+ZIP_LOCAL_HEADER_SIZE = 30
+ZIP64_EXTRA_FIELD = 1
+ZIP_FIELD_IN_ZIP64 = 0xFFFFFFFF
+ZIP_DEFLATED = 8
+ZIP_FETCH_SIZE = 64 << 20
 
 LIVE_MEMORY_SIZE = 256
 LIVE_STATE_DISK_SIZE = "16M"
