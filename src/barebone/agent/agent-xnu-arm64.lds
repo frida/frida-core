@@ -28,6 +28,7 @@ SECTIONS {
     _mach_vm_allocate = .; . += 8;
     _mach_vm_deallocate = .; . += 8;
     _mach_vm_protect = .; . += 8;
+    _mach_vm_map = .; . += 8;
     _mach_vm_remap = .; . += 8;
     _vm_map_copyin = .; . += 8;
     _vm_map_copyout = .; . += 8;

@@ -35,7 +35,6 @@ pub fn inject_into_process(id: u32) -> u32 {
         task: process.task,
         arena: arena_here,
         image_here: seen_from_here,
-        seen_size: home.seen_size,
         code: home.image,
         in_the_process: home.arena,
         stack: home.stack,
@@ -230,7 +229,7 @@ fn take_back_what_it_was_given(id: u32, placed: &Placed) {
     unsafe { kept_images() }.insert(id, Kept { code: placed.code, map: placed.map });
     say_a_copy_was_here(placed);
 
-    unsafe { give_memory_back(ourselves(), placed.image_here, placed.seen_size) };
+    unsafe { give_memory_back(ourselves(), placed.image_here, writable_half_room()) };
     unsafe { give_memory_back(ourselves(), placed.arena, crate::xnu_relay::ARENA_SIZE) };
 
     let Some(process) = process else {
@@ -245,11 +244,7 @@ fn take_back_what_it_was_given(id: u32, placed: &Placed) {
 }
 
 fn say_a_copy_was_here(placed: &Placed) {
-    let shared = (crate::writable_half_start() - crate::own_range().0) as u64;
-    let statics = match placed.seen_size == crate::own_range().1 as u64 {
-        true => placed.image_here + shared,
-        false => placed.image_here,
-    };
+    let statics = placed.image_here;
 
     unsafe {
         (statics as *mut u64).write_volatile(A_COPY_WAS_HERE);
@@ -463,7 +458,6 @@ struct Placed {
     task: *mut c_void,
     arena: u64,
     image_here: u64,
-    seen_size: u64,
     code: u64,
     in_the_process: u64,
     stack: u64,
@@ -473,7 +467,6 @@ struct Placed {
 struct Home {
     image: u64,
     image_here: u64,
-    seen_size: u64,
     code: u64,
     arena: u64,
     arena_here: u64,
@@ -499,28 +492,19 @@ fn give_the_copy_a_home(id: u32, process: &Process) -> Option<Home> {
     let (base, size) = crate::own_range();
     let shared = crate::writable_half_start() - base;
 
-    let (code, seen_from_here, seen_size) = match where_a_copy_has_been(id, map)
+    let code = match where_a_copy_has_been(id, map)
         .or_else(|| what_an_agent_before_this_one_left(map, shared))
     {
-        Some(code) => {
-            let private = (size - shared) as u64;
-            let seen = share(map, code + shared as u64, private)?;
-            unsafe {
-                crate::install_writable_half(code as usize, seen as usize);
-                core::ptr::write_bytes((seen as usize + crate::writable_half_size()) as *mut u8, 0,
-                    size - shared - crate::writable_half_size());
-            }
-
-            (code, seen, private)
-        }
-        None => {
-            let code = take_memory(map, size as u64)?;
-            let seen = share(map, code, size as u64)?;
-            lay_out_the_image(base, size, code, seen);
-
-            (code, seen, size as u64)
-        }
+        Some(code) => code,
+        None => place_the_code(map, base, size, shared)?,
     };
+
+    let seen_from_here = share(map, code + shared as u64, writable_half_room())?;
+    unsafe {
+        crate::install_writable_half(code as usize, seen_from_here as usize);
+        core::ptr::write_bytes((seen_from_here as usize + crate::writable_half_size()) as *mut u8, 0,
+            size - shared - crate::writable_half_size());
+    }
 
     let arena = take_memory(map, crate::xnu_relay::ARENA_SIZE)?;
     let arena_here = share(map, arena, crate::xnu_relay::ARENA_SIZE)?;
@@ -539,23 +523,9 @@ fn give_the_copy_a_home(id: u32, process: &Process) -> Option<Home> {
 
     let stack = take_memory(map, STACK)?;
 
-    if seen_size == size as u64 {
-        let protect = unsafe { _mach_vm_protect }?;
-        let shared = shared as u64;
-        if unsafe { protect(map, code, shared, 0, READ | EXECUTE) } != KERN_SUCCESS {
-            return None;
-        }
-        if unsafe { protect(map, code + shared, size as u64 - shared, 0, READ | WRITE) }
-            != KERN_SUCCESS
-        {
-            return None;
-        }
-    }
-
     Some(Home {
         image: code,
         image_here: seen_from_here,
-        seen_size,
         code: code + crate::xnu_user::entry_offset() as u64,
         arena,
         arena_here,
@@ -563,19 +533,37 @@ fn give_the_copy_a_home(id: u32, process: &Process) -> Option<Home> {
     })
 }
 
-fn lay_out_the_image(base: usize, size: usize, code: u64, seen_from_here: u64) {
-    let shared = crate::writable_half_start() - base;
-    let private = crate::writable_half_size();
+fn place_the_code(map: *mut c_void, base: usize, size: usize, shared: usize) -> Option<u64> {
+    let code = take_memory(map, size as u64)?;
+    let shared = shared as u64;
 
-    unsafe {
-        core::ptr::copy_nonoverlapping(base as *const u8, seen_from_here as *mut u8, shared);
-        crate::install_writable_half(code as usize, (seen_from_here as usize) + shared);
-        core::ptr::write_bytes(
-            (seen_from_here as usize + shared + private) as *mut u8,
-            0,
-            size - shared - private,
-        );
+    let map_anew = unsafe { _mach_vm_map }?;
+    let mut at = code;
+    let protections_as_darwin_stacks_them =
+        (READ | EXECUTE) as u64 | (((READ | WRITE | EXECUTE) as u64) << 32);
+    if unsafe {
+        map_anew(map, &mut at, shared, 0, FIXED | OVERWRITE, core::ptr::null_mut(), 0, 0,
+            protections_as_darwin_stacks_them, INHERIT_COPY as u64)
+    } != KERN_SUCCESS
+    {
+        return None;
     }
+
+    let seen = share(map, code, shared)?;
+    let protect = unsafe { _mach_vm_protect }?;
+    let writable = unsafe { protect(ourselves()?, seen, shared, 0, READ | WRITE) } == KERN_SUCCESS;
+    if writable {
+        unsafe { core::ptr::copy_nonoverlapping(base as *const u8, seen as *mut u8, shared as usize) };
+    }
+    unsafe { give_memory_back(ourselves(), seen, shared) };
+
+    writable.then_some(code)
+}
+
+fn writable_half_room() -> u64 {
+    let (base, size) = crate::own_range();
+
+    (base + size - crate::writable_half_start()) as u64
 }
 
 fn share(map: *mut c_void, address: u64, size: u64) -> Option<u64> {
@@ -822,6 +810,8 @@ const KERN_SUCCESS: c_int = 0;
 const ABOUT_THE_LOADER: u32 = 17;
 const ABOUT_THE_LOADER_WORDS: usize = 8;
 const ANYWHERE: c_int = 1;
+const FIXED: c_int = 0;
+const OVERWRITE: c_int = 0x4000;
 const AS_HIGH_AS_IT_GOES: c_int = 1;
 const A_COPY_OF_ITS_OWN: c_int = 0x10;
 const READ: c_int = 1;
@@ -830,6 +820,7 @@ const EXECUTE: c_int = 4;
 const ARM_THREAD_STATE64: c_int = 6;
 const SHARED: c_int = 0;
 const LONG_ENOUGH: u32 = 100_000;
+const INHERIT_COPY: c_int = 1;
 const INHERIT_NONE: c_int = 2;
 const STATE_WORDS: usize = 68;
 const STACK_POINTER: usize = 29 * 8 + 16;
@@ -852,6 +843,8 @@ unsafe extern "C" {
     static _mach_vm_allocate: Option<unsafe extern "C" fn(*mut c_void, *mut u64, u64, c_int) -> c_int>;
     static _mach_vm_deallocate: Option<unsafe extern "C" fn(*mut c_void, u64, u64) -> c_int>;
     static _mach_vm_protect: Option<unsafe extern "C" fn(*mut c_void, u64, u64, c_int, c_int) -> c_int>;
+    static _mach_vm_map: Option<unsafe extern "C" fn(*mut c_void, *mut u64, u64, u64, c_int, *mut c_void,
+        u64, c_int, u64, u64) -> c_int>;
     static _mach_vm_region: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut u64, c_int,
         *mut c_void, *mut u32, *mut u32) -> c_int>;
     static _mach_vm_remap: Option<
