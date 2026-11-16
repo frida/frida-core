@@ -72,12 +72,7 @@ fn become_a_thread_the_system_knows(arena: u64) -> bool {
         return false;
     };
 
-    let start = crate::xnu_libsystem::signed_to_begin_at(serve_from_a_proper_thread);
-    let mut made = 0u64;
-
-    unsafe {
-        out_of_a_bare_one(&mut made, core::ptr::null(), start, arena as *mut core::ffi::c_void) == 0
-    }
+    making.start_on_its_own(out_of_a_bare_one, serve_from_a_proper_thread, arena as *mut core::ffi::c_void)
 }
 
 unsafe extern "C" fn serve_from_a_proper_thread(arena: *mut core::ffi::c_void)

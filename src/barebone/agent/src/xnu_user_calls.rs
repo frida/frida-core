@@ -398,16 +398,12 @@ fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
 
     let errand = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(Errand { entry, parameter }));
 
-    let mut made = 0u64;
-    let told = unsafe {
-        make(&mut made, core::ptr::null(), crate::xnu_libsystem::signed_to_begin_at(say_which_one_first),
-            errand as *mut c_void)
-    };
-    if told != 0 {
+    let started = making.start_on_its_own(make, say_which_one_first, errand as *mut c_void);
+    if !started {
         drop(unsafe { alloc::boxed::Box::from_raw(errand) });
     }
 
-    (told == 0) as isize
+    started as isize
 }
 
 fn this_thread_is_bare() -> bool {

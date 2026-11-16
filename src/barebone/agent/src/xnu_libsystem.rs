@@ -16,6 +16,8 @@ pub fn making_threads() -> Option<&'static MakingThreads> {
         out_of_a_bare_one: function_in(pthread, b"_pthread_create_from_mach_thread")
             .map(|at| unsafe { core::mem::transmute(at) }),
         the_usual_way: unsafe { core::mem::transmute(function_in(pthread, b"_pthread_create")?) },
+        describe: unsafe { core::mem::transmute(function_in(pthread, b"_pthread_attr_init")?) },
+        leave_alone: unsafe { core::mem::transmute(function_in(pthread, b"_pthread_attr_setdetachstate")?) },
     };
 
     unsafe { MAKING = Some(found) };
@@ -29,11 +31,31 @@ pub type MakeAThread = unsafe extern "C" fn(*mut u64, *const u8, StartAThread,
 pub struct MakingThreads {
     pub out_of_a_bare_one: Option<MakeAThread>,
     pub the_usual_way: MakeAThread,
+    describe: unsafe extern "C" fn(*mut u8) -> i32,
+    leave_alone: unsafe extern "C" fn(*mut u8, i32) -> i32,
 }
+
+impl MakingThreads {
+    pub fn start_on_its_own(&self, make: MakeAThread, start: StartAThread,
+        parameter: *mut core::ffi::c_void) -> bool
+    {
+        let mut how = [0u8; A_THREAD_DESCRIPTION];
+        unsafe {
+            (self.describe)(how.as_mut_ptr());
+            (self.leave_alone)(how.as_mut_ptr(), NO_ONE_WAITS_FOR_IT);
+        }
+
+        let mut made = 0u64;
+        unsafe { make(&mut made, how.as_ptr(), signed_to_begin_at(start), parameter) == 0 }
+    }
+}
+
+const A_THREAD_DESCRIPTION: usize = 64;
+const NO_ONE_WAITS_FOR_IT: i32 = 2;
 
 static mut MAKING: Option<MakingThreads> = None;
 
-pub fn signed_to_begin_at(start: StartAThread) -> StartAThread {
+fn signed_to_begin_at(start: StartAThread) -> StartAThread {
     unsafe { core::mem::transmute(crate::pac::ptrauth_sign(start as *const u8, NOTHING_TO_TIE_IT_TO)) }
 }
 
