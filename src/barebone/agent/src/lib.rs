@@ -2283,7 +2283,7 @@ pub fn host_rpc(command: FridaCommand, payload: *mut GVariant) -> *mut GVariant 
             }
 
             kernel::wait(wait_event, None, &mut || {
-                hostlink_vsock::a_turn_is_wanted() || pending_reply_arrived(request_id)
+                the_hostlink_wants_a_turn() || pending_reply_arrived(request_id)
             });
         };
 
@@ -2308,6 +2308,16 @@ pub fn host_rpc(command: FridaCommand, payload: *mut GVariant) -> *mut GVariant 
 
         reply
     }
+}
+
+#[cfg(feature = "xnu-core")]
+fn the_hostlink_wants_a_turn() -> bool {
+    #[cfg(feature = "xnu")]
+    if hostlink_uart::a_turn_is_wanted() {
+        return true;
+    }
+
+    hostlink_vsock::a_turn_is_wanted()
 }
 
 fn note_waiter(request_id: u16, token: *const u8) {
