@@ -24,6 +24,7 @@ pub struct Primitives {
     pub enumerate_threads: fn(&mut dyn FnMut(crate::kernel::ThreadInfo), bool),
     pub find_thread: fn(u32) -> Option<crate::kernel::ThreadInfo>,
     pub modify_thread: fn(u32, &mut dyn FnMut(&mut crate::kernel::CpuState)) -> bool,
+    pub log: fn(&str),
 }
 
 pub fn select_user() {
@@ -61,6 +62,7 @@ static KERNEL: Primitives = Primitives {
     enumerate_threads: kernel_enumerate_threads,
     find_thread: kernel_find_thread,
     modify_thread: kernel_modify_thread,
+    log: kernel_log,
 };
 
 pub fn alloc(size: usize) -> *mut u8 {
@@ -152,6 +154,10 @@ fn kernel_modify_thread(_id: u32, _change: &mut dyn FnMut(&mut crate::kernel::Cp
 }
 
 pub fn log(msg: &str) {
+    (primitives().log)(msg);
+}
+
+fn kernel_log(msg: &str) {
     let mut line = [0u8; 256];
     let length = msg.len().min(line.len() - 1);
     line[..length].copy_from_slice(&msg.as_bytes()[..length]);

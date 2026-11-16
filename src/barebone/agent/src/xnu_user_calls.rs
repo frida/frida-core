@@ -91,6 +91,7 @@ pub static USER: Primitives = Primitives {
     enumerate_threads,
     find_thread,
     modify_thread,
+    log,
 };
 
 fn alloc(size: usize) -> *mut u8 {
@@ -323,6 +324,8 @@ fn modify_thread(id: u32, change: &mut dyn FnMut(&mut CpuState)) -> bool {
 
     changed
 }
+
+fn log(_msg: &str) {}
 
 fn state_of(thread: u32) -> Option<CpuState> {
     let mut state = [0u32; STATE_WORDS];
