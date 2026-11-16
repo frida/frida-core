@@ -388,12 +388,19 @@ fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
         return 0;
     };
 
+    let make = match this_thread_is_bare() {
+        true => match making.out_of_a_bare_one {
+            Some(make) => make,
+            None => return 0,
+        },
+        false => making.the_usual_way,
+    };
+
     let errand = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(Errand { entry, parameter }));
 
     let mut made = 0u64;
     let told = unsafe {
-        (making.the_usual_way)(&mut made, core::ptr::null(),
-            crate::xnu_libsystem::signed_to_begin_at(say_which_one_first),
+        make(&mut made, core::ptr::null(), crate::xnu_libsystem::signed_to_begin_at(say_which_one_first),
             errand as *mut c_void)
     };
     if told != 0 {
@@ -401,6 +408,13 @@ fn spawn_thread(entry: ThreadEntry, parameter: *mut c_void) -> isize {
     }
 
     (told == 0) as isize
+}
+
+fn this_thread_is_bare() -> bool {
+    let thread_data: u64;
+    unsafe { core::arch::asm!("mrs {}, tpidrro_el0", out(reg) thread_data, options(nomem, nostack)) };
+
+    thread_data == 0
 }
 
 struct Errand {
