@@ -2255,14 +2255,16 @@ namespace Frida {
 	 *
 	 * 5. Injecting a remote agent:
 	 *  {
+	 *    "kernel": "xnu",
 	 *    "agent": {
-	 *      "path": "/path/to/target/aarch64-unknown-none/release/frida-barebone-agent",
+	 *      "type": "injected",
+	 *      "image": "/path/to/target-xnu/aarch64-unknown-none-pic/release/frida-barebone-agent",
 	 *      "transport": {
-	 *        "type": "hostlink",
-	 *        "qmp": "unix:/path/to/qmp.sock",
-	 *        "bus": "frida-vserial.0",
-	 *        "mmio": "0xa003e00",
-	 *        "irq": 47
+	 *        "type": "uart",
+	 *        "path": "/path/to/uart1.sock",
+	 *        "mmio": 9481240576,
+	 *        "irq": 436,
+	 *        "interrupt_parent": 32
 	 *      }
 	 *    },
 	 *    "image": {
