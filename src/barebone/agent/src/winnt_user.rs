@@ -7,7 +7,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicI32, AtomicPtr, AtomicUsize, Ordering};
+use core::sync::atomic::{fence, AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering};
 
 use crate::gum_windows::{FileApi, TextApi};
 use crate::kernel::{MemoryRegion, ThreadEntry};
@@ -168,7 +168,8 @@ fn resolve_user_api() {
             wait_for_objects: core::mem::transmute(export(ntdll, b"NtWaitForMultipleObjects")),
             set_event: core::mem::transmute(export(ntdll, b"NtSetEvent")),
             reset_event: core::mem::transmute(export(ntdll, b"NtResetEvent")),
-            create_event: core::mem::transmute(export(ntdll, b"NtCreateEvent")),
+            create_semaphore: core::mem::transmute(export(ntdll, b"NtCreateSemaphore")),
+            release_semaphore: core::mem::transmute(export(ntdll, b"NtReleaseSemaphore")),
             close: core::mem::transmute(export(ntdll, b"NtClose")),
             exit_thread: core::mem::transmute(export(ntdll, b"RtlExitUserThread")),
             create_thread: core::mem::transmute(export(ntdll, b"RtlCreateUserThread")),
@@ -910,7 +911,8 @@ struct UserApi {
     flush_code: windows_fn!(*mut c_void, *mut u8, usize => i32),
     set_event: windows_fn!(*mut c_void, *mut u32 => i32),
     reset_event: windows_fn!(*mut c_void, *mut u32 => i32),
-    create_event: windows_fn!(*mut *mut c_void, u32, *mut c_void, u32, u8 => i32),
+    create_semaphore: windows_fn!(*mut *mut c_void, u32, *mut c_void, i32, i32 => i32),
+    release_semaphore: windows_fn!(*mut c_void, i32, *mut i32 => i32),
     close: windows_fn!(*mut c_void => i32),
     exit_thread: windows_fn!(u32 => !),
     create_thread: windows_fn!(*mut c_void, *mut c_void, u8, u32, usize, usize, *const c_void, *mut c_void,
@@ -1642,62 +1644,63 @@ const THREAD_BASIC_INFORMATION_SIZE: usize = 0x1c;
 const THREAD_BASIC_ID_OFFSET: usize = 0x0c;
 
 fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
-    let slot = slot_for_token(token);
-    SLEEPERS[slot].fetch_add(1, Ordering::AcqRel);
-    let event = event_in(slot);
+    let slot = join_slot(token);
+    fence(Ordering::SeqCst);
+    let handle = handle_in(slot, token);
     if check() {
-        release_slot(slot, token);
+        leave_slot(slot);
         return;
     }
 
     let due_time = timeout_us.map(|us| -((us as i64) * 10));
     unsafe {
-        (user_api().wait_for_object)(event, 0,
+        (user_api().wait_for_object)(handle, 0,
             due_time.as_ref().map_or(core::ptr::null(), |t| t))
     };
-    if core::ptr::eq(event, target_wake_handle()) {
-        unsafe { (user_api().reset_event)(event, core::ptr::null_mut()) };
+    if core::ptr::eq(handle, target_wake_handle()) {
+        unsafe { (user_api().reset_event)(handle, core::ptr::null_mut()) };
     }
-    release_slot(slot, token);
+    leave_slot(slot);
+}
+
+fn wake(token: *const u8) {
+    fence(Ordering::SeqCst);
+    for slot in 0..NUM_SLOTS {
+        let sleepers = sleepers_in(slot, token);
+        if sleepers == 0 {
+            continue;
+        }
+
+        let handle = handle_in(slot, token);
+        unsafe {
+            if core::ptr::eq(handle, target_wake_handle()) {
+                (user_api().set_event)(handle, core::ptr::null_mut());
+            } else {
+                (user_api().release_semaphore)(handle, sleepers as i32, core::ptr::null_mut());
+            }
+        }
+    }
 }
 
 // A token names one wait of one thread, and the next wait has a token of its own. Thus a slot
 // belongs to a token only while somebody waits on it: a table that never let go filled after a
 // few dozen waits, and every token after that shared the first slot, where a wake meant for one
 // thread released another.
-fn release_slot(slot: usize, token: *const u8) {
-    if SLEEPERS[slot].fetch_sub(1, Ordering::AcqRel) != 1 {
-        return;
-    }
+fn join_slot(token: *const u8) -> usize {
+    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_SLOTS;
+    for step in 0..NUM_SLOTS {
+        let slot = (start + step) % NUM_SLOTS;
 
-    let _ = OWNERS[slot].compare_exchange(token as usize, 0, Ordering::AcqRel, Ordering::Acquire);
-}
-
-fn wake(token: *const u8) {
-    let Some(slot) = slot_owned_by(token) else {
-        return;
-    };
-    let event = event_in(slot);
-
-    let mut left = SLEEPERS[slot].load(Ordering::Acquire).max(1);
-    while left != 0 {
-        unsafe { (user_api().set_event)(event, core::ptr::null_mut()) };
-        left -= 1;
-    }
-}
-
-fn slot_for_token(token: *const u8) -> usize {
-    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_EVENTS;
-    for step in 0..NUM_EVENTS {
-        let slot = (start + step) % NUM_EVENTS;
-
-        let owner = OWNERS[slot].load(Ordering::Acquire);
-        if owner == token as usize {
-            return slot;
-        }
-        if owner == 0
-                && OWNERS[slot].compare_exchange(0, token as usize, Ordering::AcqRel,
-                    Ordering::Acquire).is_ok() {
+        let joined = guarding(slot, || {
+            let owner = OWNERS[slot].load(Ordering::Relaxed);
+            if owner != token as usize && owner != 0 {
+                return false;
+            }
+            OWNERS[slot].store(token as usize, Ordering::Relaxed);
+            SLEEPERS[slot].fetch_add(1, Ordering::Relaxed);
+            true
+        });
+        if joined {
             return slot;
         }
     }
@@ -1706,48 +1709,63 @@ fn slot_for_token(token: *const u8) -> usize {
 }
 
 // The kernel half sets the one event a copy has a handle to, thus the loop keeps waiting on
-// that one and every other token gets an event of its own.
-fn slot_owned_by(token: *const u8) -> Option<usize> {
-    let start = (token as usize / core::mem::align_of::<usize>()) % NUM_EVENTS;
-    for step in 0..NUM_EVENTS {
-        let slot = (start + step) % NUM_EVENTS;
-        if OWNERS[slot].load(Ordering::Acquire) == token as usize {
-            return Some(slot);
-        }
-    }
-
-    None
-}
-
-fn event_in(slot: usize) -> *mut c_void {
-    if OWNERS[slot].load(Ordering::Acquire) == crate::glib::wakeup_token() as usize {
+// that one and every other token gets a semaphore of its own.
+fn handle_in(slot: usize, token: *const u8) -> *mut c_void {
+    if core::ptr::eq(token, crate::glib::wakeup_token()) {
         return target_wake_handle();
     }
 
     loop {
-        let existing = EVENTS[slot].load(Ordering::Acquire);
+        let existing = SEMAPHORES[slot].load(Ordering::Acquire);
         if existing != 0 {
             return existing as *mut c_void;
         }
 
         let mut made: *mut c_void = core::ptr::null_mut();
         unsafe {
-            (user_api().create_event)(&mut made, EVENT_ALL_ACCESS, core::ptr::null_mut(),
-                SYNCHRONIZATION_EVENT, 0)
+            (user_api().create_semaphore)(&mut made, SEMAPHORE_ALL_ACCESS, core::ptr::null_mut(),
+                0, i32::MAX)
         };
-        if EVENTS[slot].compare_exchange(0, made as usize, Ordering::AcqRel, Ordering::Acquire)
+        if SEMAPHORES[slot].compare_exchange(0, made as usize, Ordering::AcqRel, Ordering::Acquire)
                 .is_err() {
             unsafe { (user_api().close)(made) };
         }
     }
 }
 
-const NUM_EVENTS: usize = 32;
-const EVENT_ALL_ACCESS: u32 = 0x1f_0003;
-const SYNCHRONIZATION_EVENT: u32 = 1;
-static OWNERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
-static EVENTS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
-static SLEEPERS: [AtomicUsize; NUM_EVENTS] = [const { AtomicUsize::new(0) }; NUM_EVENTS];
+fn leave_slot(slot: usize) {
+    guarding(slot, || {
+        if SLEEPERS[slot].fetch_sub(1, Ordering::Relaxed) == 1 {
+            OWNERS[slot].store(0, Ordering::Relaxed);
+        }
+    });
+}
+
+fn sleepers_in(slot: usize, token: *const u8) -> usize {
+    guarding(slot, || {
+        if OWNERS[slot].load(Ordering::Relaxed) == token as usize {
+            SLEEPERS[slot].load(Ordering::Relaxed)
+        } else {
+            0
+        }
+    })
+}
+
+fn guarding<R>(slot: usize, work: impl FnOnce() -> R) -> R {
+    while GUARDS[slot].swap(true, Ordering::Acquire) {
+        yield_now();
+    }
+    let result = work();
+    GUARDS[slot].store(false, Ordering::Release);
+    result
+}
+
+const NUM_SLOTS: usize = 32;
+const SEMAPHORE_ALL_ACCESS: u32 = 0x1f_0003;
+static OWNERS: [AtomicUsize; NUM_SLOTS] = [const { AtomicUsize::new(0) }; NUM_SLOTS];
+static SLEEPERS: [AtomicUsize; NUM_SLOTS] = [const { AtomicUsize::new(0) }; NUM_SLOTS];
+static GUARDS: [AtomicBool; NUM_SLOTS] = [const { AtomicBool::new(false) }; NUM_SLOTS];
+static SEMAPHORES: [AtomicUsize; NUM_SLOTS] = [const { AtomicUsize::new(0) }; NUM_SLOTS];
 
 fn yield_now() {
     unsafe { (user_api().yield_execution)() };
