@@ -25,6 +25,7 @@ namespace Frida {
 		 */
 		public abstract bool try_find_symbol (string name, out uint64 address);
 
+#if HAVE_BAREBONE_BACKEND
 		internal Gee.List<LinuxKernelSymbol> to_list () {
 			var image = this as LinuxKernelImage;
 			if (image != null)
@@ -32,6 +33,7 @@ namespace Frida {
 
 			return ((LinuxSystemMap) this).symbols;
 		}
+#endif
 	}
 
 	/**
@@ -105,8 +107,10 @@ namespace Frida {
 				symbols.add (new LinuxKernelSymbol () {
 					name = fields[2].strip (),
 					address = address,
+#if HAVE_BAREBONE_BACKEND
 					symbol_type = 0xf,
 					section = 0x10,
+#endif
 				});
 			}
 
@@ -145,8 +149,10 @@ namespace Frida {
 	internal class LinuxKernelSymbol {
 		public string name;
 		public uint64 address;
+#if HAVE_BAREBONE_BACKEND
 		public uint8 symbol_type;
 		public uint8 section;
+#endif
 	}
 
 	/**
@@ -275,6 +281,7 @@ namespace Frida {
 			return false;
 		}
 
+#if HAVE_BAREBONE_BACKEND
 		public Gee.List<LinuxKernelSymbol> to_list () {
 			var symbols = new Gee.ArrayList<LinuxKernelSymbol> ();
 			uint p = names_pos;
@@ -292,6 +299,7 @@ namespace Frida {
 			}
 			return symbols;
 		}
+#endif
 
 		/**
 		 * Compares a name against its tokens where it sits, so nothing is built to throw away.
@@ -1100,6 +1108,7 @@ namespace Frida {
 			return false;
 		}
 
+#if HAVE_BAREBONE_BACKEND
 		private static uint decode_symbol (uint8[] raw, uint pos, string[] tokens, out string name) {
 			uint len = raw[pos];
 			uint p = pos + 1;
@@ -1113,6 +1122,7 @@ namespace Frida {
 			name = builder.str;
 			return p + len;
 		}
+#endif
 
 		/**
 		 * Decodes a symbol only if it is a plausible name: a type letter followed by printable,
