@@ -1815,6 +1815,15 @@ namespace Frida {
 		}
 
 		/**
+		 * Path to a custom Gadget to inject, on platforms where Frida attaches
+		 * by injecting Gadget, such as jailed iOS and Android.
+		 */
+		public string? gadget_path {
+			get;
+			set;
+		}
+
+		/**
 		 * How the agent should handle exceptions in the target.
 		 */
 		public Exceptor exceptor {
@@ -1892,6 +1901,9 @@ namespace Frida {
 			if (emulated_agent_path != null)
 				dict["emulated-agent-path"] = new Variant.string (emulated_agent_path);
 
+			if (gadget_path != null)
+				dict["gadget-path"] = new Variant.string (gadget_path);
+
 			if (exceptor != FULL)
 				dict["exceptor"] = new Variant.string (exceptor.to_nick ());
 
@@ -1936,6 +1948,13 @@ namespace Frida {
 				if (!path.is_of_type (VariantType.STRING))
 					throw new Error.INVALID_ARGUMENT ("The 'emulated-agent-path' option must be a string");
 				options.emulated_agent_path = path.get_string ();
+			}
+
+			Variant? gadget_path = dict["gadget-path"];
+			if (gadget_path != null) {
+				if (!gadget_path.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'gadget-path' option must be a string");
+				options.gadget_path = gadget_path.get_string ();
 			}
 
 			Variant? exceptor = dict["exceptor"];
