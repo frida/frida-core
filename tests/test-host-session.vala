@@ -4374,9 +4374,9 @@ namespace Frida.HostSessionTest {
 				var gadget_file = File.new_for_path (gadget_path);
 				InputStream gadget = yield gadget_file.read_async (Priority.DEFAULT, cancellable);
 
-				var details = yield Frida.Droidy.Injector.inject (gadget, debuggable_app, device_serial, cancellable);
+				var details = yield Frida.Droidy.Injector.spawn (gadget, debuggable_app, device_serial, cancellable);
 
-				printerr ("inject() => %p\n", details);
+				printerr ("spawn() => %p\n", details);
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 			}

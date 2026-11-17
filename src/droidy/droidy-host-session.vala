@@ -577,6 +577,15 @@ namespace Frida {
 				user_gadget_path = user_gadget_value.get_string ();
 			}
 
+			var gadget = yield open_gadget (user_gadget_path, cancellable);
+
+			var details = yield Droidy.Injector.spawn (gadget, package, device_details.serial, cancellable);
+			gadgets[details.pid] = details;
+
+			return details.pid;
+		}
+
+		private static async InputStream open_gadget (string? user_gadget_path, Cancellable? cancellable) throws Error, IOError {
 			string gadget_path;
 			if (user_gadget_path != null) {
 				gadget_path = user_gadget_path;
@@ -584,11 +593,12 @@ namespace Frida {
 				gadget_path = Path.build_filename (Environment.get_user_cache_dir (), "frida", "gadget-android-arm64.so");
 			}
 
-			InputStream gadget;
 			try {
 				var gadget_file = File.new_for_path (gadget_path);
-				gadget = yield gadget_file.read_async (Priority.DEFAULT, cancellable);
+				return yield gadget_file.read_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
 				if (e is IOError.NOT_FOUND && user_gadget_path == null) {
 					throw new Error.NOT_SUPPORTED (
 						"Need Gadget to attach on jailed Android; its default location is: %s", gadget_path);
@@ -596,11 +606,6 @@ namespace Frida {
 					throw new Error.NOT_SUPPORTED ("%s", e.message);
 				}
 			}
-
-			var details = yield Droidy.Injector.inject (gadget, package, device_details.serial, cancellable);
-			gadgets[details.pid] = details;
-
-			return details.pid;
 		}
 
 		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
@@ -614,7 +619,7 @@ namespace Frida {
 
 		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var gadget = gadgets[pid];
-			if (gadget != null) {
+			if (gadget != null && gadget.jdwp != null) {
 				yield gadget.jdwp.resume (cancellable);
 				return;
 			}
@@ -643,12 +648,26 @@ namespace Frida {
 			if (gadget != null)
 				return yield attach_via_gadget (pid, options, gadget, cancellable);
 
-			var server = yield get_remote_server (cancellable);
-			try {
-				return yield attach_via_remote (pid, options, server, cancellable);
-			} catch (Error e) {
-				throw_dbus_error (e);
+			var server = yield try_get_remote_server (cancellable);
+			if (server != null) {
+				try {
+					return yield attach_via_remote (pid, options, server, cancellable);
+				} catch (Error e) {
+					if (server.flavor == REGULAR)
+						throw e;
+				}
 			}
+
+			if (pid == 0)
+				throw new Error.NOT_SUPPORTED ("The Frida system session is not available on jailed Android");
+
+			var opts = SessionOptions._deserialize (options);
+			var gadget_stream = yield open_gadget (opts.gadget_path, cancellable);
+
+			gadget = yield Droidy.Injector.attach (gadget_stream, pid, device_details.serial, cancellable);
+			gadgets[pid] = gadget;
+
+			return yield attach_via_gadget (pid, options, gadget, cancellable);
 		}
 
 		public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
