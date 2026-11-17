@@ -4,6 +4,7 @@ base_sources = [
   'xnu-kernelcache.vala',
   'frida-glue.c',
   'package-manager.vala',
+  'binary-metadata.vala',
   'control-service.vala',
   'portal-service.vala',
   'host-session-service.vala',

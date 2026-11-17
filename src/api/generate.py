@@ -35,6 +35,7 @@ TOPLEVEL_NAMES = [
     "linux-kernel-image.vala",
     "xnu-kernelcache.vala",
     "package-manager.vala",
+    "binary-metadata.vala",
     "control-service.vala",
     "portal-service.vala",
     "file-monitor.vala",
