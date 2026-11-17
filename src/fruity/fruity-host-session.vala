@@ -1090,9 +1090,11 @@ namespace Frida {
 		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
 				Cancellable? cancellable) throws Error, IOError {
 			try {
+				string? gadget_path = SessionOptions._deserialize (options).gadget_path;
+
 				var lldb_session = lldb_sessions[pid];
 				if (lldb_session != null) {
-					var gadget_details = yield lldb_session.query_gadget_details (cancellable);
+					var gadget_details = yield lldb_session.query_gadget_details (gadget_path, cancellable);
 
 					lldb_session.attach_count++;
 					return yield attach_via_gadget (pid, options, gadget_details, cancellable);
@@ -1114,12 +1116,10 @@ namespace Frida {
 				var lldb = yield start_lldb_service (cancellable);
 				var process = yield lldb.attach_by_pid (pid, cancellable);
 
-				string? gadget_path = null;
-
-				lldb_session = new LLDBSession (lldb, process, gadget_path, ExceptionHandlingStatus.LIMITED, device);
+				lldb_session = new LLDBSession (lldb, process, null, ExceptionHandlingStatus.LIMITED, device);
 				add_lldb_session (lldb_session);
 
-				var gadget_details = yield lldb_session.query_gadget_details (cancellable);
+				var gadget_details = yield lldb_session.query_gadget_details (gadget_path, cancellable);
 
 				lldb_session.attach_count++;
 				return yield attach_via_gadget (pid, options, gadget_details, cancellable);
@@ -1781,7 +1781,8 @@ namespace Frida {
 					yield lldb.close (cancellable);
 			}
 
-			public async Fruity.Injector.GadgetDetails query_gadget_details (Cancellable? cancellable) throws Error, Efni.Error, IOError {
+			public async Fruity.Injector.GadgetDetails query_gadget_details (string? requested_path, Cancellable? cancellable)
+					throws Error, Efni.Error, IOError {
 				while (gadget_request != null) {
 					try {
 						return yield gadget_request.future.wait_async (cancellable);
@@ -1794,7 +1795,7 @@ namespace Frida {
 				gadget_request = new Promise<Fruity.Injector.GadgetDetails> ();
 
 				try {
-					string? path = gadget_path;
+					string? path = (requested_path != null) ? requested_path : gadget_path;
 					if (path == null) {
 						path = Path.build_filename (Environment.get_user_cache_dir (), "frida", "gadget-ios.dylib");
 						if (!FileUtils.test (path, FileTest.EXISTS)) {
