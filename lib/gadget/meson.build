@@ -1,7 +1,16 @@
 gadget_sources = [
   'gadget.vala',
   'gadget-glue.c',
+  'gadget-metadata.c',
 ]
+
+gadget_metadata = '{"type":"frida","name":"frida-gadget","version":"@0@","architecture":"@1@"}'.format(frida_version, host_arch)
+gadget_metadata_config = configuration_data()
+gadget_metadata_config.set('FRIDA_GADGET_METADATA', '"' + gadget_metadata.replace('"', '\\"') + '"')
+gadget_sources += configure_file(
+  output: 'frida-gadget-metadata.h',
+  configuration: gadget_metadata_config,
+)
 
 if host_os_family == 'darwin'
   gadget_sources += 'gadget-darwin.m'
@@ -24,9 +33,26 @@ if host_os_family != 'windows'
   platform_deps += gio_unix_dep
 endif
 
+if host_os_family == 'windows'
+  gadget_sources += import('windows').compile_resources(configure_file(
+    input: 'frida-gadget.rc.in',
+    output: 'frida-gadget.rc',
+    configuration: {
+      'MAJOR': frida_major_version,
+      'MINOR': frida_minor_version,
+      'MICRO': frida_micro_version,
+      'NANO': frida_nano_version,
+      'VERSION': frida_version,
+    },
+  ))
+endif
+
 if host_os_family == 'darwin'
   extra_objc_args += '-fobjc-arc'
-  extra_link_args += '-Wl,-framework,Foundation'
+  extra_link_args += [
+    '-Wl,-framework,Foundation',
+    f'-Wl,-current_version,@frida_major_version@.@frida_minor_version@.@frida_micro_version@',
+  ]
 endif
 
 if host_os == 'android'
