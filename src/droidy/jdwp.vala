@@ -590,6 +590,7 @@ namespace Frida.JDWP {
 		public ValueTag tag {
 			get;
 			construct;
+			default = BYTE;
 		}
 
 		public abstract string to_string ();
@@ -1111,6 +1112,7 @@ namespace Frida.JDWP {
 		public EventKind kind {
 			get;
 			construct;
+			default = SINGLE_STEP;
 		}
 
 		public EventRequestID request {
