@@ -49,6 +49,8 @@ namespace Frida.Droidy.Injector {
 		}
 
 		private const string SHARED_DIR = "/data/local/tmp";
+		private const int64 LISTEN_TIMEOUT = 5000000;
+		private const uint LISTEN_POLL_INTERVAL = 50;
 
 		public Session (InputStream gadget, string device_serial) {
 			Object (
@@ -81,7 +83,7 @@ namespace Frida.Droidy.Injector {
 				var thread = yield break_in (jdwp, "Landroid/app/Activity;", "onCreate", null, shell, cancellable);
 
 				var runtime = yield TargetRuntime.open (jdwp, thread, cancellable);
-				yield load (files, runtime, shell, cancellable);
+				yield load (files, runtime, unix_socket_path, shell, cancellable);
 
 				return new GadgetDetails (target_pid, unix_socket_path, jdwp);
 			} finally {
@@ -113,7 +115,7 @@ namespace Frida.Droidy.Injector {
 						"(dumpsys meminfo %u > /dev/null 2>&1 &)".printf (pid), shell, cancellable);
 
 					runtime = yield TargetRuntime.open (jdwp, thread, cancellable);
-					yield load (files, runtime, shell, cancellable);
+					yield load (files, runtime, unix_socket_path, shell, cancellable);
 				} finally {
 					release.begin (jdwp, runtime, files);
 				}
@@ -241,14 +243,31 @@ namespace Frida.Droidy.Injector {
 			return breakpoint_event.thread;
 		}
 
-		private async void load (GadgetFiles files, TargetRuntime runtime, AdbShellSession shell, Cancellable? cancellable)
-				throws Error, IOError {
+		private async void load (GadgetFiles files, TargetRuntime runtime, string unix_socket_path, AdbShellSession shell,
+				Cancellable? cancellable) throws Error, IOError {
 			yield runtime.exec ("cp %s %s".printf (files.so_path_shared, files.so_path_app), cancellable);
 			yield runtime.exec ("cp %s %s".printf (files.config_path_shared, files.config_path_app), cancellable);
 
 			yield shell.check_call ("rm -f %s; rm -f %s".printf (files.so_path_shared, files.config_path_shared), cancellable);
 
 			yield runtime.load (files.so_path_app, cancellable);
+
+			yield wait_until_listening (unix_socket_path, cancellable);
+		}
+
+		private async void wait_until_listening (string unix_socket_path, Cancellable? cancellable) throws Error, IOError {
+			var main_context = MainContext.get_thread_default ();
+			int64 deadline = get_monotonic_time () + LISTEN_TIMEOUT;
+
+			while (!yield is_listening (unix_socket_path, cancellable)) {
+				if (get_monotonic_time () >= deadline)
+					throw new Error.TIMED_OUT ("Timed out waiting for Gadget to start listening");
+
+				var delay = new TimeoutSource (LISTEN_POLL_INTERVAL);
+				delay.set_callback (wait_until_listening.callback);
+				delay.attach (main_context);
+				yield;
+			}
 		}
 
 		private async string query_package (uint pid, AdbShellSession shell, Cancellable? cancellable) throws Error, IOError {
