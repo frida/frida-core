@@ -274,7 +274,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/frida-tests
-          key: live-guest-${{ matrix.guest }}-${{ hashFiles('tests/vm.py', 'tests/inferno-ramdisk.patch') }}
+          # Bump the version when a change to vm.py or the Inferno patch
+          # affects how a guest is prepared.
+          key: live-guest-${{ matrix.guest }}-v1
       - name: Set up xmake
         if: matrix.guest == 'xnu' && steps.guest.outputs.cache-hit != 'true'
         uses: xmake-io/github-action-setup-xmake@v1
@@ -288,7 +290,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: ~/.cache/frida-tests
-          key: live-guest-${{ matrix.guest }}-${{ hashFiles('tests/vm.py', 'tests/inferno-ramdisk.patch') }}
+          key: live-guest-${{ matrix.guest }}-v1
       - name: Test
         run: >-
           chmod +x "$TESTS_DIR/frida-tests" &&
