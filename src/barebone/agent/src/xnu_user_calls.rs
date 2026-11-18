@@ -151,12 +151,13 @@ fn protect(address: u64, size: usize, may: u32) -> bool {
 }
 
 fn wait(token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> bool) {
+    let token = where_the_other_half_can_reach(token);
+    let value = unsafe { (token as *const u32).read_volatile() };
+
     if check() {
         return;
     }
 
-    let token = where_the_other_half_can_reach(token);
-    let value = unsafe { (token as *const u32).read_volatile() };
     unsafe {
         ask(ULOCK_WAIT, [COMPARE_AND_WAIT, token as u64, value as u64,
             timeout_us.unwrap_or(UNTIL_IT_IS_WOKEN)])
