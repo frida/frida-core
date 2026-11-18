@@ -537,6 +537,32 @@ def report_what_the_guest_said(said: [(str, Path)]):
             print(f"--- {title} ---\n{text}", file=sys.stderr)
 
 
+def what_the_wedged_test_was_doing(pid: int, qmp_path: Path) -> str:
+    return f"host stacks:\n{host_stacks(pid)}\n\nguest registers:\n{guest_registers(qmp_path)}"
+
+
+def host_stacks(pid: int) -> str:
+    gdb = shutil.which("gdb")
+    if gdb is None:
+        return "(no gdb)"
+    attach = ["sudo", "-n", gdb] if shutil.which("sudo") is not None else [gdb]
+    try:
+        done = subprocess.run(attach + ["-p", str(pid), "-batch", "-nx",
+                                        "-ex", "set pagination off",
+                                        "-ex", "thread apply all bt"],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+        return done.stdout.decode(errors="replace")
+    except Exception as e:
+        return f"(gdb failed: {e})"
+
+
+def guest_registers(qmp_path: Path) -> str:
+    try:
+        return Qmp(qmp_path).monitor("info registers -a")
+    except Exception as e:
+        return f"(qmp failed: {e})"
+
+
 def prepare_linux(arch: str, workdir: Path) -> (Path, dict):
     guest = GUESTS[arch]
     qemu_img = require_program("qemu-img")
@@ -1005,8 +1031,17 @@ def test_xnu(args):
                     copying = follow_console(process, console, XNU_READY_MARKER)
                     config_path.write_text(json.dumps(xnu_config(guest, args.agent, uart, listeners.gdb_port)))
                     environment = os.environ | {"FRIDA_BAREBONE_CONFIG": str(config_path)} | XNU_TEST_TARGETS
-                    outcome = subprocess.run([args.tests, "-p", test], env=environment,
-                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    the_test = subprocess.Popen([args.tests, "-p", test], env=environment,
+                                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    wedge_report = None
+                    try:
+                        output = the_test.communicate(timeout=XNU_TEST_BUDGET_SECONDS)[0]
+                        returncode = the_test.returncode
+                    except subprocess.TimeoutExpired:
+                        wedge_report = what_the_wedged_test_was_doing(the_test.pid, qmp_path)
+                        the_test.kill()
+                        output = the_test.communicate()[0]
+                        returncode = 1
                     emulator_gave_up = process.poll() is not None
                 finally:
                     process.terminate()
@@ -1014,16 +1049,18 @@ def test_xnu(args):
                     if copying is not None:
                         copying.join()
 
-            if outcome.returncode == 0:
+            if returncode == 0:
                 print(f"ok {index + 1} {test}", flush=True)
             else:
                 failed.append(test)
                 print(f"not ok {index + 1} {test}", flush=True)
-                print(outcome.stdout.decode(errors="replace"), file=sys.stderr)
+                print(output.decode(errors="replace"), file=sys.stderr)
                 said = [("guest console", console_path)]
                 if emulator_gave_up:
                     said.append(("emulator", emulator_path))
                 report_what_the_guest_said(said)
+                if wedge_report is not None:
+                    print(f"--- wedged after {XNU_TEST_BUDGET_SECONDS}s ---\n{wedge_report}", file=sys.stderr)
 
     print(f"1..{len(names)}")
     if failed:
@@ -1544,6 +1581,7 @@ XNU_MEMORY_SIZE = "4G"
 XNU_NVRAM_SIZE = "1M"
 XNU_BOOT_ARGUMENTS = "rd=md0 -restore serial=3 -v debug=0x8 wdt=-1"
 XNU_READY_MARKER = "standardRestore"
+XNU_TEST_BUDGET_SECONDS = 180
 XNU_TEST_TARGETS = {
     "FRIDA_TEST_XNU_TARGET": "restored_external",
     "FRIDA_TEST_XNU_OTHER_TARGET": "driverkitd",
