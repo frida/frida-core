@@ -246,7 +246,7 @@ jobs:
             agent: xnu-arm64
             packages: >-
               build-essential pkg-config ninja-build libglib2.0-dev libpixman-1-dev libslirp-dev liblzfse-dev
-              libpng-dev libzstd-dev zlib1g-dev libbz2-dev libgnutls28-dev
+              libpng-dev libzstd-dev zlib1g-dev libbz2-dev libgnutls28-dev gdb
       fail-fast: false
     runs-on: ubuntu-latest
     env:
