@@ -1,5 +1,6 @@
 portal_sources = [
   'portal.vala',
+  binary_metadata_sources['frida-portal'],
 ]
 
 extra_deps = []

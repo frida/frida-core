@@ -1,6 +1,7 @@
 inject_sources = [
   'inject.vala',
   'inject-glue.c',
+  binary_metadata_sources['frida-inject'],
 ]
 
 system_vala_args = []

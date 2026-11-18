@@ -991,6 +991,31 @@ elif host_os_family != 'windows'
   executable_no_exports_link_depends = [script]
 endif
 
+binary_metadata = [python, releng / 'binary_metadata.py']
+binary_metadata_sources = {}
+foreach binary_name, binary_kind : {
+    'frida-gadget': 'shared-library',
+    'frida-server': 'executable',
+    'frida-portal': 'executable',
+    'frida-inject': 'executable',
+  }
+  metadata_sources = [
+    custom_target(f'@binary_name@-metadata',
+      output: f'@binary_name@-metadata.c',
+      command: binary_metadata + ['source', binary_name, frida_version, host_abi, '@OUTPUT@'],
+      depend_files: [releng / 'binary_metadata.py', releng / 'binary-metadata-assets' / 'metadata.c.in'],
+    ),
+  ]
+  if host_os_family == 'windows'
+    metadata_sources += import('windows').compile_resources(custom_target(f'@binary_name@-versioninfo',
+      output: f'@binary_name@.rc',
+      command: binary_metadata + ['resource', binary_kind, binary_name, frida_version, '@OUTPUT@'],
+      depend_files: [releng / 'binary_metadata.py', releng / 'binary-metadata-assets' / 'versioninfo.rc.in'],
+    ))
+  endif
+  binary_metadata_sources += {binary_name: metadata_sources}
+endforeach
+
 compile_js_agent = files('tools' / 'compile-js-agent.py')
 
 mapper_opt = get_option('mapper')

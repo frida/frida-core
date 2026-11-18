@@ -1,6 +1,7 @@
 server_sources = [
   'server.vala',
   'server-glue.c',
+  binary_metadata_sources['frida-server'],
 ]
 
 if host_os_family == 'darwin'
