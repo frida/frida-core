@@ -26,6 +26,12 @@ namespace Frida.Gadget {
 			default = Gum.CodeSigningPolicy.OPTIONAL;
 		}
 
+		public bool interruptible {
+			get;
+			set;
+			default = false;
+		}
+
 		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
 			if (property_name == "interaction" && property_node.get_node_type () == Json.NodeType.OBJECT) {
 				var interaction_node = property_node.get_object ();
@@ -409,8 +415,11 @@ namespace Frida.Gadget {
 		interceptor.begin_transaction ();
 
 #if DARWIN
-		if (mapped_range != null)
+		if (mapped_range != null) {
 			Environment.ensure_debugger_breakpoints_only ();
+			if (config.interruptible)
+				Environment.start_interrupt_listener (location.range.base_address, location.range.size);
+		}
 #endif
 
 		exceptor = Gum.Exceptor.obtain ();
@@ -634,6 +643,7 @@ namespace Frida.Gadget {
 					exceptor = null;
 
 #if DARWIN
+					Environment.stop_interrupt_listener ();
 					Environment.allow_stolen_breakpoints ();
 #endif
 
@@ -1886,6 +1896,11 @@ namespace Frida.Gadget {
 				throw new Error.NOT_SUPPORTED ("Unable to open services when embedded");
 			}
 
+			public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable)
+					throws Error, IOError {
+				throw new Error.NOT_SUPPORTED ("Unable to dump backtraces when embedded");
+			}
+
 			public async void break_and_resume (Cancellable? cancellable) throws Error, IOError {
 #if DARWIN
 				Environment.break_and_resume ();
@@ -1896,6 +1911,7 @@ namespace Frida.Gadget {
 
 			public async void break_and_detach (Cancellable? cancellable) throws Error, IOError {
 #if DARWIN
+				Environment.disarm_interrupt_listener ();
 				Environment.break_and_detach ();
 #else
 				throw new Error.NOT_SUPPORTED ("This API is only applicable on Darwin");
@@ -2142,6 +2158,9 @@ namespace Frida.Gadget {
 			ref string? our_path, ref Gum.MemoryRange? our_range);
 		private extern void ensure_debugger_breakpoints_only ();
 		private extern void allow_stolen_breakpoints ();
+		private extern void start_interrupt_listener (Gum.Address our_base_address, size_t our_size);
+		private extern void stop_interrupt_listener ();
+		private extern void disarm_interrupt_listener ();
 		private extern void break_and_resume ();
 		private extern void break_and_detach ();
 #endif

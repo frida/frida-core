@@ -1026,6 +1026,10 @@ namespace Frida {
 				return yield parent.open_service (address, this, cancellable);
 			}
 
+			public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable) throws GLib.Error {
+				return yield parent.host_session.dump_backtraces (pid, cancellable);
+			}
+
 			private async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
 					out string token) throws Error {
 				parent.open_tcp_transport (id, cancellable, out port, out token);

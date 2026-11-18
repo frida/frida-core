@@ -35,6 +35,8 @@ namespace Frida {
 
 		public abstract async ServiceSessionId open_service (string address, Cancellable? cancellable) throws GLib.Error;
 
+		public abstract async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable) throws GLib.Error;
+
 		public signal void spawn_gating_disabled (SpawnGatingDisabledReason reason);
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
@@ -817,6 +819,10 @@ namespace Frida {
 		 * Apply the page plan.
 		 */
 		PAGE_PLAN,
+		/**
+		 * Let the debugger inspect the process, then resume execution.
+		 */
+		INTERRUPT,
 	}
 
 	[DBus (name = "re.frida.Channel17")]
@@ -1000,6 +1006,10 @@ namespace Frida {
 		}
 
 		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 	}

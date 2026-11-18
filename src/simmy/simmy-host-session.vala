@@ -435,6 +435,10 @@ namespace Frida {
 			throw_not_supported ();
 		}
 
+		public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable) throws Error, IOError {
+			throw_not_supported ();
+		}
+
 		public ServiceSession link_service_session (ServiceSessionId id) throws Error {
 			throw_not_supported ();
 		}

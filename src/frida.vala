@@ -1587,6 +1587,52 @@ namespace Frida {
 		}
 
 		/**
+		 * Captures the backtraces of all threads in a process, for debugging purposes.
+		 *
+		 * Works out-of-band through the debugger, so it doesn't need any cooperation from the process, nor
+		 * from Frida's own threads in it. The process is briefly suspended while this happens.
+		 *
+		 * Only supported on jailed iOS for now. Once Gadget is injected, the process must have been spawned with
+		 * the `interruptible` option set to `true`, so Gadget keeps a thread around that can stop it in the
+		 * debugger even if all of Frida's threads are blocked.
+		 *
+		 * The result has a `threads` array, where each thread has an `id`, an optional `name`, its general-purpose
+		 * `registers`, and `frames`.
+		 * Each frame has an `address`, plus `module` and `offset` when it is inside a known module, so it can
+		 * be symbolicated offline. Frames inside Gadget are attributed to the local Gadget file that was injected,
+		 * or to `FridaGadget.dylib` if it was already loaded. If a thread couldn't be fully walked it also has an
+		 * `error`.
+		 *
+		 * @param pid the process ID to capture backtraces from
+		 * @return a table with the threads and their backtraces
+		 */
+		public async HashTable<string, Variant> dump_backtraces (uint pid, Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			var host_session = yield get_host_session (cancellable);
+
+			try {
+				return yield host_session.dump_backtraces (pid, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public HashTable<string, Variant> dump_backtraces_sync (uint pid, Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<DumpBacktracesTask> ();
+			task.pid = pid;
+			return task.execute (cancellable);
+		}
+
+		private class DumpBacktracesTask : DeviceTask<HashTable<string, Variant>> {
+			public uint pid;
+
+			protected override async HashTable<string, Variant> perform_operation () throws Error, IOError {
+				return yield parent.dump_backtraces (pid, cancellable);
+			}
+		}
+
+		/**
 		 * Attaches to a process, giving a {@link Session} through which scripts
 		 * can be created and run inside it.
 		 *
