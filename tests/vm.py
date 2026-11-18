@@ -1551,8 +1551,6 @@ XNU_TEST_TARGETS = {
 XNU_TESTS_THE_RAMDISK_CANNOT_RUN = {
     "enumerates-applications-in-live-guest": "a restore ramdisk has no applications",
     "hooks-before-resume-in-live-guest": "a restore ramdisk has no applications to spawn",
-    "hides-itself-from-the-process-in-live-guest": "the hostlink loses wakes under slow TCG",
-    "hooks-its-own-process-in-live-guest": "the hostlink loses wakes under slow TCG",
 }
 
 ZIP_TAIL_SIZE = 65536 + 22
