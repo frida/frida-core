@@ -23,10 +23,9 @@ c_languages = ['c', 'cpp']
 cc = meson.get_compiler('c')
 cpp = meson.get_compiler('cpp')
 
-releng = meson.global_source_root() / 'releng'
-if not fs.exists(releng)
-  releng = meson.project_source_root() / 'releng'
-endif
+releng = run_command(find_program('python3'), files('tools' / 'releng_location.py'),
+  capture: true,
+  check: true).stdout().strip()
 
 frida_version = get_option('frida_version')
 if frida_version == ''

@@ -617,6 +617,8 @@ def option_should_be_forwarded(k: "OptionKey",
                 return False
         if k.subproject and k.machine is not MachineChoice.HOST:
             return False
+        if subproject == "frida-gum" and k.name == "graft_tool":
+            return False
         return is_for_us or is_for_child
 
     if optstore.is_per_machine_option(k):

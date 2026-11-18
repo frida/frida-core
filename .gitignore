@@ -27,3 +27,4 @@
 /src/linux/helpers/build/
 /src/linux/helpers/ext/
 /subprojects/*
+/tools/__pycache__/
