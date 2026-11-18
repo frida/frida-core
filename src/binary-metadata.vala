@@ -257,7 +257,7 @@ namespace Frida {
 		int length = 0;
 		while (length != data.length && data[length] != 0)
 			length++;
-		return ((string) data).ndup (length);
+		return ((string) data).substring (0, length);
 	}
 
 	private class PackageMetadata {

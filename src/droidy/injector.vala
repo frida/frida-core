@@ -279,7 +279,7 @@ namespace Frida.Droidy.Injector {
 			if (result.status != 0 || length == 0)
 				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
 
-			string process_name = ((string) cmdline).ndup (length);
+			string process_name = ((string) cmdline).substring (0, length);
 			return process_name.split (":", 2)[0];
 		}
 
