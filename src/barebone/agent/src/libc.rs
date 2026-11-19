@@ -13,6 +13,10 @@ use core::sync::atomic::Ordering;
 
 use crate::bindings::{GMutex, GRecMutex};
 use crate::gthread;
+#[cfg(feature = "linux-injected")]
+use crate::linux::files;
+#[cfg(not(feature = "linux-injected"))]
+use crate::nofiles as files;
 
 // Serialises the C library. Which hooks the library reaches for differs: newlib asks
 // for __malloc_lock/__malloc_unlock, picolibc for the retargetable lock API below,
@@ -238,10 +242,6 @@ fn gettimeofday_impl(tp: *mut core::ffi::c_void) -> i32 {
     0
 }
 
-fn write_impl(count: usize) -> isize {
-    count as isize
-}
-
 mod exports {
     use super::*;
 
@@ -449,58 +449,63 @@ mod exports {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn open(_path: *const u8, _flags: i32, _mode: i32) -> i32 {
-        unsupported()
+    pub extern "C" fn open(path: *const core::ffi::c_char, flags: i32, mode: i32) -> i32 {
+        answered(files::open(path, flags, mode)) as i32
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn close(_fd: i32) -> i32 {
-        0
+    pub extern "C" fn close(fd: i32) -> i32 {
+        answered(files::close(fd)) as i32
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn read(_fd: i32, _buf: *mut u8, _count: usize) -> isize {
-        0
+    pub extern "C" fn read(fd: i32, buf: *mut u8, count: usize) -> isize {
+        answered(files::read(fd, buf, count)) as isize
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn write(_fd: i32, _buf: *const u8, count: usize) -> isize {
-        write_impl(count)
+    pub extern "C" fn write(fd: i32, buf: *const u8, count: usize) -> isize {
+        answered(files::write(fd, buf, count)) as isize
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn lseek(_fd: i32, _offset: isize, _whence: i32) -> isize {
-        0
+    pub extern "C" fn lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+        answered(files::lseek(fd, offset, whence))
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn fstat(_fd: i32, _st: *mut core::ffi::c_void) -> i32 {
-        0
+    pub extern "C" fn ftruncate(fd: i32, length: i64) -> i32 {
+        answered(files::ftruncate(fd, length)) as i32
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn stat(_path: *const u8, _st: *mut core::ffi::c_void) -> i32 {
-        unsupported()
+    pub extern "C" fn fstat(fd: i32, st: *mut crate::bindings::stat) -> i32 {
+        answered(files::fstat(fd, st)) as i32
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn unlink(_path: *const u8) -> i32 {
-        unsupported()
+    pub extern "C" fn stat(path: *const core::ffi::c_char, st: *mut crate::bindings::stat) -> i32 {
+        answered(files::stat(path, st)) as i32
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn rename(_old: *const u8, _new: *const u8) -> i32 {
-        unsupported()
+    pub extern "C" fn unlink(path: *const core::ffi::c_char) -> i32 {
+        answered(files::unlink(path)) as i32
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn access(_path: *const u8, _mode: i32) -> i32 {
-        unsupported()
+    pub extern "C" fn rename(old: *const core::ffi::c_char, new: *const core::ffi::c_char) -> i32 {
+        answered(files::rename(old, new)) as i32
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn chmod(_path: *const u8, _mode: i32) -> i32 {
-        -1
+    pub extern "C" fn access(path: *const core::ffi::c_char, mode: i32) -> i32 {
+        answered(files::access(path, mode)) as i32
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn chmod(path: *const core::ffi::c_char, mode: i32) -> i32 {
+        answered(files::chmod(path, mode)) as i32
     }
 
     #[unsafe(no_mangle)]
@@ -509,8 +514,8 @@ mod exports {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn rmdir(_path: *const u8) -> i32 {
-        -1
+    pub extern "C" fn rmdir(path: *const core::ffi::c_char) -> i32 {
+        answered(files::rmdir(path)) as i32
     }
 
     #[unsafe(no_mangle)]
@@ -598,12 +603,17 @@ mod exports {
     pub static stderr: Stream = Stream(ptr::null_mut());
 }
 
-fn unsupported() -> i32 {
-    unsafe { errno = ENOSYS };
-    -1
+fn answered(result: Result<i64, i32>) -> i64 {
+    result.unwrap_or_else(|code| {
+        unsafe { errno = code };
+        -1
+    })
 }
 
-const ENOSYS: i32 = 88;
+fn unsupported() -> i32 {
+    unsafe { errno = crate::bindings::ENOSYS as i32 };
+    -1
+}
 
 unsafe extern "C" {
     static mut errno: i32;

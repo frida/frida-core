@@ -1274,7 +1274,7 @@ pub fn wake_up(word: usize) {
 }
 
 #[cfg(target_arch = "arm")]
-fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+pub(super) fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
     let answer: isize;
 
     unsafe {
@@ -1327,12 +1327,12 @@ unsafe extern "C" {
 }
 
 #[cfg(target_arch = "x86")]
-fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+pub(super) fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
     unsafe { frida_syscall(number, a, b, c, d, e, f) }
 }
 
 #[cfg(target_arch = "x86_64")]
-fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+pub(super) fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
     let answer: isize;
 
     unsafe {
@@ -1355,7 +1355,7 @@ fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: u
 }
 
 #[cfg(target_arch = "aarch64")]
-fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+pub(super) fn syscall(number: usize, a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
     let answer: isize;
 
     unsafe {
@@ -1426,13 +1426,13 @@ const STATE_LR: usize = 248;
 const STATE_LR: usize = 68;
 
 #[cfg(target_arch = "arm")]
-const OPENAT: usize = 322;
+pub(super) const OPENAT: usize = 322;
 #[cfg(target_arch = "x86")]
-const OPENAT: usize = 295;
+pub(super) const OPENAT: usize = 295;
 #[cfg(target_arch = "x86_64")]
-const OPENAT: usize = 257;
+pub(super) const OPENAT: usize = 257;
 #[cfg(target_arch = "aarch64")]
-const OPENAT: usize = 56;
+pub(super) const OPENAT: usize = 56;
 #[cfg(target_arch = "arm")]
 const CLOSE: usize = 6;
 #[cfg(target_arch = "x86")]
@@ -1587,7 +1587,7 @@ const MPROTECT: usize = 10;
 #[cfg(target_arch = "aarch64")]
 const MPROTECT: usize = 226;
 
-const WORKING_DIRECTORY: usize = -100isize as usize;
+pub(super) const WORKING_DIRECTORY: usize = -100isize as usize;
 const READ_ONLY: usize = 0;
 const POLL_IN: i32 = 1;
 pub const READABLE: usize = 1;

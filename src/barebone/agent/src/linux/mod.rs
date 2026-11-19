@@ -42,6 +42,8 @@ mod threads;
 #[cfg(feature = "linux-injected")]
 pub(crate) mod user;
 #[cfg(feature = "linux-injected")]
+pub(crate) mod files;
+#[cfg(feature = "linux-injected")]
 mod processes;
 #[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod cloak;
