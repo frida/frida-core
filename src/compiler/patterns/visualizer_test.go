@@ -161,3 +161,26 @@ struct Picture {
 		t.Fatalf("the root's own visualizer should be kept: %+v (error %q)", image, value.Error)
 	}
 }
+
+func TestRootEnumAttributes(t *testing.T) {
+	module, diagnostics := Compile(`
+enum Kind : u8 {
+    A,
+    B,
+} [[name("kind"), comment("the record's kind")]];
+`)
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	var kind Type
+	for _, candidate := range module.Types {
+		if candidate.TypeName() == "Kind" {
+			kind = candidate
+		}
+	}
+	value := Decode(module, Targets[0], kind, []byte{1}, 0x4000)
+
+	if value.DisplayName != "kind" || value.Comment != "the record's kind" {
+		t.Fatalf("a root enum should keep its own attributes: %+v (error %q)", value, value.Error)
+	}
+}

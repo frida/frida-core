@@ -519,7 +519,7 @@ func (d *decoder) decode(name string, t Type, offset int, scope *frame) *Decoded
 		attributes = value.frame
 	}
 	if attributes == nil {
-		return value
+		attributes = d.newFrame(value, offset, nil, true)
 	}
 	for _, attributed := range attributedTypes(t) {
 		if err := attributes.applyAttributes(value, attributed); err != nil {
