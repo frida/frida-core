@@ -354,9 +354,13 @@ unsafe fn switch_stack(top: usize, body: unsafe extern "C" fn(*mut c_void), para
             "mov sp, r5",
             top = in(reg) top,
             body = in(reg) body,
-            in("r0") parameter,
+            inout("r0") parameter => _,
+            out("r1") _,
+            out("r2") _,
+            out("r3") _,
             out("r5") _,
-            clobber_abi("C"),
+            out("r12") _,
+            out("lr") _,
         );
     }
 }
