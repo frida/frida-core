@@ -5,6 +5,7 @@ namespace Frida.Barebone {
 	public sealed class AgentConnection : Object, AsyncInitable {
 		public signal void progress (string status, double fraction);
 		public signal void script_message (uint pid, AgentScriptId id, string json, Bytes? data);
+		public signal void lost (string reason);
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -45,6 +46,7 @@ namespace Frida.Barebone {
 		private Efni.Promise<bool>? listening;
 
 		private Gee.Map<uint16, Efni.Promise<Variant>> pending_requests = new Gee.HashMap<uint16, Efni.Promise<Variant>> ();
+		private string? loss;
 		private uint16 next_request_id = 1;
 
 		private const size_t AGENT_STACK_SIZE = 512 * 1024;
@@ -545,11 +547,13 @@ namespace Frida.Barebone {
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
-			try {
-				yield execute_command (Command.STOP, new Variant.boolean (true), cancellable);
-				if (flavor == null || flavor.stays_attached)
-					yield wait_for_agent_to_leave (cancellable);
-			} catch (GLib.Error e) {
+			if (loss == null) {
+				try {
+					yield execute_command (Command.STOP, new Variant.boolean (true), cancellable);
+					if (flavor == null || flavor.stays_attached)
+						yield wait_for_agent_to_leave (cancellable);
+				} catch (GLib.Error e) {
+				}
 			}
 
 			io_cancellable.cancel ();
@@ -1062,6 +1066,9 @@ namespace Frida.Barebone {
 		// Zero selects the agent in the kernel. A different value selects a process that has a copy.
 		private async Variant execute_command (Command command, Variant payload, Cancellable? cancellable,
 				uint destination = 0) throws Efni.Error, IOError {
+			if (loss != null)
+				throw new Efni.Error.TRANSPORT ("The agent is gone: %s", loss);
+
 			uint16 request_id = next_request_id++;
 
 			Bytes frame = frame_message (command, request_id, destination, payload);
@@ -1094,6 +1101,7 @@ namespace Frida.Barebone {
 				string? fault = yield describe_agent_fault (cancellable);
 				if (fault == null)
 					throw e;
+				note_loss (fault);
 				throw new Efni.Error.TIMED_OUT ("%s; %s", e.message, fault);
 			} finally {
 				timeout_source.destroy ();
@@ -1115,15 +1123,16 @@ namespace Frida.Barebone {
 				return null;
 
 			var debugger = machine.debugger;
-			Buffer record;
+			bool was_running = yield halt_guest (debugger, cancellable);
+			Buffer? record = null;
 			try {
-				yield debugger.stop (cancellable);
 				record = debugger.make_buffer (yield debugger.read_byte_array (fault_record, FAULT_RECORD_SIZE,
 					cancellable));
-				yield debugger.resume (cancellable);
 			} catch (GLib.Error e) {
-				return null;
 			}
+			yield resume_guest (debugger, was_running, cancellable);
+			if (record == null)
+				return null;
 
 			if (record.read_uint64 (0) == 0)
 				return null;
@@ -1196,6 +1205,8 @@ namespace Frida.Barebone {
 					if (command_code == Command.READY) {
 						if (listening != null && !listening.future.ready)
 							listening.resolve (true);
+					} else if (command_code == Command.FAULTED) {
+						report_fault.begin ();
 					} else if (command_code == Command.SPAWN_ADDED) {
 						if (!payload.check_format_string ("(us)", false))
 							throw new Efni.Error.PROTOCOL ("Invalid spawn added payload format");
@@ -1250,7 +1261,32 @@ namespace Frida.Barebone {
 			} catch (GLib.Error e) {
 			}
 
+			if (!io_cancellable.is_cancelled ())
+				note_loss ("the connection closed");
+
 			reading.resolve (true);
+		}
+
+		private async void report_fault () {
+			string? fault = null;
+			try {
+				fault = yield describe_agent_fault (io_cancellable);
+			} catch (GLib.Error e) {
+			}
+			note_loss (fault ?? "the agent took an unhandled fault");
+		}
+
+		private void note_loss (string reason) {
+			if (loss != null)
+				return;
+			loss = reason;
+
+			var abandoned = pending_requests.values.to_array ();
+			pending_requests.clear ();
+			foreach (var request in abandoned)
+				request.reject (new Efni.Error.TRANSPORT ("The agent is gone: %s", reason));
+
+			lost (reason);
 		}
 
 		private Efni.Promise<bool>? reading;
@@ -1391,7 +1427,8 @@ namespace Frida.Barebone {
 			REPLY = 128,
 			SCRIPT_MESSAGE = 129,
 			SPAWN_ADDED = 130,
-			READY = 131;
+			READY = 131,
+			FAULTED = 132;
 
 			public string to_nick () {
 				return Efni.Marshal.enum_to_nick<Command> (this);

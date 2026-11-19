@@ -168,6 +168,7 @@ pub enum FridaCommand {
     ScriptMessage = 129,
     SpawnAdded = 130,
     Ready = 131,
+    Faulted = 132,
 }
 
 impl core::fmt::Display for FridaCommand {
@@ -178,6 +179,7 @@ impl core::fmt::Display for FridaCommand {
             FridaCommand::EnumerateShortcuts => write!(f, "EnumerateShortcuts"),
             FridaCommand::SpawnAdded => write!(f, "SpawnAdded"),
             FridaCommand::Ready => write!(f, "Ready"),
+            FridaCommand::Faulted => write!(f, "Faulted"),
             FridaCommand::CreateScript => write!(f, "CreateScript"),
             FridaCommand::LoadScript => write!(f, "LoadScript"),
             FridaCommand::DestroyScript => write!(f, "DestroyScript"),
@@ -384,6 +386,8 @@ mod entrypoint_blob {
             transport_set(transport);
 
             tell_the_host_we_are_listening();
+            #[cfg(feature = "linux-injected")]
+            prepare_fault_notice();
 
             let context = adopt_js_context();
             #[cfg(feature = "linux-injected")]
@@ -778,6 +782,14 @@ impl Transport {
         }
     }
 
+    #[cfg(feature = "linux-injected")]
+    pub fn flush(&self) {
+        #[cfg(feature = "blob")]
+        if let Transport::Virtio(h) = self {
+            h.flush();
+        }
+    }
+
     pub fn shutdown(&self) {
         match self {
             #[cfg(feature = "blob")]
@@ -884,6 +896,33 @@ fn tell_the_host_we_are_listening() {
         g_variant_unref(message);
     }
 }
+
+// Serialized up front, as a fault may strike with the allocator's lock held.
+#[cfg(feature = "linux-injected")]
+fn prepare_fault_notice() {
+    unsafe {
+        let message = g_variant_new(
+            c"(yquv)".as_ptr(),
+            FridaCommand::Faulted as u8 as u32,
+            0u32,
+            0u32,
+            g_variant_new(c"()".as_ptr()),
+        );
+        FAULT_NOTICE = serialize_message(message);
+        g_variant_unref(message);
+    }
+}
+
+#[cfg(feature = "linux-injected")]
+pub(crate) fn tell_the_host_we_faulted() {
+    if let Some(notice) = unsafe { (&*ptr::addr_of!(FAULT_NOTICE)).as_deref() } {
+        send_frame(notice);
+        transport_get_unchecked().flush();
+    }
+}
+
+#[cfg(feature = "linux-injected")]
+static mut FAULT_NOTICE: Option<Vec<u8>> = None;
 
 #[inline(always)]
 fn send_frame(frame: &[u8]) {

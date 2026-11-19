@@ -616,6 +616,7 @@ fn handled(faulted_at: usize, accessed: usize, context: &mut GumCpuContext) -> b
 
 extern "C" fn frida_park() -> ! {
     static mut PARK_TOKEN: u8 = 0;
+    crate::tell_the_host_we_faulted();
     loop {
         crate::kernel::wait(ptr::addr_of!(PARK_TOKEN), None, &mut || false);
     }

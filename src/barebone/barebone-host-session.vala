@@ -600,8 +600,10 @@ namespace Frida {
 		}
 
 		construct {
-			if (connection != null)
+			if (connection != null) {
 				connection.spawn_added.connect (on_spawn_added);
+				connection.lost.connect (on_connection_lost);
+			}
 			watchdog.expired.connect (on_watchdog_expired);
 		}
 
@@ -1100,6 +1102,18 @@ namespace Frida {
 
 		public async ServiceSessionId open_service (string address, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Services are not supported by this backend");
+		}
+
+		private void on_connection_lost (string reason) {
+			foreach (BareboneAgentSession session in agent_sessions.values.to_array ()) {
+				AgentSessionId id = session.id;
+
+				session.closed.disconnect (on_agent_session_closed);
+				agent_sessions.unset (id);
+				session.close.begin (null);
+
+				agent_session_detached (id, PROCESS_TERMINATED, CrashInfo (session.pid, "", reason, ""));
+			}
 		}
 
 		private void on_agent_session_closed (BareboneAgentSession session) {

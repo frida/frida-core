@@ -497,6 +497,11 @@ impl Hostlink {
         self.data_rx_refill();
     }
 
+    pub fn flush(&self) {
+        self.data_tx_complete();
+        self.data_tx_push();
+    }
+
     fn ctrl_prime_rx(&self, count: usize) {
         let s = unsafe { &mut *self.state.get() };
         let mut posted = 0usize;
