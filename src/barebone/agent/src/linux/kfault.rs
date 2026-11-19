@@ -315,6 +315,21 @@ const THUMB_STATE: u32 = 1 << 5;
 static mut ORIGINAL_STUB: usize = 0;
 
 #[cfg(target_arch = "arm")]
+static mut RESUME_STUB: usize = 0;
+
+#[cfg(target_arch = "arm")]
+static mut RESUME_TARGET: u32 = 0;
+
+#[cfg(target_arch = "arm")]
+const LDR_IP_FROM_LITERAL: u32 = 0xe59fc004;
+
+#[cfg(target_arch = "arm")]
+const LDR_IP_FROM_IP: u32 = 0xe59cc000;
+
+#[cfg(target_arch = "arm")]
+const BX_IP: u32 = 0xe12fff1c;
+
+#[cfg(target_arch = "arm")]
 pub fn install() {
     let target = unsafe { _fixup_exception } as *const u32;
     for slot in 0..2 {
@@ -327,6 +342,7 @@ pub fn install() {
     if unsafe { ORIGINAL_STUB } == 0 {
         return;
     }
+    unsafe { build_resume_stub() };
 
     unsafe {
         let addr = target as *mut u32;
@@ -365,6 +381,18 @@ unsafe fn build_original_stub(target: *const u32) {
 }
 
 #[cfg(target_arch = "arm")]
+unsafe fn build_resume_stub() {
+    let stub = crate::kernel::alloc_code(16) as *mut u32;
+    unsafe {
+        stub.add(0).write(LDR_IP_FROM_LITERAL);
+        stub.add(1).write(LDR_IP_FROM_IP);
+        stub.add(2).write(BX_IP);
+        stub.add(3).write((&raw const RESUME_TARGET) as u32);
+        RESUME_STUB = stub as usize;
+    }
+}
+
+#[cfg(target_arch = "arm")]
 unsafe extern "C" fn frida_arm_fixup(regs: *mut c_void) -> c_int {
     let original: unsafe extern "C" fn(*mut c_void) -> c_int =
         unsafe { core::mem::transmute(ORIGINAL_STUB) };
@@ -377,12 +405,19 @@ unsafe extern "C" fn frida_arm_fixup(regs: *mut c_void) -> c_int {
 
     let accessed: usize;
     unsafe { core::arch::asm!("mrc p15, 0, {}, c6, c0, 0", out(reg) accessed, options(nomem, nostack)) };
+    let state_at_fault = context.cpsr;
     if !handled(faulted_at, accessed, &mut context) {
         let status: u32;
         unsafe { core::arch::asm!("mrc p15, 0, {}, c5, c0, 0", out(reg) status, options(nomem, nostack)) };
         crate::note_unhandled_fault(status as u64, faulted_at as u64, accessed as u64);
         context.pc = frida_park as *const () as usize as u32;
-        context.cpsr &= !THUMB_STATE;
+    }
+    let resumes_in_thumb = context.pc & 1 != 0 || context.cpsr & THUMB_STATE != 0;
+    context.pc &= !1;
+    context.cpsr = state_at_fault;
+    if resumes_in_thumb && state_at_fault & THUMB_STATE == 0 {
+        unsafe { RESUME_TARGET = context.pc | 1 };
+        context.pc = unsafe { RESUME_STUB } as u32;
     }
     unsafe { restore_context(regs, &context) };
     1
