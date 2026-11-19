@@ -27,7 +27,6 @@ SECTIONS {
     ___kmalloc = .; . += 4;
     _kfree = .; . += 4;
     _vmalloc = .; . += 4;
-    _vfree = .; . += 4;
     _execmem_alloc = .; . += 4;
     _set_memory_rw = .; . += 4;
     _set_memory_ro = .; . += 4;

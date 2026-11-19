@@ -5,6 +5,7 @@ use core::ptr::read_volatile;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use core::sync::atomic::{AtomicI32, fence};
+#[cfg(not(target_arch = "arm"))]
 use core::sync::atomic::AtomicUsize;
 
 use crate::kernel::ThreadEntry;
@@ -249,20 +250,6 @@ pub fn alloc_heap(size: usize) -> *mut u8 {
     alloc(size)
 }
 
-pub fn run_on_large_stack(body: unsafe extern "C" fn(*mut c_void), parameter: *mut c_void) {
-    let stack = vmalloc(LARGE_STACK_SIZE);
-    LARGE_STACK.store(stack as usize, Ordering::Release);
-    let top = (stack as usize + LARGE_STACK_SIZE) & !15;
-    unsafe { switch_stack(top, body, parameter) };
-    LARGE_STACK.store(0, Ordering::Release);
-    vfree(stack);
-}
-
-pub fn large_stack_headroom(here: usize) -> Option<usize> {
-    let stack = LARGE_STACK.load(Ordering::Acquire);
-    (stack != 0 && here >= stack && here < stack + LARGE_STACK_SIZE).then(|| here - stack)
-}
-
 #[cfg(not(target_arch = "x86"))]
 fn vmalloc(size: usize) -> *mut u8 {
     unsafe {
@@ -280,94 +267,6 @@ fn vmalloc(size: usize) -> *mut u8 {
 fn vmalloc(size: usize) -> *mut u8 {
     unsafe { frida_k_vmalloc(size) }
 }
-
-#[cfg(not(target_arch = "x86"))]
-fn vfree(address: *mut u8) {
-    unsafe { _vfree(address) };
-}
-
-#[cfg(target_arch = "x86")]
-fn vfree(address: *mut u8) {
-    unsafe { frida_k_vfree(address) };
-}
-
-#[cfg(target_arch = "x86_64")]
-unsafe fn switch_stack(top: usize, body: unsafe extern "C" fn(*mut c_void), parameter: *mut c_void) {
-    unsafe {
-        core::arch::asm!(
-            "mov r12, rsp",
-            "mov rsp, {top}",
-            "call {body}",
-            "mov rsp, r12",
-            top = in(reg) top,
-            body = in(reg) body,
-            in("rdi") parameter,
-            out("r12") _,
-            clobber_abi("C"),
-        );
-    }
-}
-
-#[cfg(target_arch = "x86")]
-unsafe fn switch_stack(top: usize, body: unsafe extern "C" fn(*mut c_void), parameter: *mut c_void) {
-    unsafe {
-        core::arch::asm!(
-            "mov edi, esp",
-            "mov esp, {top}",
-            "sub esp, 12",
-            "push {parameter}",
-            "call {body}",
-            "mov esp, edi",
-            top = in(reg) top,
-            body = in(reg) body,
-            parameter = in(reg) parameter,
-            out("edi") _,
-            clobber_abi("C"),
-        );
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn switch_stack(top: usize, body: unsafe extern "C" fn(*mut c_void), parameter: *mut c_void) {
-    unsafe {
-        core::arch::asm!(
-            "mov x20, sp",
-            "mov sp, {top}",
-            "blr {body}",
-            "mov sp, x20",
-            top = in(reg) top,
-            body = in(reg) body,
-            in("x0") parameter,
-            out("x20") _,
-            clobber_abi("C"),
-        );
-    }
-}
-
-#[cfg(target_arch = "arm")]
-unsafe fn switch_stack(top: usize, body: unsafe extern "C" fn(*mut c_void), parameter: *mut c_void) {
-    unsafe {
-        core::arch::asm!(
-            "mov r5, sp",
-            "mov sp, {top}",
-            "blx {body}",
-            "mov sp, r5",
-            top = in(reg) top,
-            body = in(reg) body,
-            inout("r0") parameter => _,
-            out("r1") _,
-            out("r2") _,
-            out("r3") _,
-            out("r5") _,
-            out("r12") _,
-            out("lr") _,
-        );
-    }
-}
-
-static LARGE_STACK: AtomicUsize = AtomicUsize::new(0);
-
-const LARGE_STACK_SIZE: usize = 512 * 1024;
 
 #[cfg(target_arch = "x86")]
 pub fn alloc_code(size: usize) -> *mut u8 {
@@ -1414,7 +1313,6 @@ unsafe extern "C" {
     #[cfg(not(target_arch = "x86"))]
     static _vmalloc_noprof: Option<unsafe extern "C" fn(usize) -> *mut u8>;
     #[cfg(not(target_arch = "x86"))]
-    static _vfree: unsafe extern "C" fn(*mut u8);
     #[cfg(not(target_arch = "x86"))]
     static _frida_kmod_remap_writable: Option<unsafe extern "C" fn(u64, u32) -> *mut c_void>;
     #[cfg(not(target_arch = "x86"))]
@@ -1524,7 +1422,6 @@ unsafe extern "C" {
     fn frida_k_free_code(code: *mut u8);
     fn frida_k_set_protection(address: c_ulong, pages: c_ulong, writable: c_int, executable: c_int) -> c_int;
     fn frida_k_vmalloc(size: usize) -> *mut u8;
-    fn frida_k_vfree(address: *mut u8);
 }
 
 #[cfg(target_arch = "x86")]

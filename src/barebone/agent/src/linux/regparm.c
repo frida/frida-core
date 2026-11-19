@@ -716,7 +716,6 @@ int frida_k_call_fixup_exception (void * original, void * regs, int trapnr, unsi
 
 extern void * _vmalloc;
 extern void * _vmalloc_noprof;
-extern void * _vfree;
 
 void * frida_k_vmalloc (unsigned long size)
 {
@@ -729,12 +728,6 @@ void * frida_k_vmalloc (unsigned long size)
   return 0;
 }
 
-void frida_k_vfree (void * address)
-{
-  typedef void (__attribute__ ((regparm (3))) * fn_t) (void *);
-
-  ((fn_t) _vfree) (address);
-}
 
 extern void * _set_memory_ro;
 extern void * _set_memory_x;
