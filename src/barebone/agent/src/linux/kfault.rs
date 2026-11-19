@@ -1,6 +1,6 @@
 use core::ffi::{c_int, c_void};
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-use core::ffi::c_long;
+use core::ffi::c_ulong;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 use core::ptr;
 #[cfg(target_arch = "arm")]
@@ -14,99 +14,76 @@ use crate::bindings::{
     gum_barebone_handle_exception, GumCpuContext,
     _GumExceptionType_GUM_EXCEPTION_ACCESS_VIOLATION as ACCESS_VIOLATION,
 };
-
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[repr(C)]
-struct NotifierBlock {
-    notifier_call: Option<unsafe extern "C" fn(*mut NotifierBlock, c_long, *mut c_void) -> c_int>,
-    next: *mut NotifierBlock,
-    priority: c_int,
-}
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-unsafe impl Sync for NotifierBlock {}
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-static mut REPORTER: NotifierBlock =
-    NotifierBlock { notifier_call: None, next: ptr::null_mut(), priority: 0 };
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[repr(C)]
-struct DieArgs {
-    regs: *mut c_void,
-    message: *const u8,
-    err: c_long,
-    trapnr: c_int,
-    signr: c_int,
-}
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-const DIE_OOPS: c_long = 1;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-const NOTIFY_DONE: c_int = 0;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-const NOTIFY_STOP: c_int = 0x8001;
-
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-unsafe fn dispatch(action: c_long, data: *mut c_void) -> c_int {
-    if action != DIE_OOPS {
-        return NOTIFY_DONE;
-    }
-    let regs = unsafe { (*(data as *const DieArgs)).regs };
-    if unsafe { recovered(regs) } {
-        return NOTIFY_STOP;
-    }
-    NOTIFY_DONE
-}
-
-#[cfg(target_arch = "x86")]
-static mut RESUME_CONTEXT: GumCpuContext = unsafe { core::mem::zeroed() };
-
-#[cfg(target_arch = "x86")]
-static mut RESUME_STUB: usize = 0;
-
-#[cfg(target_arch = "x86")]
-const RESUME_SCRATCH_SIZE: usize = 512;
-
-#[cfg(target_arch = "x86")]
-static mut RESUME_SCRATCH: [u8; RESUME_SCRATCH_SIZE] = [0; RESUME_SCRATCH_SIZE];
+use crate::bindings::{
+    g_object_unref, gpointer, gum_interceptor_obtain, gum_interceptor_replace_fast, gum_interceptor_revert,
+    GumInterceptor, GumReplaceReturn_GUM_REPLACE_OK as GUM_REPLACE_OK,
+};
 
 #[cfg(target_arch = "x86")]
 pub fn install() {
-    unsafe { build_resume_stub() };
     unsafe {
-        (&raw mut REPORTER).write(NotifierBlock {
-            notifier_call: Some(frida_kcb_die),
-            next: ptr::null_mut(),
-            priority: 0,
-        });
-        frida_k_register_die_notifier(&raw mut REPORTER as *mut c_void);
+        build_resume_stub();
+        take_over_fixups(frida_kcb_fixup_exception as *mut c_void);
     }
 }
 
 #[cfg(target_arch = "x86")]
 pub fn uninstall() {
-    unsafe { frida_k_unregister_die_notifier(&raw mut REPORTER as *mut c_void) };
+    give_back_fixups();
 }
 
-#[cfg(target_arch = "x86")]
-unsafe fn build_resume_stub() {
-    let stub = crate::kernel::alloc_code(16);
-    if stub.is_null() {
-        return;
-    }
+#[cfg(target_arch = "x86_64")]
+pub fn install() {
+    unsafe { take_over_fixups(frida_x86_64_fixup as *mut c_void) };
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn uninstall() {
+    give_back_fixups();
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+unsafe fn take_over_fixups(replacement: *mut c_void) {
+    let mut original: gpointer = ptr::null_mut();
     unsafe {
-        stub.write(0xbf);
-        (stub.add(1) as *mut u32).write((&raw mut RESUME_CONTEXT) as u32);
-        stub.add(5).write(0xe9);
-        let rel = (frida_i386_resume as *const () as usize).wrapping_sub(stub as usize + 10) as u32;
-        (stub.add(6) as *mut u32).write(rel);
-        RESUME_STUB = stub as usize;
+        INTERCEPTOR = gum_interceptor_obtain();
+        let result = gum_interceptor_replace_fast(
+            INTERCEPTOR,
+            _fixup_exception as *mut c_void,
+            replacement,
+            &mut original,
+            ptr::null(),
+        );
+        assert_eq!(result, GUM_REPLACE_OK);
+        ORIGINAL_FIXUP = original as usize;
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn give_back_fixups() {
+    unsafe {
+        gum_interceptor_revert(INTERCEPTOR, _fixup_exception as *mut c_void);
+        g_object_unref(INTERCEPTOR as gpointer);
     }
 }
 
 #[cfg(target_arch = "x86")]
-unsafe fn recovered(regs: *mut c_void) -> bool {
+#[unsafe(no_mangle)]
+unsafe extern "C" fn frida_cb_fixup_exception(
+    regs: *mut c_void,
+    trapnr: c_int,
+    error_code: c_ulong,
+    fault_address: c_ulong,
+) -> c_int {
+    if unsafe { recovered(regs, fault_address as usize) } {
+        return 1;
+    }
+    unsafe { frida_k_call_fixup_exception(ORIGINAL_FIXUP as *mut c_void, regs, trapnr, error_code, fault_address) }
+}
+
+#[cfg(target_arch = "x86")]
+unsafe fn recovered(regs: *mut c_void, accessed: usize) -> bool {
     let faulted_at = unsafe { (regs as *const u32).add(12).read() as usize };
     let (base, size) = crate::own_range();
     if faulted_at < base || faulted_at >= base + size {
@@ -118,11 +95,11 @@ unsafe fn recovered(regs: *mut c_void) -> bool {
         gum_barebone_handle_exception(
             ACCESS_VIOLATION,
             faulted_at as *mut c_void,
-            faulting_address() as *mut c_void,
+            accessed as *mut c_void,
             &mut context,
         )
     };
-    if handled == 0 || unsafe { RESUME_STUB } == 0 {
+    if handled == 0 {
         return false;
     }
 
@@ -134,10 +111,16 @@ unsafe fn recovered(regs: *mut c_void) -> bool {
 }
 
 #[cfg(target_arch = "x86")]
-fn faulting_address() -> usize {
-    let value: usize;
-    unsafe { core::arch::asm!("mov {}, cr2", out(reg) value, options(nomem, nostack)) };
-    value
+unsafe fn build_resume_stub() {
+    let stub = crate::kernel::alloc_code(16);
+    unsafe {
+        stub.write(0xbf);
+        (stub.add(1) as *mut u32).write((&raw mut RESUME_CONTEXT) as u32);
+        stub.add(5).write(0xe9);
+        let rel = (frida_i386_resume as *const () as usize).wrapping_sub(stub as usize + 10) as u32;
+        (stub.add(6) as *mut u32).write(rel);
+        RESUME_STUB = stub as usize;
+    }
 }
 
 #[cfg(target_arch = "x86")]
@@ -175,43 +158,18 @@ unsafe extern "C" fn frida_i386_resume() {
     );
 }
 
-#[cfg(target_arch = "x86")]
-#[unsafe(no_mangle)]
-unsafe extern "C" fn frida_cb_die(_nb: *mut NotifierBlock, action: c_long, data: *mut c_void) -> c_int {
-    unsafe { dispatch(action, data) }
-}
-
-#[cfg(target_arch = "x86")]
-unsafe extern "C" {
-    fn frida_kcb_die(nb: *mut NotifierBlock, action: c_long, data: *mut c_void) -> c_int;
-    fn frida_k_register_die_notifier(nb: *mut c_void) -> c_int;
-    fn frida_k_unregister_die_notifier(nb: *mut c_void) -> c_int;
-}
-
 #[cfg(target_arch = "x86_64")]
-pub fn install() {
-    unsafe {
-        (&raw mut REPORTER).write(NotifierBlock {
-            notifier_call: Some(on_die),
-            next: ptr::null_mut(),
-            priority: 0,
-        });
-        _register_die_notifier(&raw mut REPORTER as *mut c_void);
+unsafe extern "C" fn frida_x86_64_fixup(regs: *mut c_void, trapnr: c_int, error_code: c_ulong, fault_address: c_ulong) -> c_int {
+    if unsafe { recovered(regs, fault_address as usize) } {
+        return 1;
     }
+    let original: unsafe extern "C" fn(*mut c_void, c_int, c_ulong, c_ulong) -> c_int =
+        unsafe { core::mem::transmute(ORIGINAL_FIXUP) };
+    unsafe { original(regs, trapnr, error_code, fault_address) }
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn uninstall() {
-    unsafe { _unregister_die_notifier(&raw mut REPORTER as *mut c_void) };
-}
-
-#[cfg(target_arch = "x86_64")]
-unsafe extern "C" fn on_die(_nb: *mut NotifierBlock, action: c_long, data: *mut c_void) -> c_int {
-    unsafe { dispatch(action, data) }
-}
-
-#[cfg(target_arch = "x86_64")]
-unsafe fn recovered(regs: *mut c_void) -> bool {
+unsafe fn recovered(regs: *mut c_void, accessed: usize) -> bool {
     let faulted_at = unsafe { program_counter(regs) };
     let (base, size) = crate::own_range();
     if faulted_at < base || faulted_at >= base + size {
@@ -223,7 +181,7 @@ unsafe fn recovered(regs: *mut c_void) -> bool {
         gum_barebone_handle_exception(
             ACCESS_VIOLATION,
             faulted_at as *mut c_void,
-            faulting_address() as *mut c_void,
+            accessed as *mut c_void,
             &mut context,
         )
     };
@@ -233,13 +191,6 @@ unsafe fn recovered(regs: *mut c_void) -> bool {
 
     unsafe { restore_context(regs, &context) };
     true
-}
-
-#[cfg(target_arch = "x86_64")]
-fn faulting_address() -> usize {
-    let value: usize;
-    unsafe { core::arch::asm!("mov {}, cr2", out(reg) value, options(nomem, nostack)) };
-    value
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -297,10 +248,40 @@ unsafe fn restore_context(regs: *mut c_void, c: &GumCpuContext) {
     }
 }
 
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+static mut INTERCEPTOR: *mut GumInterceptor = ptr::null_mut();
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+static mut ORIGINAL_FIXUP: usize = 0;
+
+#[cfg(target_arch = "x86")]
+static mut RESUME_CONTEXT: GumCpuContext = unsafe { core::mem::zeroed() };
+
+#[cfg(target_arch = "x86")]
+static mut RESUME_STUB: usize = 0;
+
+#[cfg(target_arch = "x86")]
+const RESUME_SCRATCH_SIZE: usize = 512;
+
+#[cfg(target_arch = "x86")]
+static mut RESUME_SCRATCH: [u8; RESUME_SCRATCH_SIZE] = [0; RESUME_SCRATCH_SIZE];
+
+#[cfg(target_arch = "x86")]
+unsafe extern "C" {
+    static _fixup_exception: unsafe extern "C" fn();
+    fn frida_kcb_fixup_exception();
+    fn frida_k_call_fixup_exception(
+        original: *mut c_void,
+        regs: *mut c_void,
+        trapnr: c_int,
+        error_code: c_ulong,
+        fault_address: c_ulong,
+    ) -> c_int;
+}
+
 #[cfg(target_arch = "x86_64")]
 unsafe extern "C" {
-    static _register_die_notifier: unsafe extern "C" fn(*mut c_void) -> c_int;
-    static _unregister_die_notifier: unsafe extern "C" fn(*mut c_void) -> c_int;
+    static _fixup_exception: unsafe extern "C" fn();
 }
 
 #[cfg(target_arch = "arm")]

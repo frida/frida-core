@@ -122,8 +122,7 @@ SECTIONS {
     _kernel_sendmsg = .; . += 4;
     _kernel_recvmsg = .; . += 4;
     _sock_release = .; . += 4;
-    _register_die_notifier = .; . += 4;
-    _unregister_die_notifier = .; . += 4;
+    _fixup_exception = .; . += 4;
   }
   /* Everything above is only ever read, so a process being instrumented can be shown the very
      same pages; everything below it each copy needs its own of. */

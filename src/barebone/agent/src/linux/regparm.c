@@ -644,32 +644,6 @@ frida_kcb_module_state (void * nb, unsigned long action, void * data)
   return frida_cb_module_state (nb, action, data);
 }
 
-extern void * _register_die_notifier;
-
-int frida_k_register_die_notifier (void * a0)
-{
-  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *);
-
-  return ((fn_t) _register_die_notifier) (a0);
-}
-
-extern void * _unregister_die_notifier;
-
-int frida_k_unregister_die_notifier (void * a0)
-{
-  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *);
-
-  return ((fn_t) _unregister_die_notifier) (a0);
-}
-
-extern int frida_cb_die (void * nb, unsigned long action, void * data);
-
-__attribute__ ((regparm (3))) int
-frida_kcb_die (void * nb, unsigned long action, void * data)
-{
-  return frida_cb_die (nb, action, data);
-}
-
 extern void * _frida_kmod_link_open;
 
 int frida_k_frida_kmod_link_open (void)
@@ -722,6 +696,22 @@ void frida_k_frida_kmod_exit_worker (void)
   typedef void (__attribute__ ((regparm (3))) * fn_t) (void);
 
   ((fn_t) _frida_kmod_exit_worker) ();
+}
+
+extern int frida_cb_fixup_exception (void * regs, int trapnr, unsigned long error_code, unsigned long fault_address);
+
+__attribute__ ((regparm (3))) int
+frida_kcb_fixup_exception (void * regs, int trapnr, unsigned long error_code, unsigned long fault_address)
+{
+  return frida_cb_fixup_exception (regs, trapnr, error_code, fault_address);
+}
+
+int frida_k_call_fixup_exception (void * original, void * regs, int trapnr, unsigned long error_code,
+    unsigned long fault_address)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (void *, int, unsigned long, unsigned long);
+
+  return ((fn_t) original) (regs, trapnr, error_code, fault_address);
 }
 
 extern void * _set_memory_ro;
