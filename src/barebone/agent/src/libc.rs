@@ -54,9 +54,15 @@ pub extern "C" fn sysconf(_name: i32) -> isize {
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(_start: *const u8, _end: *const u8) {}
 
-#[cfg(all(target_arch = "arm", not(feature = "linux-injected")))]
+#[cfg(target_arch = "arm")]
 #[unsafe(no_mangle)]
 pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
+    #[cfg(feature = "linux-injected")]
+    if !crate::kernel::in_copy() {
+        flush_lines(start, end);
+        return;
+    }
+
     unsafe {
         core::arch::asm!(
             "push {{r7}}",
@@ -73,8 +79,7 @@ pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
 }
 
 #[cfg(all(target_arch = "arm", feature = "linux-injected"))]
-#[unsafe(no_mangle)]
-pub extern "C" fn __clear_cache(start: *const u8, end: *const u8) {
+fn flush_lines(start: *const u8, end: *const u8) {
     unsafe {
         let told: u32;
         core::arch::asm!("mrc p15, 0, {}, c0, c0, 1", out(reg) told, options(nomem, nostack));
