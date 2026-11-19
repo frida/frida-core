@@ -514,15 +514,16 @@ func (f *frame) target(v Value) (*DecodedValue, error) {
 
 func (d *decoder) decode(name string, t Type, offset int, scope *frame) *DecodedValue {
 	value := d.decodeBare(name, t, offset, scope)
-	if scope != nil {
-		attributes := scope
-		if value.frame != nil {
-			attributes = value.frame
-		}
-		for _, attributed := range attributedTypes(t) {
-			if err := attributes.applyAttributes(value, attributed); err != nil {
-				value.fail(err)
-			}
+	attributes := scope
+	if value.frame != nil {
+		attributes = value.frame
+	}
+	if attributes == nil {
+		return value
+	}
+	for _, attributed := range attributedTypes(t) {
+		if err := attributes.applyAttributes(value, attributed); err != nil {
+			value.fail(err)
 		}
 	}
 	return value

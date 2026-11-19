@@ -137,3 +137,27 @@ struct Pair {
 		t.Error("an unknown pattern should fail")
 	}
 }
+
+func TestRootTypeVisualizer(t *testing.T) {
+	module, diagnostics := Compile(`
+struct Picture {
+    u8 kind;
+    u8 data[2];
+} [[hex::visualize("image", this.data)]];
+`)
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	var picture Type
+	for _, candidate := range module.Types {
+		if candidate.TypeName() == "Picture" {
+			picture = candidate
+		}
+	}
+	value := Decode(module, Targets[0], picture, []byte{7, 0xAA, 0xBB}, 0x3000)
+
+	image := value.Visualizer
+	if image == nil || image.Name != "image" || len(image.Arguments) != 1 || image.Arguments[0].Address != "0x3001" {
+		t.Fatalf("the root's own visualizer should be kept: %+v (error %q)", image, value.Error)
+	}
+}
