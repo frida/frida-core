@@ -385,6 +385,9 @@ mod entrypoint_blob {
             tell_the_host_we_are_listening();
 
             let context = adopt_js_context();
+            #[cfg(feature = "linux-injected")]
+            linux::run_on_large_stack(run_main_loop_on_large_stack, context as *mut c_void);
+            #[cfg(not(feature = "linux-injected"))]
             run_main_loop(context);
 
             destroy_all_scripts(context);
@@ -1225,6 +1228,11 @@ pub struct AgentFault {
 
 pub(crate) fn stop_requested() -> bool {
     STOP_REQUESTED.load(Ordering::Acquire)
+}
+
+#[cfg(feature = "linux-injected")]
+unsafe extern "C" fn run_main_loop_on_large_stack(main_context: *mut c_void) {
+    run_main_loop(main_context as *mut GMainContext);
 }
 
 fn run_main_loop(main_context: *mut GMainContext) {

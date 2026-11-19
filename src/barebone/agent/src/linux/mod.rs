@@ -4,7 +4,7 @@ pub fn stack_headroom() -> usize {
     let marker = 0usize;
     let here = &marker as *const usize as usize;
 
-    here - (here & !(STACK_SPAN - 1))
+    native::large_stack_headroom(here).unwrap_or(here - (here & !(STACK_SPAN - 1)))
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
@@ -62,7 +62,7 @@ pub use self::facade::*;
 pub use self::native::{
     alloc_dma, free_dma, get_kernel_base, get_kernel_size, hand_back_to_the_loader,
     install_interrupt_handler, loaded_from_the_inside, map_io, map_pages, mmio_interrupt, pci_interrupt,
-    release_fault_reporter, release_interrupt, remap_writable, run_when_ready, patch_text,
+    release_fault_reporter, release_interrupt, remap_writable, run_on_large_stack, run_when_ready, patch_text,
     set_kernel_base, set_protection, unmap_writable, virt_to_phys,
 };
 #[cfg(all(feature = "linux-injected", any(target_arch = "x86_64", target_arch = "aarch64")))]
