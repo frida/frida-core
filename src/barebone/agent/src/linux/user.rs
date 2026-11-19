@@ -1175,6 +1175,8 @@ fn page_size() -> usize {
     Arena::at(unsafe { ARENA }).page_size() as usize
 }
 
+const CHUNK_SIZE: usize = 4096;
+
 pub fn names_in(directory: &core::ffi::CStr) -> Vec<String> {
     let listed = syscall(OPENAT, WORKING_DIRECTORY, directory.as_ptr() as usize, READ_ONLY, 0, 0, 0);
     if listed < 0 {
@@ -1182,7 +1184,7 @@ pub fn names_in(directory: &core::ffi::CStr) -> Vec<String> {
     }
 
     let mut names = Vec::new();
-    let mut chunk = [0u8; 4096];
+    let mut chunk = alloc::vec![0u8; CHUNK_SIZE];
     loop {
         let read = syscall(GETDENTS, listed as usize, chunk.as_mut_ptr() as usize, chunk.len(),
             0, 0, 0);
@@ -1223,7 +1225,7 @@ pub fn contents_of(path: &core::ffi::CStr) -> Vec<u8> {
     }
 
     let mut said = Vec::new();
-    let mut chunk = [0u8; 4096];
+    let mut chunk = alloc::vec![0u8; CHUNK_SIZE];
     loop {
         let read = syscall(READ, file as usize, chunk.as_mut_ptr() as usize, chunk.len(), 0, 0, 0);
         if read <= 0 {
