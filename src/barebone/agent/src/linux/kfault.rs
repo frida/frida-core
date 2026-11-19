@@ -1,7 +1,6 @@
 use core::ffi::{c_int, c_void};
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use core::ffi::c_ulong;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 use core::ptr;
 #[cfg(target_arch = "arm")]
 use core::sync::atomic::AtomicBool;
@@ -37,7 +36,10 @@ pub fn uninstall() {
 
 #[cfg(target_arch = "x86_64")]
 pub fn install() {
-    unsafe { take_over_fixups(frida_x86_64_fixup as *mut c_void) };
+    unsafe {
+        take_over_fixups(frida_x86_64_fixup as *mut c_void);
+        take_over_oopses();
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -61,9 +63,34 @@ unsafe fn take_over_fixups(replacement: *mut c_void) {
     unsafe { ORIGINAL_FIXUP = original as usize };
 }
 
+#[cfg(target_arch = "x86_64")]
+unsafe fn take_over_oopses() {
+    if unsafe { _page_fault_oops } == 0 {
+        return;
+    }
+    let mut original: gpointer = ptr::null_mut();
+    let result = FIXUPS.apply(|interceptor| unsafe {
+        gum_interceptor_replace_fast(
+            interceptor,
+            _page_fault_oops as *mut c_void,
+            frida_x86_64_page_fault_oops as *mut c_void,
+            &mut original,
+            ptr::null(),
+        )
+    });
+    assert_eq!(result, GUM_REPLACE_OK);
+    unsafe { ORIGINAL_OOPS = original as usize };
+}
+
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn give_back_fixups() {
-    FIXUPS.revert(|interceptor| unsafe { gum_interceptor_revert(interceptor, _fixup_exception as *mut c_void) });
+    FIXUPS.revert(|interceptor| unsafe {
+        gum_interceptor_revert(interceptor, _fixup_exception as *mut c_void);
+        #[cfg(target_arch = "x86_64")]
+        if ORIGINAL_OOPS != 0 {
+            gum_interceptor_revert(interceptor, _page_fault_oops as *mut c_void);
+        }
+    });
 }
 
 #[cfg(target_arch = "x86")]
@@ -74,38 +101,23 @@ unsafe extern "C" fn frida_cb_fixup_exception(
     error_code: c_ulong,
     fault_address: c_ulong,
 ) -> c_int {
-    if unsafe { recovered(regs, fault_address as usize) } {
-        return 1;
-    }
-    unsafe { frida_k_call_fixup_exception(ORIGINAL_FIXUP as *mut c_void, regs, trapnr, error_code, fault_address) }
-}
-
-#[cfg(target_arch = "x86")]
-unsafe fn recovered(regs: *mut c_void, accessed: usize) -> bool {
+    let fixed =
+        unsafe { frida_k_call_fixup_exception(ORIGINAL_FIXUP as *mut c_void, regs, trapnr, error_code, fault_address) };
     let faulted_at = unsafe { (regs as *const u32).add(12).read() as usize };
-    let (base, size) = crate::own_range();
-    if faulted_at < base || faulted_at >= base + size {
-        return false;
+    if fixed != 0 || !is_ours(faulted_at) {
+        return fixed;
     }
 
     let mut context = unsafe { context_of(regs) };
-    let handled = unsafe {
-        gum_barebone_handle_exception(
-            ACCESS_VIOLATION,
-            faulted_at as *mut c_void,
-            accessed as *mut c_void,
-            &mut context,
-        )
-    };
-    if handled == 0 {
-        return false;
+    if !handled(faulted_at, fault_address as usize, &mut context) {
+        crate::note_unhandled_fault(trapnr as u64, faulted_at as u64, fault_address as u64);
+        context.eip = frida_park as *const () as usize as u32;
     }
-
     unsafe {
         (&raw mut RESUME_CONTEXT).write(context);
         (regs as *mut u32).add(12).write(RESUME_STUB as u32);
     }
-    true
+    1
 }
 
 #[cfg(target_arch = "x86")]
@@ -158,37 +170,38 @@ unsafe extern "C" fn frida_i386_resume() {
 
 #[cfg(target_arch = "x86_64")]
 unsafe extern "C" fn frida_x86_64_fixup(regs: *mut c_void, trapnr: c_int, error_code: c_ulong, fault_address: c_ulong) -> c_int {
-    if unsafe { recovered(regs, fault_address as usize) } {
-        return 1;
-    }
     let original: unsafe extern "C" fn(*mut c_void, c_int, c_ulong, c_ulong) -> c_int =
         unsafe { core::mem::transmute(ORIGINAL_FIXUP) };
-    unsafe { original(regs, trapnr, error_code, fault_address) }
+    let fixed = unsafe { original(regs, trapnr, error_code, fault_address) };
+    if fixed != 0 || !is_ours(unsafe { program_counter(regs) }) {
+        return fixed;
+    }
+
+    unsafe { recover(regs, trapnr, fault_address as usize) };
+    1
 }
 
 #[cfg(target_arch = "x86_64")]
-unsafe fn recovered(regs: *mut c_void, accessed: usize) -> bool {
-    let faulted_at = unsafe { program_counter(regs) };
-    let (base, size) = crate::own_range();
-    if faulted_at < base || faulted_at >= base + size {
-        return false;
+unsafe extern "C" fn frida_x86_64_page_fault_oops(regs: *mut c_void, error_code: c_ulong, fault_address: c_ulong) {
+    if !is_ours(unsafe { program_counter(regs) }) {
+        let original: unsafe extern "C" fn(*mut c_void, c_ulong, c_ulong) = unsafe { core::mem::transmute(ORIGINAL_OOPS) };
+        unsafe { original(regs, error_code, fault_address) };
+        return;
     }
 
+    unsafe { recover(regs, PAGE_FAULT_TRAP, fault_address as usize) };
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn recover(regs: *mut c_void, trapnr: c_int, accessed: usize) {
     let mut context = unsafe { context_of(regs) };
-    let handled = unsafe {
-        gum_barebone_handle_exception(
-            ACCESS_VIOLATION,
-            faulted_at as *mut c_void,
-            accessed as *mut c_void,
-            &mut context,
-        )
-    };
-    if handled == 0 {
-        return false;
+    let faulted_at = context.rip as usize;
+    if !handled(faulted_at, accessed, &mut context) {
+        crate::note_unhandled_fault(trapnr as u64, faulted_at as u64, accessed as u64);
+        context.rip = frida_park as *const () as usize as u64;
+        context.rsp = (context.rsp & !15) - 8;
     }
-
     unsafe { restore_context(regs, &context) };
-    true
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -252,6 +265,12 @@ static FIXUPS: Instrumentation = Instrumentation::new();
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 static mut ORIGINAL_FIXUP: usize = 0;
 
+#[cfg(target_arch = "x86_64")]
+static mut ORIGINAL_OOPS: usize = 0;
+
+#[cfg(target_arch = "x86_64")]
+const PAGE_FAULT_TRAP: c_int = 14;
+
 #[cfg(target_arch = "x86")]
 static mut RESUME_CONTEXT: GumCpuContext = unsafe { core::mem::zeroed() };
 
@@ -280,6 +299,7 @@ unsafe extern "C" {
 #[cfg(target_arch = "x86_64")]
 unsafe extern "C" {
     static _fixup_exception: unsafe extern "C" fn();
+    static _page_fault_oops: usize;
 }
 
 #[cfg(target_arch = "arm")]
@@ -287,6 +307,9 @@ const PROLOGUE: [u32; 2] = [0xe92d4010, 0xe52de004];
 
 #[cfg(target_arch = "arm")]
 static ACTIVATED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_arch = "arm")]
+const THUMB_STATE: u32 = 1 << 5;
 
 #[cfg(target_arch = "arm")]
 static mut ORIGINAL_STUB: usize = 0;
@@ -343,40 +366,26 @@ unsafe fn build_original_stub(target: *const u32) {
 
 #[cfg(target_arch = "arm")]
 unsafe extern "C" fn frida_arm_fixup(regs: *mut c_void) -> c_int {
-    if unsafe { recovered(regs) } {
-        return 1;
-    }
     let original: unsafe extern "C" fn(*mut c_void) -> c_int =
         unsafe { core::mem::transmute(ORIGINAL_STUB) };
-    unsafe { original(regs) }
-}
-
-#[cfg(target_arch = "arm")]
-unsafe fn recovered(regs: *mut c_void) -> bool {
-    let faulted_at = unsafe { (regs as *const u32).add(15).read() as usize };
-    let (base, size) = crate::own_range();
-    if faulted_at < base || faulted_at >= base + size {
-        return false;
+    let fixed = unsafe { original(regs) };
+    let mut context = unsafe { context_of(regs) };
+    let faulted_at = context.pc as usize;
+    if fixed != 0 || !is_ours(faulted_at) {
+        return fixed;
     }
 
     let accessed: usize;
     unsafe { core::arch::asm!("mrc p15, 0, {}, c6, c0, 0", out(reg) accessed, options(nomem, nostack)) };
-
-    let mut context = unsafe { context_of(regs) };
-    let handled = unsafe {
-        gum_barebone_handle_exception(
-            ACCESS_VIOLATION,
-            faulted_at as *mut c_void,
-            accessed as *mut c_void,
-            &mut context,
-        )
-    };
-    if handled == 0 {
-        return false;
+    if !handled(faulted_at, accessed, &mut context) {
+        let status: u32;
+        unsafe { core::arch::asm!("mrc p15, 0, {}, c5, c0, 0", out(reg) status, options(nomem, nostack)) };
+        crate::note_unhandled_fault(status as u64, faulted_at as u64, accessed as u64);
+        context.pc = frida_park as *const () as usize as u32;
+        context.cpsr &= !THUMB_STATE;
     }
-
     unsafe { restore_context(regs, &context) };
-    true
+    1
 }
 
 #[cfg(target_arch = "arm")]
@@ -538,52 +547,24 @@ unsafe extern "C" {
 
 #[cfg(target_arch = "aarch64")]
 unsafe extern "C" fn frida_arm64_fixup(regs: *mut c_void) -> c_int {
-    if unsafe { recovered(regs) } {
-        return 1;
-    }
     let prologue = INSTALLED.load(Ordering::Acquire);
-    unsafe { ((*prologue).call_original)(regs) }
-}
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn recovered(regs: *mut c_void) -> bool {
-    let faulted_at = unsafe { (regs as *const u64).add(32).read() as usize };
-    let (base, size) = crate::own_range();
-    if faulted_at < base || faulted_at >= base + size {
-        return false;
+    let fixed = unsafe { ((*prologue).call_original)(regs) };
+    let mut context = unsafe { context_of(regs) };
+    let faulted_at = context.pc as usize;
+    if fixed != 0 || !is_ours(faulted_at) {
+        return fixed;
     }
 
     let accessed: usize;
     unsafe { core::arch::asm!("mrs {}, far_el1", out(reg) accessed, options(nomem, nostack)) };
-
-    let mut context = unsafe { context_of(regs) };
-    let handled = unsafe {
-        gum_barebone_handle_exception(
-            ACCESS_VIOLATION,
-            faulted_at as *mut c_void,
-            accessed as *mut c_void,
-            &mut context,
-        )
-    };
-    if handled == 0 {
+    if !handled(faulted_at, accessed, &mut context) {
         let esr: u64;
         unsafe { core::arch::asm!("mrs {}, esr_el1", out(reg) esr, options(nomem, nostack)) };
         crate::note_unhandled_fault(esr, faulted_at as u64, accessed as u64);
-        context.pc = frida_arm64_park as *const () as usize as u64;
-        unsafe { restore_context(regs, &context) };
-        return true;
+        context.pc = frida_park as *const () as usize as u64;
     }
-
     unsafe { restore_context(regs, &context) };
-    true
-}
-
-#[cfg(target_arch = "aarch64")]
-extern "C" fn frida_arm64_park() -> ! {
-    static mut PARK_TOKEN: u8 = 0;
-    loop {
-        crate::kernel::wait(core::ptr::addr_of!(PARK_TOKEN), None, &mut || false);
-    }
+    1
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -622,6 +603,22 @@ unsafe fn restore_context(regs: *mut c_void, c: &GumCpuContext) {
 unsafe extern "C" {
     static _fixup_exception: unsafe extern "C" fn();
     static _aarch64_insn_patch_text_nosync: unsafe extern "C" fn(*mut c_void, u32) -> c_int;
+}
+
+fn is_ours(faulted_at: usize) -> bool {
+    let (base, size) = crate::own_range();
+    (faulted_at >= base && faulted_at - base < size) || crate::on_js_thread()
+}
+
+fn handled(faulted_at: usize, accessed: usize, context: &mut GumCpuContext) -> bool {
+    unsafe { gum_barebone_handle_exception(ACCESS_VIOLATION, faulted_at as *mut c_void, accessed as *mut c_void, context) != 0 }
+}
+
+extern "C" fn frida_park() -> ! {
+    static mut PARK_TOKEN: u8 = 0;
+    loop {
+        crate::kernel::wait(ptr::addr_of!(PARK_TOKEN), None, &mut || false);
+    }
 }
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "arm", target_arch = "aarch64")))]

@@ -100,6 +100,7 @@ SECTIONS {
     ___preempt_count = .; . += 8;
     _pcpu_hot = .; . += 8;
     _fixup_exception = .; . += 8;
+    _page_fault_oops = .; . += 8;
     _ioremap = .; . += 8;
     _ioremap_nocache = .; . += 8;
     ___default_kernel_pte_mask = .; . += 8;

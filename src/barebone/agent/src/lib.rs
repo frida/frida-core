@@ -1188,7 +1188,7 @@ pub(crate) unsafe fn adopt_js_context() -> *mut GMainContext {
 
 static mut JS_THREAD_ID: u64 = 0;
 
-#[cfg(any(feature = "blob", feature = "xnu-core"))]
+#[cfg(any(feature = "blob", feature = "xnu-core", feature = "linux-injected"))]
 pub(crate) fn on_js_thread() -> bool {
     let id = unsafe { JS_THREAD_ID };
     id != 0 && kernel::current_thread_id() == id
@@ -1200,7 +1200,7 @@ pub(crate) static STOP_REQUESTED: core::sync::atomic::AtomicBool =
 #[unsafe(no_mangle)]
 pub static mut frida_agent_left: u32 = 0;
 
-#[cfg(any(feature = "win9x", all(feature = "linux-injected", target_arch = "aarch64")))]
+#[cfg(any(feature = "win9x", feature = "linux-injected"))]
 pub(crate) fn note_unhandled_fault(vector: u64, pc: u64, address: u64) {
     unsafe {
         let fault = &raw mut frida_agent_fault;
