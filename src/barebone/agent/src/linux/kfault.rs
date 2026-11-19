@@ -2,7 +2,7 @@ use core::ffi::{c_int, c_void};
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use core::ffi::c_ulong;
 use core::ptr;
-#[cfg(target_arch = "arm")]
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 use core::sync::atomic::AtomicBool;
 #[cfg(target_arch = "aarch64")]
 use core::sync::atomic::AtomicPtr;
@@ -506,6 +506,25 @@ const STP_X19_X20: u32 = 0xa90153f3;
 static INSTALLED: AtomicPtr<Prologue> = AtomicPtr::new(ptr::null_mut());
 
 #[cfg(target_arch = "aarch64")]
+const KERNEL_FAULT_PROLOGUE: [u32; 4] = [PACIASP, STP_FRAME_RECORD_48, MOV_FRAME_POINTER, STP_X19_X20];
+
+#[cfg(target_arch = "aarch64")]
+const STP_FRAME_RECORD_48: u32 = 0xa9bd7bfd;
+
+#[cfg(target_arch = "aarch64")]
+const ESR_CLASS_SHIFT: u64 = 26;
+
+#[cfg(target_arch = "aarch64")]
+const INSTRUCTION_ABORT_HERE: u64 = 0x21;
+
+#[cfg(target_arch = "aarch64")]
+static KERNEL_FAULTS_TAKEN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_arch = "aarch64")]
+#[unsafe(no_mangle)]
+static mut FRIDA_ARM64_KERNEL_FAULT_CONT: u64 = 0;
+
+#[cfg(target_arch = "aarch64")]
 #[unsafe(no_mangle)]
 static mut FRIDA_ARM64_ORIGINAL_CONT: u64 = 0;
 
@@ -528,6 +547,32 @@ pub fn install() {
         _aarch64_insn_patch_text_nosync(addr as *mut c_void, jump[0]);
     }
     INSTALLED.store(prologue as *const Prologue as *mut Prologue, Ordering::Release);
+
+    unsafe { take_over_kernel_faults() };
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn take_over_kernel_faults() {
+    let target = unsafe { ___do_kernel_fault } as *const u32;
+    if target.is_null() {
+        return;
+    }
+    let present: [u32; 4] = core::array::from_fn(|slot| unsafe { target.add(slot).read_volatile() });
+    if present != KERNEL_FAULT_PROLOGUE {
+        return;
+    }
+
+    unsafe { FRIDA_ARM64_KERNEL_FAULT_CONT = target.add(4) as u64 };
+
+    let jump = redirect_to(frida_arm64_kernel_fault as *const () as usize);
+    unsafe {
+        let addr = target as *mut u32;
+        _aarch64_insn_patch_text_nosync(addr.add(2) as *mut c_void, jump[2]);
+        _aarch64_insn_patch_text_nosync(addr.add(3) as *mut c_void, jump[3]);
+        _aarch64_insn_patch_text_nosync(addr.add(1) as *mut c_void, jump[1]);
+        _aarch64_insn_patch_text_nosync(addr as *mut c_void, jump[0]);
+    }
+    KERNEL_FAULTS_TAKEN.store(true, Ordering::Release);
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -542,6 +587,15 @@ pub fn uninstall() {
     unsafe {
         for slot in 0..4 {
             _aarch64_insn_patch_text_nosync(target.add(slot) as *mut c_void, words[slot]);
+        }
+    }
+
+    if KERNEL_FAULTS_TAKEN.swap(false, Ordering::AcqRel) {
+        let target = unsafe { ___do_kernel_fault } as *mut u32;
+        unsafe {
+            for slot in 0..4 {
+                _aarch64_insn_patch_text_nosync(target.add(slot) as *mut c_void, KERNEL_FAULT_PROLOGUE[slot]);
+            }
         }
     }
 }
@@ -571,13 +625,25 @@ core::arch::global_asm!(
     "add x16, x16, :lo12:{cont}",
     "ldr x16, [x16]",
     "br x16",
+    ".globl frida_arm64_call_original_kernel_fault",
+    "frida_arm64_call_original_kernel_fault:",
+    "paciasp",
+    "stp x29, x30, [sp, #-48]!",
+    "mov x29, sp",
+    "stp x19, x20, [sp, #16]",
+    "adrp x16, {kernel_fault_cont}",
+    "add x16, x16, :lo12:{kernel_fault_cont}",
+    "ldr x16, [x16]",
+    "br x16",
     cont = sym FRIDA_ARM64_ORIGINAL_CONT,
+    kernel_fault_cont = sym FRIDA_ARM64_KERNEL_FAULT_CONT,
 );
 
 #[cfg(target_arch = "aarch64")]
 unsafe extern "C" {
     fn frida_arm64_call_original(regs: *mut c_void) -> c_int;
     fn frida_arm64_call_original_traceable(regs: *mut c_void) -> c_int;
+    fn frida_arm64_call_original_kernel_fault(address: usize, esr: u64, regs: *mut c_void);
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -585,21 +651,37 @@ unsafe extern "C" fn frida_arm64_fixup(regs: *mut c_void) -> c_int {
     let prologue = INSTALLED.load(Ordering::Acquire);
     let fixed = unsafe { ((*prologue).call_original)(regs) };
     let mut context = unsafe { context_of(regs) };
-    let faulted_at = context.pc as usize;
-    if fixed != 0 || !is_ours(faulted_at) {
+    if fixed != 0 || !is_ours(context.pc as usize) {
         return fixed;
     }
 
+    unsafe { recover(regs, &mut context) };
+    1
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" fn frida_arm64_kernel_fault(address: usize, esr: u64, regs: *mut c_void) {
+    let mut context = unsafe { context_of(regs) };
+    if esr >> ESR_CLASS_SHIFT != INSTRUCTION_ABORT_HERE || !is_ours(context.pc as usize) {
+        unsafe { frida_arm64_call_original_kernel_fault(address, esr, regs) };
+        return;
+    }
+
+    unsafe { recover(regs, &mut context) };
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn recover(regs: *mut c_void, context: &mut GumCpuContext) {
+    let faulted_at = context.pc as usize;
     let accessed: usize;
     unsafe { core::arch::asm!("mrs {}, far_el1", out(reg) accessed, options(nomem, nostack)) };
-    if !handled(faulted_at, accessed, &mut context) {
+    if !handled(faulted_at, accessed, context) {
         let esr: u64;
         unsafe { core::arch::asm!("mrs {}, esr_el1", out(reg) esr, options(nomem, nostack)) };
         crate::note_unhandled_fault(esr, faulted_at as u64, accessed as u64);
         context.pc = frida_park as *const () as usize as u64;
     }
-    unsafe { restore_context(regs, &context) };
-    1
+    unsafe { restore_context(regs, context) };
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -637,6 +719,7 @@ unsafe fn restore_context(regs: *mut c_void, c: &GumCpuContext) {
 #[cfg(target_arch = "aarch64")]
 unsafe extern "C" {
     static _fixup_exception: unsafe extern "C" fn();
+    static ___do_kernel_fault: usize;
     static _aarch64_insn_patch_text_nosync: unsafe extern "C" fn(*mut c_void, u32) -> c_int;
 }
 

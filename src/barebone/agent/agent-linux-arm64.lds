@@ -148,6 +148,7 @@ SECTIONS {
     _call_usermodehelper_exec = .; . += 8;
     _access_process_vm = .; . += 8;
     _fixup_exception = .; . += 8;
+    ___do_kernel_fault = .; . += 8;
     _aarch64_insn_patch_text_nosync = .; . += 8;
     _aarch64_insn_patch_text = .; . += 8;
     _kthread_worker_fn = .; . += 8;
