@@ -422,7 +422,7 @@ mod exports {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn kill(_pid: i32, _sig: i32) -> i32 {
-        -1
+        unsupported()
     }
 
     #[unsafe(no_mangle)]
@@ -450,7 +450,7 @@ mod exports {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn open(_path: *const u8, _flags: i32, _mode: i32) -> i32 {
-        -1
+        unsupported()
     }
 
     #[unsafe(no_mangle)]
@@ -480,22 +480,22 @@ mod exports {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn stat(_path: *const u8, _st: *mut core::ffi::c_void) -> i32 {
-        -1
+        unsupported()
     }
 
     #[unsafe(no_mangle)]
     pub extern "C" fn unlink(_path: *const u8) -> i32 {
-        -1
+        unsupported()
     }
 
     #[unsafe(no_mangle)]
     pub extern "C" fn rename(_old: *const u8, _new: *const u8) -> i32 {
-        -1
+        unsupported()
     }
 
     #[unsafe(no_mangle)]
     pub extern "C" fn access(_path: *const u8, _mode: i32) -> i32 {
-        -1
+        unsupported()
     }
 
     #[unsafe(no_mangle)]
@@ -596,4 +596,15 @@ mod exports {
 
     #[unsafe(no_mangle)]
     pub static stderr: Stream = Stream(ptr::null_mut());
+}
+
+fn unsupported() -> i32 {
+    unsafe { errno = ENOSYS };
+    -1
+}
+
+const ENOSYS: i32 = 88;
+
+unsafe extern "C" {
+    static mut errno: i32;
 }
