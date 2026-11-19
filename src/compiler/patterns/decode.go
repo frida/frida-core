@@ -1452,10 +1452,12 @@ func (f *frame) place(field *Field) error {
 	if field.Doc != "" {
 		node.Comment = field.Doc
 	}
-	if node.Size != nil {
-		if err := f.applyAttributes(node, field.Attributes); err != nil {
-			return err
-		}
+	attributes := field.Attributes
+	if node.Size == nil {
+		attributes = presentationOf(attributes)
+	}
+	if err := f.applyAttributes(node, attributes); err != nil {
+		return err
 	}
 	f.value.Fields = append(f.value.Fields, node)
 	f.nodes[field] = node
@@ -1478,6 +1480,17 @@ func (f *frame) place(field *Field) error {
 		}
 	}
 	return nil
+}
+
+func presentationOf(uses []*AttributeUse) []*AttributeUse {
+	var presentation []*AttributeUse
+	for _, use := range uses {
+		switch use.Name {
+		case "name", "comment", "color", "hidden", "highlight_hidden", "tree_hidden", "inline", "sealed":
+			presentation = append(presentation, use)
+		}
+	}
+	return presentation
 }
 
 func isStructOrUnion(t Type) bool {

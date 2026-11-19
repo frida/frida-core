@@ -427,6 +427,33 @@ struct Timing {
 	}
 }
 
+func TestDecodeTruncatedFieldKeepsItsPresentation(t *testing.T) {
+	const source = `
+struct Entry {
+	u8 tag;
+	if (tag != 0) {
+		u8 extra;
+	}
+};
+struct Body {
+	Entry entries[4];
+};
+struct Packet {
+	u8 kind;
+	Body body [[inline, name("payload")]];
+};
+`
+	decoded, err := DecodeSource(source, "Packet", []byte{1, 1, 2, 1, 2}, 0, Targets[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"truncated":true`, `"inline":true`, `"display_name":"payload"`} {
+		if !strings.Contains(decoded, expected) {
+			t.Errorf("a field cut short should still carry %s: %s", expected, decoded)
+		}
+	}
+}
+
 func TestDecodeArrayIndexInsideElement(t *testing.T) {
 	const source = `
 struct Entry {
