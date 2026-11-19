@@ -1,4 +1,6 @@
 use core::ffi::{c_char, c_int, c_uint, c_void};
+#[cfg(target_arch = "x86")]
+use core::ffi::c_ulong;
 use core::ptr::read_volatile;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -332,8 +334,12 @@ pub fn protect(address: u64, size: usize, protection: u32) -> bool {
 }
 
 #[cfg(target_arch = "x86")]
-pub fn set_protection(_address: u64, _size: usize, _protection: u32) -> bool {
-    false
+pub fn set_protection(address: u64, size: usize, protection: u32) -> bool {
+    let pages = size.div_ceil(PAGE_SIZE) as c_ulong;
+    let writable = (protection & GUM_PAGE_WRITE != 0) as c_int;
+    let executable = (protection & GUM_PAGE_EXECUTE != 0) as c_int;
+
+    unsafe { frida_k_set_protection(address as c_ulong, pages, writable, executable) != 0 }
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -410,9 +416,7 @@ pub fn set_protection(address: u64, size: usize, protection: u32) -> bool {
     true
 }
 
-#[cfg(not(target_arch = "x86"))]
 const GUM_PAGE_WRITE: u32 = 2;
-#[cfg(not(target_arch = "x86"))]
 const GUM_PAGE_EXECUTE: u32 = 4;
 
 pub fn current_process_id() -> u32 {
@@ -1401,6 +1405,7 @@ unsafe extern "C" {
     fn frida_k_text_poke(addr: *mut c_void, opcode: *const c_void, len: usize) -> *mut c_void;
     fn frida_k_alloc_code(kind: usize, size: usize, pages: usize) -> *mut u8;
     fn frida_k_free_code(code: *mut u8);
+    fn frida_k_set_protection(address: c_ulong, pages: c_ulong, writable: c_int, executable: c_int) -> c_int;
 }
 
 #[cfg(target_arch = "x86")]

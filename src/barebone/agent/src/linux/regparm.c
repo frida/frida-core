@@ -723,3 +723,19 @@ void frida_k_frida_kmod_exit_worker (void)
 
   ((fn_t) _frida_kmod_exit_worker) ();
 }
+
+extern void * _set_memory_ro;
+extern void * _set_memory_x;
+
+int frida_k_set_protection (unsigned long address, unsigned long pages, int writable, int executable)
+{
+  typedef int (__attribute__ ((regparm (3))) * fn_t) (unsigned long, int);
+
+  if (((fn_t) (writable ? _set_memory_rw : _set_memory_ro)) (address, pages) != 0)
+    return 0;
+
+  if (executable)
+    ((fn_t) _set_memory_x) (address, pages);
+
+  return 1;
+}
