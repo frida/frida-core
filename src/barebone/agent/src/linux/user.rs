@@ -591,8 +591,17 @@ struct PollFd {
 
 #[repr(C)]
 struct TimeSpec {
-    seconds: i64,
-    nanoseconds: i64,
+    seconds: core::ffi::c_long,
+    nanoseconds: core::ffi::c_long,
+}
+
+impl TimeSpec {
+    fn of_micros(us: u64) -> Self {
+        TimeSpec {
+            seconds: (us / 1_000_000) as core::ffi::c_long,
+            nanoseconds: ((us % 1_000_000) * 1000) as core::ffi::c_long,
+        }
+    }
 }
 
 pub(crate) unsafe extern "C" fn frida_poll(ufds: *mut crate::bindings::GPollFD, nfds: u32,
@@ -626,10 +635,7 @@ pub(crate) unsafe extern "C" fn frida_poll(ufds: *mut crate::bindings::GPollFD, 
     }
 
     let waiting = if ready > 0 { 0 } else { timeout };
-    let span = TimeSpec {
-        seconds: (waiting as i64) / 1000,
-        nanoseconds: ((waiting as i64) % 1000) * 1_000_000,
-    };
+    let span = TimeSpec::of_micros(waiting.max(0) as u64 * 1000);
     let deadline = if waiting < 0 {
         core::ptr::null::<TimeSpec>()
     } else {
@@ -668,8 +674,8 @@ fn wait(_token: *const u8, timeout_us: Option<u64>, check: &mut dyn FnMut() -> b
 
     match timeout_us {
         Some(us) => {
-            let until = [(us / 1_000_000) as i64, ((us % 1_000_000) * 1000) as i64];
-            syscall(NANOSLEEP, until.as_ptr() as usize, 0, 0, 0, 0, 0);
+            let until = TimeSpec::of_micros(us);
+            syscall(NANOSLEEP, &until as *const TimeSpec as usize, 0, 0, 0, 0, 0);
         }
         None => wait_on(waited_on(), unchanged, None),
     }
@@ -701,10 +707,10 @@ fn micros_of(clock: usize) -> i64 {
 }
 
 fn read_clock(clock: usize) -> [i64; 2] {
-    let mut now = [0i64; 2];
-    syscall(CLOCK_GETTIME, clock, now.as_mut_ptr() as usize, 0, 0, 0, 0);
+    let mut now = TimeSpec { seconds: 0, nanoseconds: 0 };
+    syscall(CLOCK_GETTIME, clock, &mut now as *mut TimeSpec as usize, 0, 0, 0, 0);
 
-    now
+    [now.seconds as i64, now.nanoseconds as i64]
 }
 
 // The copy has a task of its own, so which process it belongs to is what it was told.
@@ -1254,9 +1260,9 @@ fn bump_what_is_waited_on() {
 }
 
 fn wait_on(word: usize, until_it_changes: u32, micros: Option<u64>) {
-    let until = micros.map(|us| [(us / 1_000_000) as i64, ((us % 1_000_000) * 1000) as i64]);
+    let until = micros.map(TimeSpec::of_micros);
     let deadline = match &until {
-        Some(when) => when.as_ptr() as usize,
+        Some(when) => when as *const TimeSpec as usize,
         None => 0,
     };
 
