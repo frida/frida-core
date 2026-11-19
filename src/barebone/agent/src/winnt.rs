@@ -11,6 +11,8 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::kernel::{CpuState, MemoryRegion, ThreadEntry, ThreadInfo};
 use crate::ring::{Ring, Taken};
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::instrumentation::Instrumentation;
 
 // A process is made in ring 3, thus a copy of the agent does this work.
 pub use crate::winnt_user::{
@@ -1015,16 +1017,15 @@ pub fn install_fault_reporter() {
             return;
         };
 
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        let outcome = crate::bindings::gum_interceptor_replace_fast(
-            interceptor,
-            dispatch as *mut c_void,
-            on_exception_dispatch as *mut c_void,
-            &raw mut ORIGINAL_DISPATCH as *mut *mut c_void,
-            core::ptr::null(),
-        );
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        let outcome = DISPATCH_HOOK.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace_fast(
+                interceptor,
+                dispatch as *mut c_void,
+                on_exception_dispatch as *mut c_void,
+                &raw mut ORIGINAL_DISPATCH as *mut *mut c_void,
+                core::ptr::null(),
+            )
+        });
         if outcome != 0 {
             return;
         }
@@ -1040,8 +1041,9 @@ pub fn release_fault_reporter() {
             return;
         }
 
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_revert(interceptor, HOOKED_DISPATCH as *mut c_void);
+        DISPATCH_HOOK.revert(|interceptor| {
+            crate::bindings::gum_interceptor_revert(interceptor, HOOKED_DISPATCH as *mut c_void);
+        });
         HOOKED_DISPATCH = 0;
     }
 }
@@ -1290,6 +1292,9 @@ fn vector_for(code: u32) -> u32 {
 }
 
 #[cfg(target_arch = "x86_64")]
+static DISPATCH_HOOK: Instrumentation = Instrumentation::new();
+
+#[cfg(target_arch = "x86_64")]
 static mut HOOKED_DISPATCH: usize = 0;
 #[cfg(target_arch = "x86_64")]
 static mut ORIGINAL_DISPATCH: *mut c_void = core::ptr::null_mut();
@@ -1433,8 +1438,9 @@ pub fn install_fault_reporter() {
 pub fn release_fault_reporter() {
     unsafe {
         if HOOKED_HANDLER != 0 {
-            let interceptor = crate::bindings::gum_interceptor_obtain();
-            crate::bindings::gum_interceptor_revert(interceptor, HOOKED_HANDLER as *mut c_void);
+            HANDLER_HOOK.revert(|interceptor| {
+                crate::bindings::gum_interceptor_revert(interceptor, HOOKED_HANDLER as *mut c_void);
+            });
             HOOKED_HANDLER = 0;
             SHADOW_VECTORS = 0;
             return;
@@ -1636,16 +1642,15 @@ fn hook_the_synchronous_handler(live: usize) -> bool {
     };
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        let outcome = crate::bindings::gum_interceptor_replace_fast(
-            interceptor,
-            handler as *mut c_void,
-            on_synchronous_exception as *mut c_void,
-            &raw mut ORIGINAL_HANDLER as *mut *mut c_void,
-            core::ptr::null(),
-        );
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        let outcome = HANDLER_HOOK.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace_fast(
+                interceptor,
+                handler as *mut c_void,
+                on_synchronous_exception as *mut c_void,
+                &raw mut ORIGINAL_HANDLER as *mut *mut c_void,
+                core::ptr::null(),
+            )
+        });
         if outcome != 0 {
             return false;
         }
@@ -1718,6 +1723,9 @@ extern "C" fn on_synchronous_exception(frame: *mut u8) {
 
 #[cfg(target_arch = "aarch64")]
 static mut ORIGINAL_HANDLER: *mut c_void = core::ptr::null_mut();
+#[cfg(target_arch = "aarch64")]
+static HANDLER_HOOK: Instrumentation = Instrumentation::new();
+
 #[cfg(target_arch = "aarch64")]
 static mut HOOKED_HANDLER: usize = 0;
 

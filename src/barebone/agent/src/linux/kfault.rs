@@ -16,9 +16,11 @@ use crate::bindings::{
 };
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::bindings::{
-    g_object_unref, gpointer, gum_interceptor_obtain, gum_interceptor_replace_fast, gum_interceptor_revert,
-    GumInterceptor, GumReplaceReturn_GUM_REPLACE_OK as GUM_REPLACE_OK,
+    gpointer, gum_interceptor_replace_fast, gum_interceptor_revert,
+    GumReplaceReturn_GUM_REPLACE_OK as GUM_REPLACE_OK,
 };
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+use crate::instrumentation::Instrumentation;
 
 #[cfg(target_arch = "x86")]
 pub fn install() {
@@ -46,26 +48,22 @@ pub fn uninstall() {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn take_over_fixups(replacement: *mut c_void) {
     let mut original: gpointer = ptr::null_mut();
-    unsafe {
-        INTERCEPTOR = gum_interceptor_obtain();
-        let result = gum_interceptor_replace_fast(
-            INTERCEPTOR,
+    let result = FIXUPS.apply(|interceptor| unsafe {
+        gum_interceptor_replace_fast(
+            interceptor,
             _fixup_exception as *mut c_void,
             replacement,
             &mut original,
             ptr::null(),
-        );
-        assert_eq!(result, GUM_REPLACE_OK);
-        ORIGINAL_FIXUP = original as usize;
-    }
+        )
+    });
+    assert_eq!(result, GUM_REPLACE_OK);
+    unsafe { ORIGINAL_FIXUP = original as usize };
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn give_back_fixups() {
-    unsafe {
-        gum_interceptor_revert(INTERCEPTOR, _fixup_exception as *mut c_void);
-        g_object_unref(INTERCEPTOR as gpointer);
-    }
+    FIXUPS.revert(|interceptor| unsafe { gum_interceptor_revert(interceptor, _fixup_exception as *mut c_void) });
 }
 
 #[cfg(target_arch = "x86")]
@@ -249,7 +247,7 @@ unsafe fn restore_context(regs: *mut c_void, c: &GumCpuContext) {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-static mut INTERCEPTOR: *mut GumInterceptor = ptr::null_mut();
+static FIXUPS: Instrumentation = Instrumentation::new();
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 static mut ORIGINAL_FIXUP: usize = 0;

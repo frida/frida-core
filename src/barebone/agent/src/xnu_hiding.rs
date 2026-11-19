@@ -1,6 +1,7 @@
 
 use core::ffi::c_int;
 use core::ffi::c_void;
+use crate::instrumentation::Instrumentation;
 
 pub fn hide_our_threads() {
     hide_us_from_the_thread_list();
@@ -25,12 +26,11 @@ pub fn hide_our_threads() {
 
     unsafe {
         WHERE_IT_IS_ASKED = asking as *mut c_void;
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void,
-            say_what_it_has as *mut c_void, (&raw mut THE_ANSWER) as *mut *mut c_void,
-            core::ptr::null_mut());
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        HIDING.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void,
+                say_what_it_has as *mut c_void, (&raw mut THE_ANSWER) as *mut *mut c_void,
+                core::ptr::null_mut());
+        });
     }
 }
 
@@ -41,21 +41,20 @@ pub fn show_our_threads_again() {
     unsafe { HIDDEN = false };
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        if !WHERE_IT_IS_ASKED.is_null() {
-            crate::bindings::gum_interceptor_revert(interceptor, WHERE_IT_IS_ASKED);
-        }
-        if !WHERE_THE_LIST_IS_ASKED.is_null() {
-            crate::bindings::gum_interceptor_revert(interceptor, WHERE_THE_LIST_IS_ASKED);
-        }
-        if !WHERE_A_RANGE_IS_ASKED.is_null() {
-            crate::bindings::gum_interceptor_revert(interceptor, WHERE_A_RANGE_IS_ASKED);
-        }
-        if !WHERE_A_DEEPER_RANGE_IS_ASKED.is_null() {
-            crate::bindings::gum_interceptor_revert(interceptor, WHERE_A_DEEPER_RANGE_IS_ASKED);
-        }
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        HIDING.revert(|interceptor| {
+            if !WHERE_IT_IS_ASKED.is_null() {
+                crate::bindings::gum_interceptor_revert(interceptor, WHERE_IT_IS_ASKED);
+            }
+            if !WHERE_THE_LIST_IS_ASKED.is_null() {
+                crate::bindings::gum_interceptor_revert(interceptor, WHERE_THE_LIST_IS_ASKED);
+            }
+            if !WHERE_A_RANGE_IS_ASKED.is_null() {
+                crate::bindings::gum_interceptor_revert(interceptor, WHERE_A_RANGE_IS_ASKED);
+            }
+            if !WHERE_A_DEEPER_RANGE_IS_ASKED.is_null() {
+                crate::bindings::gum_interceptor_revert(interceptor, WHERE_A_DEEPER_RANGE_IS_ASKED);
+            }
+        });
         THE_ANSWER = None;
         THE_LIST = None;
         THE_RANGE = None;
@@ -81,12 +80,11 @@ fn hide_us_from_the_thread_list() {
 
     unsafe {
         WHERE_THE_LIST_IS_ASKED = asking as *mut c_void;
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void,
-            say_which_threads as *mut c_void, (&raw mut THE_LIST) as *mut *mut c_void,
-            core::ptr::null_mut());
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        HIDING.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void,
+                say_which_threads as *mut c_void, (&raw mut THE_LIST) as *mut *mut c_void,
+                core::ptr::null_mut());
+        });
     }
 }
 
@@ -101,12 +99,11 @@ fn say_less_of_what_a_task_holds() {
     };
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void,
-            say_what_the_task_holds as *mut c_void, (&raw mut WHAT_IT_HOLDS) as *mut *mut c_void,
-            core::ptr::null_mut());
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        KEPT.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void,
+                say_what_the_task_holds as *mut c_void, (&raw mut WHAT_IT_HOLDS) as *mut *mut c_void,
+                core::ptr::null_mut());
+        });
     }
 }
 
@@ -197,18 +194,17 @@ fn say_no_port_names_one_of_ours() {
             say_it_names_nothing_to_look_at as *mut c_void),
     ];
 
-    let interceptor = unsafe { crate::bindings::gum_interceptor_obtain() };
-    unsafe { crate::bindings::gum_interceptor_begin_transaction(interceptor) };
-    for (asking, held, ours) in turning {
-        let Some(asking) = asking else {
-            continue;
-        };
-        unsafe {
-            crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void, ours,
-                held, core::ptr::null_mut());
+    KEPT.apply(|interceptor| {
+        for (asking, held, ours) in turning {
+            let Some(asking) = asking else {
+                continue;
+            };
+            unsafe {
+                crate::bindings::gum_interceptor_replace(interceptor, asking as *mut c_void, ours,
+                    held, core::ptr::null_mut());
+            }
         }
-    }
-    unsafe { crate::bindings::gum_interceptor_end_transaction(interceptor) };
+    });
 }
 
 unsafe extern "C" fn say_it_names_nothing(port: *mut c_void) -> *mut c_void {
@@ -403,15 +399,14 @@ fn hide_what_we_have_in_a_process() {
     unsafe {
         WHERE_A_RANGE_IS_ASKED = one_range as *mut c_void;
         WHERE_A_DEEPER_RANGE_IS_ASKED = one_range_deeper as *mut c_void;
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_replace(interceptor, one_range as *mut c_void,
-            say_what_is_there as *mut c_void, (&raw mut THE_RANGE) as *mut *mut c_void,
-            core::ptr::null_mut());
-        crate::bindings::gum_interceptor_replace(interceptor, one_range_deeper as *mut c_void,
-            say_what_is_there_deeper as *mut c_void, (&raw mut THE_DEEPER_RANGE) as *mut *mut c_void,
-            core::ptr::null_mut());
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        HIDING.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace(interceptor, one_range as *mut c_void,
+                say_what_is_there as *mut c_void, (&raw mut THE_RANGE) as *mut *mut c_void,
+                core::ptr::null_mut());
+            crate::bindings::gum_interceptor_replace(interceptor, one_range_deeper as *mut c_void,
+                say_what_is_there_deeper as *mut c_void, (&raw mut THE_DEEPER_RANGE) as *mut *mut c_void,
+                core::ptr::null_mut());
+        });
     }
 }
 
@@ -672,6 +667,9 @@ static mut THE_LIST: Option<unsafe extern "C" fn(*mut c_void, *mut *mut u64, *mu
 static mut WHERE_THE_LIST_IS_ASKED: *mut c_void = core::ptr::null_mut();
 static mut WHERE_A_PORT_SAYS_ITS_THREAD: usize = 0;
 static mut OUR_THREADS: [u64; MOST_OF_OURS] = [0; MOST_OF_OURS];
+static HIDING: Instrumentation = Instrumentation::new();
+static KEPT: Instrumentation = Instrumentation::new();
+
 static mut THE_ANSWER: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> c_int> =
     None;
 static mut WHERE_IT_IS_ASKED: *mut c_void = core::ptr::null_mut();

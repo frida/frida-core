@@ -48,6 +48,7 @@ mod ffi;
 mod glib;
 mod gthread;
 mod gum;
+mod instrumentation;
 mod libc;
 #[cfg(any(feature = "win9x", feature = "winnt", feature = "linux-injected", feature = "xnu-core"))]
 mod ring;

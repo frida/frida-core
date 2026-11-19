@@ -5,10 +5,9 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 
 #[cfg(not(target_arch = "x86"))]
-use crate::bindings::{
-    gum_interceptor_begin_transaction, gum_interceptor_end_transaction, gum_interceptor_obtain,
-    gum_interceptor_replace_fast,
-};
+use crate::bindings::{gum_interceptor_replace_fast, gum_interceptor_revert};
+#[cfg(not(target_arch = "x86"))]
+use crate::instrumentation::Instrumentation;
 
 use super::layout::field_offset;
 #[cfg(target_arch = "aarch64")]
@@ -977,14 +976,11 @@ pub fn watch_for_named_spawns() {
         return;
     }
 
-    unsafe {
-        let interceptor = gum_interceptor_obtain();
-        gum_interceptor_begin_transaction(interceptor);
+    HOOKS.apply(|interceptor| unsafe {
         gum_interceptor_replace_fast(interceptor, ___set_task_comm as *mut c_void,
             frida_replaced_set_task_comm as *mut c_void, &raw mut ORIGINAL_SET_TASK_COMM,
             ptr::null());
-        gum_interceptor_end_transaction(interceptor);
-    }
+    });
 }
 
 #[cfg(target_arch = "x86")]
@@ -993,6 +989,9 @@ pub fn watch_for_named_spawns() {
 
 #[cfg(not(target_arch = "x86"))]
 static RENAME_WATCHING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+#[cfg(not(target_arch = "x86"))]
+static HOOKS: Instrumentation = Instrumentation::new();
 
 #[cfg(not(target_arch = "x86"))]
 static mut ORIGINAL_SET_TASK_COMM: *mut c_void = ptr::null_mut();
@@ -1074,6 +1073,7 @@ pub fn stop_copies() {
     for home in homes {
         detach_from_process(home);
     }
+    stop_watching_for_named_spawns();
 
     if !WATCHING.swap(false, core::sync::atomic::Ordering::AcqRel) {
         return;
@@ -1085,6 +1085,19 @@ pub fn stop_copies() {
         _tracepoint_probe_unregister(___tracepoint_sched_process_exit,
             THREAD_LEFT_PROBE as *mut c_void, ptr::null_mut());
     }
+}
+
+#[cfg(not(target_arch = "x86"))]
+fn stop_watching_for_named_spawns() {
+    if !RENAME_WATCHING.swap(false, core::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+
+    HOOKS.revert(|interceptor| unsafe { gum_interceptor_revert(interceptor, ___set_task_comm as *mut c_void) });
+}
+
+#[cfg(target_arch = "x86")]
+fn stop_watching_for_named_spawns() {
 }
 
 fn ask_it_to_leave(placed: &Placement) {

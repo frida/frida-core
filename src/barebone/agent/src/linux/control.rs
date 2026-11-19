@@ -6,6 +6,7 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use super::layout::field_offset;
 use super::{cloak, native, process_memory, user_threads};
+use crate::instrumentation::Instrumentation;
 
 pub fn open() {
     cloak::install_hooks();
@@ -19,24 +20,16 @@ pub fn open() {
     }
     unsafe { ARGUMENTS = Some(arguments) };
 
-    let interceptor = unsafe { crate::bindings::gum_interceptor_obtain() };
-    unsafe {
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+    HOOKS.apply(|interceptor| unsafe {
         crate::bindings::gum_interceptor_replace(interceptor, target as *mut c_void,
             frida_cb_sys_prctl as *mut c_void, (&raw mut SYS_PRCTL) as *mut *mut c_void, ptr::null_mut());
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
-    }
+    });
 }
 
 pub fn close() {
-    if unsafe { (*(&raw const ARGUMENTS)).is_some() } {
-        let interceptor = unsafe { crate::bindings::gum_interceptor_obtain() };
-        unsafe {
-            crate::bindings::gum_interceptor_begin_transaction(interceptor);
-            crate::bindings::gum_interceptor_revert(interceptor, SYS_PRCTL_TARGET as *mut c_void);
-            crate::bindings::gum_interceptor_end_transaction(interceptor);
-        }
-    }
+    HOOKS.revert(|interceptor| unsafe {
+        crate::bindings::gum_interceptor_revert(interceptor, SYS_PRCTL_TARGET as *mut c_void);
+    });
 
     cloak::remove_hooks();
 }
@@ -314,6 +307,7 @@ unsafe fn arguments() -> &'static ArgumentLayout {
 }
 
 static mut ARGUMENTS: Option<ArgumentLayout> = None;
+static HOOKS: Instrumentation = Instrumentation::new();
 static mut SYS_PRCTL: usize = 0;
 
 fn read_word(address: usize) -> usize {

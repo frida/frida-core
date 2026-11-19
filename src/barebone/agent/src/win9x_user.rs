@@ -11,6 +11,7 @@ use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicUsiz
 use crate::gum_windows::{FileApi, TextApi};
 use crate::kernel::{MemoryRegion, ThreadEntry};
 use crate::win9x::*;
+use crate::instrumentation::Instrumentation;
 
 // No code in this image calls the ring 3 entry point, thus tell the linker to keep it.
 #[used]
@@ -844,16 +845,15 @@ fn gate_spawns(on: bool) {
     }
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
         if on {
-            crate::bindings::gum_interceptor_replace(interceptor, create_process,
-                on_create_process as *mut c_void, &raw mut ORIGINAL_CREATE_PROCESS,
-                core::ptr::null());
+            SPAWN_HOOK.apply(|interceptor| {
+                crate::bindings::gum_interceptor_replace(interceptor, create_process,
+                    on_create_process as *mut c_void, &raw mut ORIGINAL_CREATE_PROCESS,
+                    core::ptr::null());
+            });
         } else {
-            crate::bindings::gum_interceptor_revert(interceptor, create_process);
+            SPAWN_HOOK.revert(|interceptor| crate::bindings::gum_interceptor_revert(interceptor, create_process));
         }
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
     }
 }
 
@@ -888,6 +888,8 @@ unsafe extern "stdcall" fn on_create_process(application: u32, command_line: *co
 
     ok
 }
+
+static SPAWN_HOOK: Instrumentation = Instrumentation::new();
 
 static mut ORIGINAL_CREATE_PROCESS: *mut c_void = core::ptr::null_mut();
 static mut GATING_HERE: bool = false;

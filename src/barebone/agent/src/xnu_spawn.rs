@@ -1,5 +1,6 @@
 
 use core::ffi::{c_char, c_int, c_void};
+use crate::instrumentation::Instrumentation;
 
 pub fn spawn_when_the_loop_can(request_id: u16, words: &[u8]) {
     let asked = each_word_asked_for();
@@ -189,15 +190,14 @@ fn take_over_the_first_word_a_process_says() {
     unsafe {
         WHERE_IT_IS_SAID = word as *mut c_void;
         WHERE_IT_IS_ASKED = work as *mut c_void;
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_replace(interceptor, word as *mut c_void,
-            hold_it_early as *mut c_void, (&raw mut THE_WORD) as *mut *mut c_void,
-            core::ptr::null_mut());
-        crate::bindings::gum_interceptor_replace(interceptor, work as *mut c_void,
-            hold_it_there as *mut c_void, (&raw mut THE_CLAIM) as *mut *mut c_void,
-            core::ptr::null_mut());
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        SPAWNS.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace(interceptor, word as *mut c_void,
+                hold_it_early as *mut c_void, (&raw mut THE_WORD) as *mut *mut c_void,
+                core::ptr::null_mut());
+            crate::bindings::gum_interceptor_replace(interceptor, work as *mut c_void,
+                hold_it_there as *mut c_void, (&raw mut THE_CLAIM) as *mut *mut c_void,
+                core::ptr::null_mut());
+        });
     }
 }
 
@@ -213,13 +213,12 @@ pub fn give_the_word_back() {
     }
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_revert(interceptor, where_it_is_said);
-        if !WHERE_IT_IS_ASKED.is_null() {
-            crate::bindings::gum_interceptor_revert(interceptor, WHERE_IT_IS_ASKED);
-        }
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        SPAWNS.revert(|interceptor| {
+            crate::bindings::gum_interceptor_revert(interceptor, where_it_is_said);
+            if !WHERE_IT_IS_ASKED.is_null() {
+                crate::bindings::gum_interceptor_revert(interceptor, WHERE_IT_IS_ASKED);
+            }
+        });
         THE_WORD = None;
         THE_CLAIM = None;
         WHERE_IT_IS_SAID = core::ptr::null_mut();
@@ -337,6 +336,8 @@ struct Held {
 static mut GATING: bool = false;
 static mut TAKEN_OVER: bool = false;
 type ACall = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> c_int;
+
+static SPAWNS: Instrumentation = Instrumentation::new();
 
 static mut THE_WORD: Option<ACall> = None;
 static mut THE_CLAIM: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> c_int> = None;

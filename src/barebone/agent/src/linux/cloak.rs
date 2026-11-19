@@ -5,6 +5,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use super::layout::field_offset;
 use super::native;
+use crate::instrumentation::Instrumentation;
 
 pub fn add_thread(tgid: i32, tid: i32) {
     let fresh = Cloak::of(tgid);
@@ -65,9 +66,7 @@ pub fn install_hooks() {
     };
     unsafe { LAYOUT = Some(layout) };
 
-    let interceptor = unsafe { crate::bindings::gum_interceptor_obtain() };
-    unsafe {
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+    HOOKS.apply(|interceptor| unsafe {
         replace(interceptor, _show_map, frida_cb_show_map as *mut c_void, &raw mut SHOW_MAP);
         replace(interceptor, _show_smap, frida_cb_show_smap as *mut c_void, &raw mut SHOW_SMAP);
         replace(interceptor, _proc_fill_cache, frida_cb_proc_fill_cache as *mut c_void,
@@ -76,8 +75,7 @@ pub fn install_hooks() {
             &raw mut PROC_PID_STATUS);
         replace(interceptor, _do_task_stat, frida_cb_do_task_stat as *mut c_void, &raw mut DO_TASK_STAT);
         replace(interceptor, _release_task, frida_cb_release_task as *mut c_void, &raw mut RELEASE_TASK);
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
-    }
+    });
 }
 
 pub fn remove_hooks() {
@@ -85,16 +83,13 @@ pub fn remove_hooks() {
         return;
     }
 
-    let interceptor = unsafe { crate::bindings::gum_interceptor_obtain() };
-    unsafe {
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
+    HOOKS.revert(|interceptor| unsafe {
         for target in [_show_map, _show_smap, _proc_fill_cache, _proc_pid_status, _do_task_stat, _release_task] {
             if target != 0 {
                 crate::bindings::gum_interceptor_revert(interceptor, target as *mut c_void);
             }
         }
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
-    }
+    });
 
     registry().with(|cloaks| cloaks.clear());
 }
@@ -382,6 +377,7 @@ type StatusFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut
 type StatFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void, c_int) -> c_int;
 type ReleaseFn = unsafe extern "C" fn(*mut c_void);
 
+static HOOKS: Instrumentation = Instrumentation::new();
 static mut SHOW_MAP: usize = 0;
 static mut SHOW_SMAP: usize = 0;
 static mut PROC_FILL_CACHE: usize = 0;

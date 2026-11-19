@@ -25,6 +25,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ptr;
+use crate::instrumentation::Instrumentation;
 
 #[cfg(target_arch = "x86")]
 macro_rules! windows_fn {
@@ -398,19 +399,18 @@ pub(crate) fn watch_the_loader() {
     };
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_replace(interceptor, entries.load as gpointer,
-            kernel::on_module_load as gpointer, &raw mut LOADER_LOAD, ptr::null());
-        if entries.load_with_flags != 0 {
-            crate::bindings::gum_interceptor_replace(interceptor,
-                entries.load_with_flags as gpointer, kernel::on_module_load_with_flags as gpointer,
-                &raw mut LOADER_LOAD_WITH_FLAGS, ptr::null());
-        }
-        crate::bindings::gum_interceptor_replace(interceptor, entries.unload as gpointer,
-            kernel::on_module_unload as gpointer, &raw mut LOADER_UNLOAD, ptr::null());
+        LOADER_HOOKS.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace(interceptor, entries.load as gpointer,
+                kernel::on_module_load as gpointer, &raw mut LOADER_LOAD, ptr::null());
+            if entries.load_with_flags != 0 {
+                crate::bindings::gum_interceptor_replace(interceptor,
+                    entries.load_with_flags as gpointer, kernel::on_module_load_with_flags as gpointer,
+                    &raw mut LOADER_LOAD_WITH_FLAGS, ptr::null());
+            }
+            crate::bindings::gum_interceptor_replace(interceptor, entries.unload as gpointer,
+                kernel::on_module_unload as gpointer, &raw mut LOADER_UNLOAD, ptr::null());
 
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        });
     }
 }
 
@@ -421,15 +421,14 @@ pub(crate) fn forget_the_loader() {
     };
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_revert(interceptor, entries.load as gpointer);
-        if entries.load_with_flags != 0 {
-            crate::bindings::gum_interceptor_revert(interceptor,
-                entries.load_with_flags as gpointer);
-        }
-        crate::bindings::gum_interceptor_revert(interceptor, entries.unload as gpointer);
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        LOADER_HOOKS.revert(|interceptor| {
+            crate::bindings::gum_interceptor_revert(interceptor, entries.load as gpointer);
+            if entries.load_with_flags != 0 {
+                crate::bindings::gum_interceptor_revert(interceptor,
+                    entries.load_with_flags as gpointer);
+            }
+            crate::bindings::gum_interceptor_revert(interceptor, entries.unload as gpointer);
+        });
     }
 }
 
@@ -531,6 +530,11 @@ fn known_mut() -> &'static mut alloc::collections::BTreeSet<u64> {
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut KNOWN: alloc::collections::BTreeSet<u64> = alloc::collections::BTreeSet::new();
+
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+static LOADER_HOOKS: Instrumentation = Instrumentation::new();
+#[cfg(any(feature = "win9x", feature = "winnt"))]
+static THREAD_HOOKS: Instrumentation = Instrumentation::new();
 
 #[cfg(any(feature = "win9x", feature = "winnt"))]
 static mut LOADER_LOAD: gpointer = ptr::null_mut();
@@ -637,13 +641,12 @@ fn watch_the_threads() {
     };
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_replace(interceptor, entries.start as gpointer,
-            entries.on_start as gpointer, kernel::thread_start_slot(), ptr::null());
-        crate::bindings::gum_interceptor_replace(interceptor, entries.exit as gpointer,
-            kernel::on_thread_exit as gpointer, kernel::thread_exit_slot(), ptr::null());
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        THREAD_HOOKS.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace(interceptor, entries.start as gpointer,
+                entries.on_start as gpointer, kernel::thread_start_slot(), ptr::null());
+            crate::bindings::gum_interceptor_replace(interceptor, entries.exit as gpointer,
+                kernel::on_thread_exit as gpointer, kernel::thread_exit_slot(), ptr::null());
+        });
     }
 }
 
@@ -653,11 +656,10 @@ fn forget_the_threads() {
     };
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_revert(interceptor, entries.start as gpointer);
-        crate::bindings::gum_interceptor_revert(interceptor, entries.exit as gpointer);
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        THREAD_HOOKS.revert(|interceptor| {
+            crate::bindings::gum_interceptor_revert(interceptor, entries.start as gpointer);
+            crate::bindings::gum_interceptor_revert(interceptor, entries.exit as gpointer);
+        });
     }
 }
 

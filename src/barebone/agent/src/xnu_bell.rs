@@ -1,5 +1,6 @@
 
 use core::ffi::{c_int, c_void};
+use crate::instrumentation::Instrumentation;
 
 pub fn hang_the_bell() {
     if unsafe { HUNG } {
@@ -18,12 +19,11 @@ pub fn hang_the_bell() {
     let ending_a_wait = unsafe { crate::pac::ptrauth_strip_data(signed as *const u8) };
     unsafe { WHERE_IT_HANGS = ending_a_wait as *mut c_void };
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_replace(interceptor, ending_a_wait as *mut c_void,
-            answer_the_bell as *mut c_void, (&raw mut ENDS_A_WAIT) as *mut *mut c_void,
-            core::ptr::null_mut());
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        BELL.apply(|interceptor| {
+            crate::bindings::gum_interceptor_replace(interceptor, ending_a_wait as *mut c_void,
+                answer_the_bell as *mut c_void, (&raw mut ENDS_A_WAIT) as *mut *mut c_void,
+                core::ptr::null_mut());
+        });
     }
 }
 
@@ -59,10 +59,9 @@ pub fn take_the_bell_down() {
     }
 
     unsafe {
-        let interceptor = crate::bindings::gum_interceptor_obtain();
-        crate::bindings::gum_interceptor_begin_transaction(interceptor);
-        crate::bindings::gum_interceptor_revert(interceptor, hangs_on);
-        crate::bindings::gum_interceptor_end_transaction(interceptor);
+        BELL.revert(|interceptor| {
+            crate::bindings::gum_interceptor_revert(interceptor, hangs_on);
+        });
         ENDS_A_WAIT = None;
         WHERE_IT_HANGS = core::ptr::null_mut();
     }
@@ -108,6 +107,8 @@ type EndsAWait = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut i32) -> c_i
 
 static mut HUNG: bool = false;
 static RUNG: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+static BELL: Instrumentation = Instrumentation::new();
+
 static mut ENDS_A_WAIT: Option<EndsAWait> = None;
 static mut WHERE_IT_HANGS: *mut c_void = core::ptr::null_mut();
 

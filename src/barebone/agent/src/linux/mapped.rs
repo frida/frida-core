@@ -9,11 +9,11 @@ use crate::bindings::{
     g_bytes_new, g_bytes_unref, g_clear_error, g_object_unref, gconstpointer, gpointer, gsize,
     gum_barebone_register_module, gum_barebone_unregister_module,
     gum_elf_module_enumerate_exports, gum_elf_module_enumerate_symbols,
-    gum_elf_module_get_preferred_address, gum_elf_module_new_from_blob, gum_interceptor_begin_transaction,
-    gum_interceptor_end_transaction, gum_interceptor_obtain, gum_interceptor_replace,
+    gum_elf_module_get_preferred_address, gum_elf_module_new_from_blob, gum_interceptor_replace,
 };
 use crate::bindings::{GumElfSymbolBind_GUM_ELF_BIND_LOCAL, GumElfSymbolDetails};
 use crate::gum::{self, FoundExportCallback, FoundSymbolCallback};
+use crate::instrumentation::Instrumentation;
 use crate::kernel::MemoryRegion;
 use alloc::ffi::CString;
 
@@ -35,14 +35,11 @@ pub fn watch_the_loader() {
         return;
     };
 
-    unsafe {
-        let interceptor = gum_interceptor_obtain();
-        gum_interceptor_begin_transaction(interceptor);
+    HOOKS.apply(|interceptor| unsafe {
         gum_interceptor_replace(interceptor, rendezvous as gpointer,
             the_loader_changed_something as gpointer, &raw mut LOADER_SAYS_SO,
             ptr::null_mut());
-        gum_interceptor_end_transaction(interceptor);
-    }
+    });
 }
 
 unsafe extern "C" fn the_loader_changed_something() {
@@ -257,6 +254,7 @@ unsafe fn known() -> &'static mut Vec<Image> {
 
 static mut KNOWN: Vec<Image> = Vec::new();
 static mut REGISTRY: *mut GumModuleRegistry = ptr::null_mut();
+static HOOKS: Instrumentation = Instrumentation::new();
 static mut LOADER_SAYS_SO: *mut c_void = ptr::null_mut();
 
 pub fn enumerate_ranges(found: &mut dyn FnMut(u64, u64, u32)) {
