@@ -557,3 +557,28 @@ func TestBaseAddressUnderNode(t *testing.T) {
 		t.Errorf("unexpected output: %s\n%s", actual, files["probe.js"])
 	}
 }
+
+const wideOffsetScript = `
+import { $offset } from "./runtime.js";
+const at = (decimal) => ({ sub: () => ({ toString: () => decimal }) });
+console.log(String($offset(null, at("18446744071964721443"))) + " " + typeof $offset(null, at("4096")));
+`
+
+func TestOffsetKeepsKernelAddressesExact(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not available")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "run.mjs"), []byte(wideOffsetScript), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeModules(t, dir)
+	output, err := exec.Command(node, filepath.Join(dir, "run.mjs")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node failed: %v\n%s", err, output)
+	}
+	if actual := strings.TrimSpace(string(output)); actual != "18446744071964721443 number" {
+		t.Errorf("unexpected output: %s", actual)
+	}
+}

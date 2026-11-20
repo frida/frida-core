@@ -1274,7 +1274,7 @@ export function $pointerDelta(value) {
     return typeof value === "bigint" ? Number(BigInt.asIntN(64, value)) : Number(value);
 }
 
-export function $offset(base, pointer) { return parseInt(pointer.sub(base).toString(10), 10); }
+export function $offset(base, pointer) { return $fit(BigInt(pointer.sub(base).toString(10))); }
 
 export function $align(value, alignment) { return Math.ceil(value / alignment) * alignment; }
 
