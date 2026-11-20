@@ -375,6 +375,10 @@ namespace Frida.Gadget {
 	private Controller? controller;
 	private Gum.Interceptor? interceptor;
 	private Gum.Exceptor? exceptor;
+#if !WINDOWS
+	private ForkMonitor? fork_monitor;
+	private GadgetForkHandler? fork_handler;
+#endif
 	private Mutex mutex;
 	private Cond cond;
 
@@ -414,6 +418,11 @@ namespace Frida.Gadget {
 #endif
 
 		exceptor = Gum.Exceptor.obtain ();
+
+#if !WINDOWS
+		fork_handler = new GadgetForkHandler ();
+		fork_monitor = new ForkMonitor (fork_handler);
+#endif
 
 		try {
 			var interaction = config.interaction;
@@ -520,6 +529,11 @@ namespace Frida.Gadget {
 
 		if (config.teardown == Gum.TeardownRequirement.FULL) {
 			config = null;
+
+#if !WINDOWS
+			fork_monitor = null;
+			fork_handler = null;
+#endif
 
 			invalidate_dbus_context ();
 
@@ -748,6 +762,41 @@ namespace Frida.Gadget {
 		return new Location (executable_name, our_path, our_range);
 	}
 
+#if !WINDOWS
+	private sealed class GadgetForkHandler : Object, ForkHandler {
+		public void prepare_to_fork () {
+			/*
+			 * Keep the parent running. Joining gum-js-loop or the Gadget
+			 * worker around fork() wedges the host's main thread (input
+			 * timeout, then the system kills the process because it cannot
+			 * deliver broadcasts). GLib prepare/recover is also unsafe:
+			 * pause_all copies held pool mutexes into the child, and
+			 * resume_all then blocks forever in g_mutex_lock. Child-only
+			 * recover reinitializes copied Gum locks so helpers can _exit.
+			 */
+		}
+
+		public void recover_from_fork_in_parent () {
+		}
+
+		public void recover_from_fork_in_child (string? identifier) {
+			GLibFork.recover_from_fork_in_child ();
+			GIOFork.recover_from_fork_in_child ();
+			Gum.recover_from_fork_in_child ();
+			GumJS.recover_from_fork_in_child ();
+			Environment.recover_from_fork_in_child ();
+		}
+
+		public void prepare_to_specialize (string identifier) {
+			prepare_to_fork ();
+		}
+
+		public void recover_from_specialization (string identifier) {
+			recover_from_fork_in_parent ();
+		}
+	}
+#endif
+
 	private interface Controller : Object {
 		public abstract bool is_eternal {
 			get;
@@ -896,7 +945,15 @@ namespace Frida.Gadget {
 		}
 
 		private bool supports_async_exit () {
-			// Avoid deadlocking in case a fork() happened that we weren't made aware of.
+#if !WINDOWS
+			/*
+			 * A fork child is not a live Gadget session. Async unload posts
+			 * to the worker and waits; short-lived helpers never finish it,
+			 * so _exit sticks on g_cond_wait. Empty sync teardown is enough.
+			 */
+			if (Environment.is_fork_child ())
+				return false;
+#endif
 			return Gum.Process.has_thread (Environment.get_worker_tid ());
 		}
 
@@ -2130,6 +2187,12 @@ namespace Frida.Gadget {
 
 		private extern Gum.ThreadId get_worker_tid ();
 		private extern unowned MainContext get_worker_context ();
+#if !WINDOWS
+		private extern bool is_fork_child ();
+		private extern void prepare_to_fork ();
+		private extern void recover_from_fork_in_parent ();
+		private extern void recover_from_fork_in_child ();
+#endif
 
 		private extern string? detect_bundle_id ();
 		private extern string? detect_bundle_name ();
