@@ -34,6 +34,6 @@
     "@frida/web-streams": "^1.0.0",
     "@types/frida-gum": "^19.13.0",
     "@types/node": "18.19.103",
-    "frida-fs": "7.1.1"
+    "frida-fs": "8.1.2"
   }
 }
