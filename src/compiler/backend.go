@@ -254,9 +254,12 @@ func makeContext(options BuildOptions, callbacks BuildEventCallbacks) (ctx *buil
 		Format:            format,
 		Inject:            []string{"frida-builtins:///node-globals.js"},
 		External:          options.Externals,
-		EntryPoints:       []string{entrypoint},
-		Write:             false,
-		Plugins:           plugins,
+		EntryPointsAdvanced: []esbuild.EntryPoint{{
+			InputPath:  entrypoint,
+			OutputPath: strings.TrimSuffix(changeToJS(filepath.Base(entrypoint)), ".js"),
+		}},
+		Write:   false,
+		Plugins: plugins,
 	}
 
 	if isTS {
@@ -359,7 +362,13 @@ func makeBuildObserverPlugin(projectRoot, entrypoint string, options BuildOption
 				if len(result.Errors) == 0 {
 					var output string
 					if options.BundleFormat == BundleFormatESM {
-						output = makeESMBundle(result.OutputFiles, projectRoot, entrypoint)
+						bundle, err := makeESMBundle(result.OutputFiles, projectRoot, entrypoint)
+						if err != nil {
+							failure := esbuild.Message{Text: err.Error()}
+							emitDiagnostic("error", failure, callbacks.OnDiagnostic)
+							return esbuild.OnEndResult{Errors: []esbuild.Message{failure}}, nil
+						}
+						output = bundle
 					} else {
 						output = string(result.OutputFiles[0].Contents)
 					}
@@ -391,11 +400,11 @@ func makeBuildObserverPlugin(projectRoot, entrypoint string, options BuildOption
 	}
 }
 
-func makeESMBundle(files []esbuild.OutputFile, projectRoot, entrypoint string) string {
+func makeESMBundle(files []esbuild.OutputFile, projectRoot, entrypoint string) (string, error) {
 	entrypointJS, entrypointMap := outputForEntrypoint(projectRoot, entrypoint)
 	relEntryp, err := filepath.Rel(projectRoot, entrypoint)
 	if err != nil {
-		panic(fmt.Sprintf("Cannot compute entrypoint relative path: %v", err))
+		return "", fmt.Errorf("Cannot compute entrypoint relative path: %v", err)
 	}
 	entrySubDir := filepath.Dir(relEntryp)
 
@@ -410,7 +419,7 @@ func makeESMBundle(files []esbuild.OutputFile, projectRoot, entrypoint string) s
 		}
 	}
 	if entryIndexJS < 0 {
-		panic(fmt.Sprintf("Entrypoint JS %q not found in files", entrypointJS))
+		return "", fmt.Errorf("Entrypoint JS %q not found in files", entrypointJS)
 	}
 
 	orderedFiles := make([]esbuild.OutputFile, 0, len(files))
@@ -444,7 +453,7 @@ func makeESMBundle(files []esbuild.OutputFile, projectRoot, entrypoint string) s
 		}
 	}
 
-	return sb.String()
+	return sb.String(), nil
 }
 
 func outputForEntrypoint(projectRoot, entrypoint string) (jsOut, mapOut string) {
