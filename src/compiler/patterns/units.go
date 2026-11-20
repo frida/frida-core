@@ -34,7 +34,11 @@ func Compile(source string) (*Module, []Diagnostic) {
 }
 
 func CompileSource(main Source, resolver Resolver) (*Module, []Diagnostic) {
-	return compileUnit(main, nil, newUnitRegistry(resolver))
+	return CompileSourceDefining(main, resolver, nil)
+}
+
+func CompileSourceDefining(main Source, resolver Resolver, defines map[string]string) (*Module, []Diagnostic) {
+	return compileUnit(main, definedMacros(defines), newUnitRegistry(resolver))
 }
 
 func newUnitRegistry(resolver Resolver) *unitRegistry {

@@ -242,6 +242,8 @@ type compiledPatternCache struct {
 
 var compiledPatterns = &compiledPatternCache{entries: map[string]*CompiledPattern{}}
 
+var agentDefines = map[string]string{"__MEMORY__": ""}
+
 func (p *compiledPatternCache) compile(path string) (*CompiledPattern, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -258,7 +260,7 @@ func (p *compiledPatternCache) compile(path string) (*CompiledPattern, error) {
 
 	compiled := &CompiledPattern{Path: path, Files: []string{path}, ModTime: resolver.ModTime(path), resolver: resolver}
 	sourceName := filepath.Base(path)
-	module, diagnostics := patterns.CompileSource(main, resolver)
+	module, diagnostics := patterns.CompileSourceDefining(main, resolver, agentDefines)
 	if len(diagnostics) > 0 {
 		compiled.Diagnostics = diagnostics
 		if previous, wasCompiled := p.entries[path]; wasCompiled {
