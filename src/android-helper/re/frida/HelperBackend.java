@@ -1103,7 +1103,11 @@ public class HelperBackend {
 		Date started = new Date(mSystemBootTime + startTimeDeltaInMilliseconds);
 
 		try {
-			parameters.put("user", resolveUserIdToName(uid));
+			parameters.put("uid", uid);
+			String user = resolveUserIdToName(uid);
+			if (user != null) {
+				parameters.put("user", user);
+			}
 			parameters.put("ppid", ppid);
 			parameters.put("started", mIso8601.format(started));
 		} catch (JSONException e) {
@@ -1160,7 +1164,9 @@ public class HelperBackend {
 	private String resolveUserIdToName(int uid) {
 		try {
 			return (String) mPwnameField.get(mGetpwuid.invoke(mGetpwuidReceiver, uid));
-		} catch (IllegalArgumentException | IllegalAccessException | InvocationTargetException e) {
+		} catch (InvocationTargetException e) {
+			return null;
+		} catch (IllegalArgumentException | IllegalAccessException e) {
 			throw new RuntimeException(e);
 		}
 	}
