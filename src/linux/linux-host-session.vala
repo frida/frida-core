@@ -481,23 +481,13 @@ namespace Frida {
 			android_helper_request = new Promise<AndroidHelperClient> ();
 
 			try {
-				string instance_id = Uuid.string_random ().replace ("-", "");
-				string helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
-				FileUtils.set_data (helper_path, Frida.Data.Android.get_helper_dex_blob ().data);
-				Posix.chmod (helper_path, 0644);
+				var service = yield AndroidHelperService.obtain (cancellable);
 
-				try {
-					var service = new AndroidHelperService ();
-					yield service.start (helper_path, cancellable);
+				var helper = new AndroidHelperClient (service);
 
-					var helper = new AndroidHelperClient (service);
+				android_helper_request.resolve (helper);
 
-					android_helper_request.resolve (helper);
-
-					return helper;
-				} finally {
-					Posix.unlink (helper_path);
-				}
+				return helper;
 			} catch (GLib.Error e) {
 				var api_error = (e is Error) ? e : new Error.PERMISSION_DENIED ("%s", e.message);
 
@@ -545,9 +535,17 @@ namespace Frida {
 
 #if ANDROID
 	private sealed class AndroidHelperService : Object, AndroidHelperTransport {
+		private static AndroidHelperService? shared_instance;
+
+		private static int resume_pipe[2];
+		private static int idle_pipe[2];
+
+		private uint use_count = 0;
+		private Promise<bool>? start_request;
+
 		private MainLoop main_loop;
 		private MainContext main_context = new MainContext ();
-		private Thread<void>? worker_thread;
+		private Thread<void> worker_thread;
 
 		private Android.Module? vm_mod;
 		private SigchainCompat? sigchain_compat;
@@ -559,79 +557,78 @@ namespace Frida {
 
 		construct {
 			main_loop = new MainLoop (main_context, false);
-			worker_thread = new Thread<void> ("frida-android-helper", run);
-		}
-
-		public async void close (Cancellable? cancellable) throws IOError {
-			var promise = new Promise<bool> ();
-			var caller_context = MainContext.ref_thread_default ();
-
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				close_and_fulfill (promise, caller_context);
-				return Source.REMOVE;
-			});
-			source.attach (main_context);
 
 			try {
-				yield promise.future.wait_async (cancellable);
-			} catch (Error e) {
+				Unix.open_pipe (resume_pipe, Posix.FD_CLOEXEC);
+				Unix.open_pipe (idle_pipe, Posix.FD_CLOEXEC);
+				Unix.set_fd_nonblocking (idle_pipe[0], true);
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 
-			worker_thread.join ();
-			worker_thread = null;
-
-			if (vm != null) {
-				var res = (*vm)->destroy_java_vm (vm);
-				assert (res == OK);
-				vm = null;
-			}
-
-			rt_mod = null;
-			vm_mod = null;
-
-			if (sigchain_compat != null) {
-				sigchain_compat.disable ();
-				sigchain_compat = null;
-			}
+			worker_thread = new Thread<void> ("frida-android-helper", run);
 		}
 
-		private void close_and_fulfill (Promise<bool> promise, MainContext caller_context) {
-			do_close ();
+		public static async AndroidHelperService obtain (Cancellable? cancellable) throws Error, IOError {
+			if (shared_instance == null)
+				shared_instance = new AndroidHelperService ();
+			var service = shared_instance;
 
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				promise.resolve (true);
-				return Source.REMOVE;
-			});
-			source.attach (caller_context);
+			if (service.use_count++ == 0)
+				service.resume ();
+
+			GLib.Error? pending_error = null;
+			try {
+				yield service.ensure_started (cancellable);
+			} catch (GLib.Error e) {
+				pending_error = e;
+			}
+
+			if (pending_error != null) {
+				yield service.release ();
+				throw_api_error (pending_error);
+			}
+
+			return service;
 		}
 
-		private void do_close () {
-			if (env != null) {
-				if (backend != null) {
-					(*env)->delete_global_ref (env, backend);
-					backend = null;
+		private void resume () {
+			send_token (resume_pipe);
+		}
+
+		private async void ensure_started (Cancellable? cancellable) throws Error, IOError {
+			while (start_request != null) {
+				try {
+					yield start_request.future.wait_async (cancellable);
+					return;
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
 				}
-
-				handle_request_string = null;
-
-				var res = (*vm)->detach_current_thread (vm);
-				assert (res == OK);
-				env = null;
 			}
+			var request = new Promise<bool> ();
+			start_request = request;
 
-			main_loop.quit ();
+			try {
+				yield start (cancellable);
+
+				request.resolve (true);
+			} catch (GLib.Error e) {
+				start_request = null;
+				request.reject (e);
+
+				throw_api_error (e);
+			}
 		}
 
-		public async void start (string helper_path, Cancellable? cancellable) throws Error, IOError {
+		private async void start (Cancellable? cancellable) throws Error, IOError {
 			var promise = new Promise<bool> ();
 			var caller_context = MainContext.ref_thread_default ();
 
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				start_and_fulfill (helper_path, promise, caller_context);
+				start_and_fulfill (promise, caller_context);
 				return Source.REMOVE;
 			});
 			source.attach (main_context);
@@ -639,10 +636,10 @@ namespace Frida {
 			yield promise.future.wait_async (cancellable);
 		}
 
-		private void start_and_fulfill (string helper_path, Promise<bool> promise, MainContext caller_context) {
+		private void start_and_fulfill (Promise<bool> promise, MainContext caller_context) {
 			Error? error = null;
 			try {
-				do_start (helper_path);
+				do_start ();
 			} catch (Error e) {
 				error = e;
 			} finally {
@@ -658,7 +655,29 @@ namespace Frida {
 			}
 		}
 
-		private void do_start (string helper_path) throws Error {
+		private void do_start () throws Error {
+			if (vm == null) {
+				string instance_id = Uuid.string_random ().replace ("-", "");
+				string helper_path = "/data/local/tmp/frida-helper-" + instance_id + ".dex";
+				try {
+					FileUtils.set_data (helper_path, Frida.Data.Android.get_helper_dex_blob ().data);
+				} catch (FileError e) {
+					throw new Error.PERMISSION_DENIED ("%s", e.message);
+				}
+				Posix.chmod (helper_path, 0644);
+
+				try {
+					start_vm (helper_path);
+				} finally {
+					Posix.unlink (helper_path);
+				}
+			}
+
+			if (backend == null)
+				start_backend ();
+		}
+
+		private void start_vm (string helper_path) throws Error {
 			var linker = Gum.Android.get_linker_module ();
 
 			string vm_soname = (Gum.Android.get_api_level () >= 21) ? "libart.so" : "libdvm.so";
@@ -740,6 +759,28 @@ namespace Frida {
 				assert (res == OK);
 			}
 
+			reattach_current_thread_as_daemon ();
+
+			Posix.atexit (destroy_vm_at_exit);
+		}
+
+		private void reattach_current_thread_as_daemon () {
+			var res = (*vm)->detach_current_thread (vm);
+			assert (res == OK);
+
+			var args = JNI.VMAttachArgs () {
+				version = JNI.VERSION_1_2,
+				name = "frida-android-helper",
+			};
+			res = (*vm)->attach_current_thread_as_daemon (vm, out env, &args);
+			assert (res == OK);
+		}
+
+		private static void destroy_vm_at_exit () {
+			(*shared_instance.vm)->destroy_java_vm (shared_instance.vm);
+		}
+
+		private void start_backend () throws Error {
 			(*env)->push_local_frame (env, 5);
 			try {
 				var backend_class = (*env)->find_class (env, "re/frida/HelperBackend");
@@ -759,6 +800,35 @@ namespace Frida {
 			} finally {
 				(*env)->pop_local_frame (env, null);
 			}
+		}
+
+		private async void release () {
+			if (--use_count == 0)
+				yield suspend ();
+		}
+
+		private async void suspend () {
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				main_loop.quit ();
+				return Source.REMOVE;
+			});
+			source.attach (main_context);
+
+			var idle_source = new IOSource (new IOChannel.unix_new (idle_pipe[0]), IOCondition.IN);
+			idle_source.set_callback (() => {
+				if (!try_receive_token (idle_pipe))
+					return Source.CONTINUE;
+				suspend.callback ();
+				return Source.REMOVE;
+			});
+			idle_source.attach (MainContext.get_thread_default ());
+
+			yield;
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			yield release ();
 		}
 
 		public async Json.Node request (Json.Node stanza, Cancellable? cancellable) throws Error, IOError {
@@ -822,9 +892,35 @@ namespace Frida {
 		}
 
 		private void run () {
-			main_context.push_thread_default ();
-			main_loop.run ();
-			main_context.pop_thread_default ();
+			while (true) {
+				receive_token (resume_pipe);
+
+				main_context.push_thread_default ();
+				main_loop.run ();
+				main_context.pop_thread_default ();
+
+				send_token (idle_pipe);
+			}
+		}
+
+		private static void send_token (int[] pipe) {
+			uint8 token = 1;
+			while (Posix.write (pipe[1], &token, 1) == -1 && errno == Posix.EINTR) {
+			}
+		}
+
+		private static void receive_token (int[] pipe) {
+			uint8 token;
+			while (Posix.read (pipe[0], &token, 1) == -1 && errno == Posix.EINTR) {
+			}
+		}
+
+		private static bool try_receive_token (int[] pipe) {
+			uint8 token;
+			ssize_t n;
+			while ((n = Posix.read (pipe[0], &token, 1)) == -1 && errno == Posix.EINTR) {
+			}
+			return n == 1;
 		}
 
 		private static void check_java_exception (JNI.NativeInterface ** env) throws Error {
@@ -903,7 +999,6 @@ namespace Frida {
 		private Gum.Interceptor interceptor;
 		private ChainState[] chains;
 		private bool initialized = false;
-		private bool enabled = false;
 
 		private struct ChainState {
 			public bool claimed;
@@ -964,41 +1059,6 @@ namespace Frida {
 				}
 				return true;
 			});
-
-			enabled = true;
-		}
-
-		public void disable () {
-			if (!enabled)
-				return;
-
-			if (current_instance == this)
-				current_instance = null;
-
-			for (int sig = 1; sig != Android.NSIG; sig++) {
-				var chain = &chains[sig];
-				if (!chain->claimed)
-					continue;
-
-				restore_previous_kernel_handler (sig);
-
-				chain->claimed = false;
-				chain->owns_signal = false;
-				chain->skip_add = false;
-				chain->n_special = 0;
-
-				chain->special0.sc_sigaction = null;
-				chain->special1.sc_sigaction = null;
-				chain->special0.sc_flags = 0;
-				chain->special1.sc_flags = 0;
-				Posix.sigemptyset (out chain->special0.sc_mask);
-				Posix.sigemptyset (out chain->special1.sc_mask);
-
-				chain->previous_action = {};
-				chain->user_action = {};
-			}
-
-			enabled = false;
 		}
 
 		private void initialize () {

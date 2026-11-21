@@ -96,21 +96,11 @@ public class HelperBackend {
 	private Method mReadlink;
 	private Object mReadlinkReceiver;
 
+	private static Context sSystemContext;
+	private static RuntimeException sSystemContextError;
+
 	public HelperBackend() {
-		Looper.prepareMainLooper();
-
-		preInitVendorExtensions();
-
-		Context context;
-		try {
-			Class<?> ActivityThread = Class.forName("android.app.ActivityThread");
-			Object activityThread = ActivityThread.getDeclaredMethod("systemMain").invoke(null);
-			mContext = (Context) ActivityThread.getDeclaredMethod("getSystemContext").invoke(activityThread);
-		} catch (InvocationTargetException e) {
-			throw new RuntimeException(e.getCause());
-		} catch (Throwable e) {
-			throw new RuntimeException(e);
-		}
+		mContext = getSystemContext();
 		mPackageManager = mContext.getPackageManager();
 		mActivityManager = (ActivityManager) mContext.getSystemService(Context.ACTIVITY_SERVICE);
 
@@ -192,6 +182,27 @@ public class HelperBackend {
 				throw new RuntimeException("readlink is not available on this device/API level: " + e2.toString());
 			}
 		}
+	}
+
+	private static Context getSystemContext() {
+		if (sSystemContext == null && sSystemContextError == null) {
+			try {
+				Looper.prepareMainLooper();
+
+				preInitVendorExtensions();
+
+				Class<?> ActivityThread = Class.forName("android.app.ActivityThread");
+				Object activityThread = ActivityThread.getDeclaredMethod("systemMain").invoke(null);
+				sSystemContext = (Context) ActivityThread.getDeclaredMethod("getSystemContext").invoke(activityThread);
+			} catch (InvocationTargetException e) {
+				sSystemContextError = new RuntimeException(e.getCause());
+			} catch (Throwable e) {
+				sSystemContextError = new RuntimeException(e);
+			}
+		}
+		if (sSystemContextError != null)
+			throw sSystemContextError;
+		return sSystemContext;
 	}
 
 	private static void preInitVendorExtensions() {
