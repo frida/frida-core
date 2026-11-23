@@ -174,6 +174,12 @@ frida_gadget_environment_get_worker_context (void)
   return worker_context;
 }
 
+GMainContext *
+frida_get_main_context (void)
+{
+  return worker_context;
+}
+
 #ifndef HAVE_DARWIN
 
 gchar *

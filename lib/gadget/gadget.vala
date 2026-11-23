@@ -982,7 +982,7 @@ namespace Frida.Gadget {
 		private ScriptEngine engine;
 		private Gee.HashMap<string, Script> scripts = new Gee.HashMap<string, Script> ();
 		private bool scan_in_progress = false;
-		private GLib.FileMonitor monitor;
+		private FileMonitor? monitor;
 		private Source unchanged_timeout;
 
 		public ScriptDirectoryRunner (Config config, Location location) {
@@ -1001,12 +1001,12 @@ namespace Frida.Gadget {
 			var interaction = config.interaction as ScriptDirectoryInteraction;
 
 			if (interaction.on_change == ScriptDirectoryInteraction.ChangeBehavior.RESCAN) {
+				var monitor = new FileMonitor (directory_path);
 				try {
-					var path = directory_path;
-					var monitor = File.new_for_path (path).monitor_directory (FileMonitorFlags.NONE);
-					monitor.changed.connect (on_file_changed);
+					yield monitor.enable ();
+					monitor.change.connect (on_file_changed);
 					this.monitor = monitor;
-				} catch (GLib.Error e) {
+				} catch (Error e) {
 					log_warning ("Failed to watch directory: " + e.message);
 				}
 			}
@@ -1023,8 +1023,12 @@ namespace Frida.Gadget {
 
 		protected override async void on_stop () {
 			if (monitor != null) {
-				monitor.changed.disconnect (on_file_changed);
-				monitor.cancel ();
+				monitor.change.disconnect (on_file_changed);
+				try {
+					yield monitor.disable ();
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
 				monitor = null;
 			}
 
@@ -1142,8 +1146,8 @@ namespace Frida.Gadget {
 			return false;
 		}
 
-		private void on_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
-			if (event_type == FileMonitorEvent.CHANGES_DONE_HINT)
+		private void on_file_changed (string file_path, string? other_file_path, FileMonitorEvent event) {
+			if (event == FileMonitorEvent.CHANGES_DONE_HINT)
 				return;
 
 			var source = new TimeoutSource (50);
@@ -1216,7 +1220,7 @@ namespace Frida.Gadget {
 
 		private AgentScriptId id;
 		private bool load_in_progress = false;
-		private GLib.FileMonitor monitor;
+		private FileMonitor? monitor;
 		private Source unchanged_timeout;
 		private RpcClient rpc_client;
 
@@ -1237,9 +1241,10 @@ namespace Frida.Gadget {
 			engine.message_from_script.connect (on_message);
 
 			if (on_change == ChangeBehavior.RELOAD) {
+				var monitor = new FileMonitor (path);
 				try {
-					var monitor = File.new_for_path (path).monitor_file (FileMonitorFlags.NONE);
-					monitor.changed.connect (on_file_changed);
+					yield monitor.enable ();
+					monitor.change.connect (on_file_changed);
 					this.monitor = monitor;
 				} catch (GLib.Error e) {
 					log_warning ("Failed to watch %s: %s".printf (path, e.message));
@@ -1262,8 +1267,12 @@ namespace Frida.Gadget {
 
 		public async void stop () {
 			if (monitor != null) {
-				monitor.changed.disconnect (on_file_changed);
-				monitor.cancel ();
+				monitor.change.disconnect (on_file_changed);
+				try {
+					yield monitor.disable ();
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
 				monitor = null;
 			}
 
@@ -1328,8 +1337,8 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private void on_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
-			if (event_type == FileMonitorEvent.CHANGES_DONE_HINT)
+		private void on_file_changed (string file_path, string? other_file_path, FileMonitorEvent event) {
+			if (event == FileMonitorEvent.CHANGES_DONE_HINT)
 				return;
 
 			var source = new TimeoutSource (50);

@@ -32,6 +32,9 @@ if host_os_family == 'darwin'
     f'-Wl,-current_version,@frida_major_version@.@frida_minor_version@.@frida_micro_version@',
   ]
 endif
+if host_os == 'macos'
+  extra_link_args += '-Wl,-framework,CoreServices'
+endif
 
 if host_os == 'android'
   extra_vala_args += '--pkg=minizip'
