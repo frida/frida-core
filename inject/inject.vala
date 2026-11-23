@@ -442,7 +442,7 @@ namespace Frida.Inject {
 		private bool enable_development = false;
 
 		private bool load_in_progress = false;
-		private GLib.FileMonitor script_monitor;
+		private FileMonitor? script_monitor;
 		private Source script_unchanged_timeout;
 
 		private RpcClient rpc_client;
@@ -474,10 +474,12 @@ namespace Frida.Inject {
 			yield load ();
 
 			if (enable_development && script_path != null) {
+				var monitor = new FileMonitor (script_path);
 				try {
-					script_monitor = File.new_for_path (script_path).monitor_file (FileMonitorFlags.NONE);
-					script_monitor.changed.connect (on_script_file_changed);
-				} catch (GLib.Error e) {
+					yield monitor.enable (io_cancellable);
+					monitor.change.connect (on_script_file_changed);
+					script_monitor = monitor;
+				} catch (Error e) {
 					printerr (e.message + "\n");
 				}
 			}
@@ -485,8 +487,12 @@ namespace Frida.Inject {
 
 		public async void stop (Cancellable? cancellable) throws IOError {
 			if (script_monitor != null) {
-				script_monitor.changed.disconnect (on_script_file_changed);
-				script_monitor.cancel ();
+				script_monitor.change.disconnect (on_script_file_changed);
+				try {
+					yield script_monitor.disable (cancellable);
+				} catch (Error e) {
+					assert_not_reached ();
+				}
 				script_monitor = null;
 			}
 
@@ -650,8 +656,8 @@ namespace Frida.Inject {
 			rpc_client.call.begin ("onFridaStdin", new Json.Node[] { str_value }, data, io_cancellable);
 		}
 
-		private void on_script_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
-			if (event_type == FileMonitorEvent.CHANGES_DONE_HINT)
+		private void on_script_file_changed (string file_path, string? other_file_path, FileMonitorEvent event) {
+			if (event == FileMonitorEvent.CHANGES_DONE_HINT)
 				return;
 
 			var source = new TimeoutSource (50);
