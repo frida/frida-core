@@ -11,8 +11,6 @@ base_sources = [
   'agent-container.vala',
   'adb.vala',
   'system.vala',
-  'file-monitor.vala',
-  'async-task.vala',
 ]
 
 if host_os_family == 'darwin'
@@ -734,7 +732,9 @@ else
 endif
 
 core_extra_link_args = backend_libs_private
+core_link_whole = []
 if is_shared
+  core_link_whole += base
   symbol_map_outdir = meson.current_build_dir()
   run_command(python, files('api' / 'generate.py'),
     '--output=symbol-maps',
@@ -771,6 +771,7 @@ core = library(core_lib_name, core_sources,
   link_args: core_extra_link_args,
   link_depends: core_extra_link_depends,
   link_with: backend_libs,
+  link_whole: core_link_whole,
   dependencies: core_deps + internal_deps,
   install: is_shared,
 )

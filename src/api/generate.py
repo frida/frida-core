@@ -38,7 +38,6 @@ TOPLEVEL_NAMES = [
     "binary-metadata.vala",
     "control-service.vala",
     "portal-service.vala",
-    "file-monitor.vala",
     Path("compiler") / "compiler.vala",
 ]
 
@@ -736,6 +735,7 @@ def parse_api(frida_version, frida_version_components, api_version, toplevel_cod
         "WebRequestHandler": "StaticAuthenticationService",
         "WebRequest": "WebRequestHandler",
         "WebResponse": "WebRequest",
+        "FileMonitor": "WebResponse",
     }
     internal_type_prefixes = [
         "AgentMessageKind",

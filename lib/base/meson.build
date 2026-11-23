@@ -1,6 +1,7 @@
 base_sources = [
   'asset-location.vala',
   'promise.vala',
+  'async-task.vala',
   'session.vala',
   'session-glue.c',
   'channel.vala',
@@ -11,6 +12,7 @@ base_sources = [
   'dbus.vala',
   'socket.vala',
   'socket-glue.c',
+  'file-monitor.vala',
   'xnu-syscalls' / 'xnu-syscalls.vala',
   'xnu-syscalls' / 'xnu-syscalls-glue.c',
 ]

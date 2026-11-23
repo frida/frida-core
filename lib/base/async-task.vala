@@ -1,4 +1,4 @@
-internal abstract class Frida.AsyncTask<T> : Object {
+public abstract class Frida.AsyncTask<T> : Object {
 	private MainLoop loop;
 	private bool completed;
 	private Mutex mutex;
