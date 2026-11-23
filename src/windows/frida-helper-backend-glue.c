@@ -317,6 +317,9 @@ _frida_windows_helper_backend_inject_library_section (guint32 pid, guint32 sourc
   process_handle = OpenProcess (desired_access, FALSE, pid);
   CHECK_OS_RESULT (process_handle, !=, NULL, "OpenProcess");
 
+  if (frida_process_is_exiting (process_handle))
+    goto process_gone;
+
   source_handle = OpenProcess (PROCESS_DUP_HANDLE, FALSE, source_pid);
   CHECK_OS_RESULT (source_handle, !=, NULL, "OpenProcess");
 
@@ -413,6 +416,15 @@ _frida_windows_helper_backend_inject_library_section (guint32 pid, guint32 sourc
   goto beach;
 
   /* ERRORS */
+process_gone:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PROCESS_NOT_FOUND,
+        "Unable to find process with pid %u",
+        pid);
+    goto beach;
+  }
 propagate_io_error:
   {
     g_propagate_error (error, io_error);
