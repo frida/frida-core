@@ -19,6 +19,16 @@ runs:
         CERTIFICATES_PASSWORD: ${{ inputs.certificates-password }}
         KEYCHAIN_PASSWORD: ${{ inputs.keychain-password }}
       run: |
+        if [ -z "$CERTIFICATES_P12" ] && [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          echo "::notice::No Apple certificates available, using ad-hoc signing"
+          (
+            echo MACOS_CERTID=-
+            echo IOS_CERTID=-
+            echo WATCHOS_CERTID=-
+            echo TVOS_CERTID=-
+          ) >> $GITHUB_ENV
+          exit 0
+        fi
         CERTIFICATE_PATH=$RUNNER_TEMP/apple-certificates.p12
         KEYCHAIN_PATH=$RUNNER_TEMP/frida-signing.keychain-db
         echo -n "$CERTIFICATES_P12" | base64 -d -o $CERTIFICATE_PATH
