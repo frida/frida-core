@@ -358,6 +358,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Windows/attach-to-exited-process", () => {
+			var h = new Harness ((h) => Windows.attach_to_exited_process.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Windows/ChildGating/create-process", () => {
 			var h = new Harness ((h) => Windows.create_process.begin (h as Harness));
 			h.run ();
@@ -3686,6 +3691,51 @@ namespace Frida.HostSessionTest {
 				h.disconnect (message_handler);
 
 				yield host_session.kill (pid, cancellable);
+			} catch (GLib.Error e) {
+				printerr ("Unexpected error: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.teardown_backend (backend);
+
+			h.done ();
+		}
+
+		private async void attach_to_exited_process (Harness h) {
+			var backend = new WindowsHostSessionBackend ();
+
+			var prov = yield h.setup_local_backend (backend);
+
+			try {
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (new NullHostSessionHub (), null, (status, progress) => {}, cancellable);
+
+				/* Our handle keeps the process object around once it has exited, so its PID can still be opened. */
+				var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"));
+				var pid = process.id;
+				yield host_session.kill (pid, cancellable);
+
+				bool exited = false;
+				while (!exited) {
+					yield h.process_events ();
+
+					exited = true;
+					var processes = yield host_session.enumerate_processes (make_parameters_dict (), cancellable);
+					foreach (var p in processes) {
+						if (p.pid == pid) {
+							exited = false;
+							break;
+						}
+					}
+				}
+
+				try {
+					yield host_session.attach (pid, make_parameters_dict (), cancellable);
+					assert_not_reached ();
+				} catch (GLib.Error e) {
+					assert_true (e is Error.PROCESS_NOT_FOUND);
+				}
 			} catch (GLib.Error e) {
 				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
