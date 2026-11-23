@@ -1461,7 +1461,7 @@ namespace Frida.Agent {
 					break;
 				case DBusMessageType.METHOD_RETURN:
 				case DBusMessageType.ERROR:
-					if (!incoming) {
+					if (!incoming && !connection.is_closed ()) {
 						lock (pending_calls) {
 							pending_calls--;
 							var operation = pending_close;
