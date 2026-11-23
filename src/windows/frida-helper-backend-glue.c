@@ -153,6 +153,9 @@ _frida_windows_helper_backend_inject_library_file (guint32 pid, const gchar * pa
   details.process_handle = OpenProcess (desired_access, FALSE, pid);
   CHECK_OS_RESULT (details.process_handle, !=, NULL, "OpenProcess");
 
+  if (frida_process_is_exiting (details.process_handle))
+    goto process_gone;
+
   if (!frida_remote_worker_context_init (&rwc, &details, error))
     goto beach;
   rwc_initialized = TRUE;
@@ -193,6 +196,15 @@ invalid_path:
         FRIDA_ERROR_INVALID_ARGUMENT,
         "Unable to find DLL at '%s'",
         path);
+    goto beach;
+  }
+process_gone:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PROCESS_NOT_FOUND,
+        "Unable to find process with pid %u",
+        pid);
     goto beach;
   }
 os_failure:
