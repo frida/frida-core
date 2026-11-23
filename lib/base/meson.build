@@ -31,6 +31,11 @@ if host_os_family == 'darwin'
   extra_vala_args += '--pkg=darwin-xnu'
 endif
 
+if host_os == 'macos'
+  base_sources += 'fsevents-directory-monitor.vala'
+  extra_vala_args += '--pkg=darwin-fsevents'
+endif
+
 if host_os_family == 'linux'
   base_sources += [
     'linux.vala',

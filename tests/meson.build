@@ -1,5 +1,6 @@
 test_sources = [
   'test-system.vala',
+  'test-file-monitor.vala',
   'test-host-session.vala',
   'runner.vala',
   'runner-glue.c',

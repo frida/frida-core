@@ -1,6 +1,9 @@
 namespace Frida {
 	/**
 	 * Watches a filesystem path and reports changes to it.
+	 *
+	 * When the path is a directory, changes to the entries directly inside
+	 * it are reported, including writes to existing files.
 	 */
 	public sealed class FileMonitor : Object {
 		/**
@@ -47,12 +50,20 @@ namespace Frida {
 			var file = File.parse_name (path);
 
 			try {
-				monitor = file.monitor (FileMonitorFlags.NONE, cancellable);
+				monitor = create_monitor (file, cancellable);
 			} catch (GLib.Error e) {
 				throw new Error.INVALID_OPERATION ("%s", e.message);
 			}
 
 			monitor.changed.connect (on_changed);
+		}
+
+		private static GLib.FileMonitor create_monitor (File file, Cancellable? cancellable) throws GLib.Error {
+#if MACOS
+			if (file.query_file_type (NONE, cancellable) == DIRECTORY)
+				return new FSEventsDirectoryMonitor (file);
+#endif
+			return file.monitor (FileMonitorFlags.NONE, cancellable);
 		}
 
 		public void enable_sync (Cancellable? cancellable = null) throws Error, IOError {
