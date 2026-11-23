@@ -483,7 +483,8 @@ frida_map_library_section (const FridaLibrarySection * library, HANDLE source_pr
 {
   HANDLE section;
   GBytes * blob;
-  GumMapper * mapper;
+  GumMapper * mapper = NULL;
+  GError * gum_error = NULL;
 
   if (!DuplicateHandle (source_process, GSIZE_TO_POINTER (library->section), GetCurrentProcess (), &section, 0, FALSE,
       DUPLICATE_SAME_ACCESS))
@@ -491,18 +492,18 @@ frida_map_library_section (const FridaLibrarySection * library, HANDLE source_pr
     goto duplicate_failed;
   }
 
-  blob = gum_windows_bytes_new_from_section (section, 0, library->size, error);
+  blob = gum_windows_bytes_new_from_section (section, 0, library->size, &gum_error);
   CloseHandle (section);
   if (blob == NULL)
-    return NULL;
+    goto gum_failure;
 
-  mapper = gum_mapper_new_take_blob (frida_library_section_get_name (library), blob, resolver, error);
+  mapper = gum_mapper_new_take_blob (frida_library_section_get_name (library), blob, resolver, &gum_error);
   if (mapper == NULL)
-    return NULL;
+    goto gum_failure;
   gum_mapper_set_target (mapper, GUM_PROCESS_MEMORY (target));
 
-  if (!gum_mapper_map (mapper, 0, NULL, error))
-    goto map_failed;
+  if (!gum_mapper_map (mapper, 0, NULL, &gum_error))
+    goto gum_failure;
 
   return mapper;
 
@@ -515,9 +516,15 @@ duplicate_failed:
         GetLastError ());
     return NULL;
   }
-map_failed:
+gum_failure:
   {
-    g_object_unref (mapper);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "%s",
+        gum_error->message);
+    g_error_free (gum_error);
+    g_clear_object (&mapper);
     return NULL;
   }
 }
