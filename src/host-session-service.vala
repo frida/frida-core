@@ -1563,23 +1563,6 @@ namespace Frida {
 		}
 	}
 
-	internal sealed class TemporaryHelperFile : Object, HelperFile {
-		public string path {
-			owned get {
-				return file.path;
-			}
-		}
-
-		public TemporaryFile file {
-			get;
-			construct;
-		}
-
-		public TemporaryHelperFile (TemporaryFile file) {
-			Object (file: file);
-		}
-	}
-
 	public abstract class InternalAgent : Object, AgentMessageSink, RpcPeer {
 		public signal void unloaded ();
 
