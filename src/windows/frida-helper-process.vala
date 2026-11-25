@@ -51,7 +51,7 @@ namespace Frida {
 
 		private ResourceStore get_resource_store () throws Error {
 			if (_resource_store == null)
-				_resource_store = new ResourceStore (tempdir);
+				_resource_store = new ResourceStore ();
 			return _resource_store;
 		}
 
@@ -217,7 +217,7 @@ namespace Frida {
 				void * process = spawn (resource_store.native_helper_path,
 					"MANAGER %s %s".printf (level_str, transport.remote_address),
 					level);
-				instance = new HelperInstance (resource_store.helpers, transport, stream_request, process);
+				instance = new HelperInstance (transport, stream_request, process);
 			} catch (Error e) {
 				error = e;
 			}
@@ -284,7 +284,6 @@ namespace Frida {
 			}
 		}
 
-		private Gee.Collection<TemporaryFile> helpers;
 		private PipeTransport transport;
 		private Future<IOStream> stream_request;
 		private DBusConnection connection;
@@ -293,9 +292,7 @@ namespace Frida {
 
 		private Gee.Set<uint> injectee_ids = new Gee.HashSet<uint> ();
 
-		public HelperInstance (Gee.Collection<TemporaryFile> helpers, PipeTransport transport, Future<IOStream> stream_request,
-				void * process) {
-			this.helpers = helpers;
+		public HelperInstance (PipeTransport transport, Future<IOStream> stream_request, void * process) {
 			this.transport = transport;
 			this.stream_request = stream_request;
 			this.process = process;
@@ -425,27 +422,29 @@ namespace Frida {
 			private set;
 		}
 
-		public Gee.Collection<TemporaryFile> helpers {
-			get;
-			private set;
-			default = new Gee.ArrayList<TemporaryFile> ();
-		}
-
-		public ResourceStore (TemporaryDirectory tempdir) throws Error {
+		public ResourceStore () throws Error {
 #if HAVE_EMBEDDED_ASSETS
-			var helper_arm64 = add_helper ("arm64", Frida.Data.Helper.get_frida_helper_arm64_exe_blob (), tempdir);
-			var helper_x86_64 = add_helper ("x86_64", Frida.Data.Helper.get_frida_helper_x86_64_exe_blob (), tempdir);
-			var helper_x86 = add_helper ("x86", Frida.Data.Helper.get_frida_helper_x86_exe_blob (), tempdir);
+			var blob_arm64 = Frida.Data.Helper.get_frida_helper_arm64_exe_blob ();
+			var blob_x86_64 = Frida.Data.Helper.get_frida_helper_x86_64_exe_blob ();
+			var blob_x86 = Frida.Data.Helper.get_frida_helper_x86_exe_blob ();
+			var resources = ResourceDirectory.open ({
+				helper_filename ("arm64") + " " + blob_arm64.digest,
+				helper_filename ("x86_64") + " " + blob_x86_64.digest,
+				helper_filename ("x86") + " " + blob_x86.digest,
+			});
+			string helper_arm64 = add_helper (resources, "arm64", blob_arm64);
+			string helper_x86_64 = add_helper (resources, "x86_64", blob_x86_64);
+			string helper_x86 = add_helper (resources, "x86", blob_x86);
 
 			switch (Gum.Windows.query_native_cpu_type ()) {
 				case ARM64:
-					native_helper_path = helper_arm64.path;
+					native_helper_path = helper_arm64;
 					break;
 				case AMD64:
-					native_helper_path = helper_x86_64.path;
+					native_helper_path = helper_x86_64;
 					break;
 				case IA32:
-					native_helper_path = helper_x86.path;
+					native_helper_path = helper_x86;
 					break;
 				default:
 					assert_not_reached ();
@@ -470,12 +469,12 @@ namespace Frida {
 		}
 
 #if HAVE_EMBEDDED_ASSETS
-		private TemporaryFile add_helper (string name, Frida.Data.Helper.Blob blob, TemporaryDirectory tempdir) throws Error {
-			var file = new TemporaryFile.from_stream (@"frida-helper-$name.exe",
-				new MemoryInputStream.from_data (blob.data, null),
-				tempdir);
-			helpers.add (file);
-			return file;
+		private static string add_helper (ResourceDirectory resources, string arch, Frida.Data.Helper.Blob blob) throws Error {
+			return resources.provide (helper_filename (arch), new Bytes.static (blob.data), blob.digest, 0755);
+		}
+
+		private static string helper_filename (string arch) {
+			return @"frida-helper-$arch.exe";
 		}
 #endif
 	}
