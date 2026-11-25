@@ -290,6 +290,7 @@ namespace Frida {
 				"  gconstpointer data;\n" +
 				"  guint data_length1;\n" +
 				"  guint uncompressed_size;\n" +
+				"  const gchar * digest;\n" +
 				"};\n" +
 				"\n").printf (incguard_name, incguard_name, blob_ctype, blob_ctype, blob_ctype),
 				null);
@@ -339,6 +340,7 @@ namespace Frida {
 				var blob_identifier_by_index = new Gee.ArrayList<string> ();
 				var size_by_index = new Gee.ArrayList<uint64?> ();
 				var uncompressed_size_by_index = new Gee.ArrayList<uint64?> ();
+				var digest_by_index = new Gee.ArrayList<string> ();
 				int file_count = category.files.size;
 
 				foreach (ResourceFile input in category.files) {
@@ -354,6 +356,7 @@ namespace Frida {
 					identifier_by_index.add (identifier);
 					size_by_index.add (prepared_resource.size);
 					uncompressed_size_by_index.add (prepared_resource.uncompressed_size);
+					digest_by_index.add (compute_digest (prepared_resource.file));
 
 					string blob_identifier = "_" + namespace_cprefix + "_" + identifier;
 					blob_identifier_by_index.add (blob_identifier);
@@ -397,11 +400,13 @@ namespace Frida {
 					string blob_identifier = blob_identifier_by_index[file_index];
 					uint64 size = size_by_index[file_index];
 					uint64 uncompressed_size = uncompressed_size_by_index[file_index];
-					csource.put_string ("\n  { \"%s\", %s, %s, %s },".printf (
+					string digest = digest_by_index[file_index];
+					csource.put_string ("\n  { \"%s\", %s, %s, %s, \"%s\" },".printf (
 							filename,
 							blob_identifier,
 							size.to_string (),
-							uncompressed_size.to_string ()
+							uncompressed_size.to_string (),
+							digest
 						));
 				}
 				csource.put_string ("\n};\n\n");
@@ -450,6 +455,7 @@ namespace Frida {
 						"  needle.data = NULL;\n" +
 						"  needle.data_length1 = 0;\n" +
 						"  needle.uncompressed_size = 0;\n" +
+						"  needle.digest = NULL;\n" +
 						"\n" +
 						"  return bsearch (&needle, " + blob_list_identifier + ", G_N_ELEMENTS (" + blob_list_identifier + "), sizeof (" + blob_ctype + "), " + compare_func_identifier + ");\n" +
 						"}\n",
@@ -465,11 +471,13 @@ namespace Frida {
 				"		public unowned string name;\n" +
 				"		public unowned uint8[] data;\n" +
 				"		public uint uncompressed_size;\n" +
+				"		public unowned string digest;\n" +
 				"\n" +
-				"		public Blob (string name, uint8[] data, uint uncompressed_size) {\n" +
+				"		public Blob (string name, uint8[] data, uint uncompressed_size, string digest) {\n" +
 				"			this.name = name;\n" +
 				"			this.data = data;\n" +
 				"			this.uncompressed_size = uncompressed_size;\n" +
+				"			this.digest = digest;\n" +
 				"		}\n" +
 				"	}\n" +
 				"\n" +
@@ -565,6 +573,11 @@ namespace Frida {
 				return MACHO;
 
 			return NONE;
+		}
+
+		private static string compute_digest (File file) throws Error {
+			var mapped = new MappedFile (file.get_path (), false);
+			return Checksum.compute_for_bytes (SHA256, mapped.get_bytes ());
 		}
 
 		private static string quote (string path) {
