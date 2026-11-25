@@ -52,7 +52,7 @@ namespace Frida {
 
 		private ResourceStore get_resource_store () throws Error {
 			if (_resource_store == null)
-				_resource_store = new ResourceStore (tempdir);
+				_resource_store = new ResourceStore ();
 			return _resource_store;
 		}
 
@@ -634,11 +634,6 @@ namespace Frida {
 	}
 
 	private sealed class ResourceStore {
-		public TemporaryDirectory tempdir {
-			get;
-			private set;
-		}
-
 		public HelperFile? helper32 {
 			get;
 			private set;
@@ -649,17 +644,27 @@ namespace Frida {
 			private set;
 		}
 
-		public ResourceStore (TemporaryDirectory tempdir) throws Error {
-			this.tempdir = tempdir;
+#if HAVE_EMBEDDED_ASSETS
+		private ResourceDirectory? resources;
+#endif
 
+		public ResourceStore () throws Error {
 #if HAVE_EMBEDDED_ASSETS
 			var blob32 = Frida.Data.Helper.get_frida_helper_32_blob ();
-			if (blob32.data.length > 0)
-				helper32 = make_temporary_helper ("frida-helper-32", blob32.data);
-
 			var blob64 = Frida.Data.Helper.get_frida_helper_64_blob ();
+
+			if (!MemoryFileDescriptor.is_supported ()) {
+				resources = ResourceDirectory.open ({
+					"frida-helper-32 " + blob32.digest,
+					"frida-helper-64 " + blob64.digest,
+				});
+			}
+
+			if (blob32.data.length > 0)
+				helper32 = make_helper ("frida-helper-32", blob32);
+
 			if (blob64.data.length > 0)
-				helper64 = make_temporary_helper ("frida-helper-64", blob64.data);
+				helper64 = make_helper ("frida-helper-64", blob64);
 #else
 			var tpl = PathTemplate (Frida.helper_path);
 			string path = tpl.expand ((sizeof (void *) == 8) ? "32" : "64");
@@ -672,16 +677,11 @@ namespace Frida {
 		}
 
 #if HAVE_EMBEDDED_ASSETS
-		private HelperFile make_temporary_helper (string name, uint8[] data) throws Error {
-			if (MemoryFileDescriptor.is_supported ())
-				return new MemoryHelperFile (name, new Bytes.static (data));
+		private HelperFile make_helper (string name, Frida.Data.Helper.Blob blob) throws Error {
+			if (resources == null)
+				return new MemoryHelperFile (name, new Bytes.static (blob.data));
 
-			var helper = new TemporaryHelperFile (
-				new TemporaryFile.from_stream (name,
-					new MemoryInputStream.from_data (data, null),
-					tempdir));
-			FileUtils.chmod (helper.path, 0700);
-			return helper;
+			return new InstalledHelperFile.for_path (resources.provide (name, new Bytes.static (blob.data), blob.digest, 0700));
 		}
 #endif
 	}
