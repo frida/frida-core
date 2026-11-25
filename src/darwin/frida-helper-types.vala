@@ -84,6 +84,8 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint,
 			string data, Cancellable? cancellable) throws GLib.Error;
+		public abstract async MappedLibraryBlob mmap_library (UnixInputStream memory, uint64 size,
+			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void demonitor (uint id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws GLib.Error;

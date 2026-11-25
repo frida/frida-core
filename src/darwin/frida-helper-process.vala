@@ -14,6 +14,8 @@ namespace Frida {
 		}
 
 		private ResourceStore _resource_store;
+		private Bytes? shared_blob;
+		private UnixInputStream? shared_memory;
 
 		private Pid process_pid;
 		private DBusConnection connection;
@@ -46,6 +48,8 @@ namespace Frida {
 			process_pid = 0;
 
 			_resource_store = null;
+			shared_blob = null;
+			shared_memory = null;
 		}
 
 		private ResourceStore get_resource_store () throws Error {
@@ -272,7 +276,36 @@ namespace Frida {
 		}
 
 		public async MappedLibraryBlob? try_mmap (Bytes blob, Cancellable? cancellable) throws Error, IOError {
-			return null;
+			var helper = yield obtain (cancellable);
+			try {
+				return yield helper.mmap_library (get_shared_memory (blob), blob.get_size (), cancellable);
+			} catch (GLib.Error e) {
+				return null;
+			}
+		}
+
+		private UnixInputStream get_shared_memory (Bytes blob) throws Error {
+			if (shared_blob != blob) {
+				string name = "/frida-%08x%08x".printf (Random.next_int (), Random.next_int ());
+				int fd = Posix.shm_open (name, Posix.O_RDWR | Posix.O_CREAT | Posix.O_EXCL, 0600);
+				if (fd == -1)
+					throw new Error.NOT_SUPPORTED ("Unable to create shared memory: %s", strerror (errno));
+				Posix.shm_unlink (name);
+				var memory = new UnixInputStream (fd, true);
+
+				size_t size = blob.get_size ();
+				if (Posix.ftruncate (fd, size) != 0)
+					throw new Error.NOT_SUPPORTED ("Unable to size shared memory: %s", strerror (errno));
+				void * address = Posix.mmap (null, size, Posix.PROT_READ | Posix.PROT_WRITE, Posix.MAP_SHARED, fd, 0);
+				if (address == Posix.MAP_FAILED)
+					throw new Error.NOT_SUPPORTED ("Unable to map shared memory: %s", strerror (errno));
+				Memory.copy (address, blob.get_data (), size);
+				Posix.munmap (address, size);
+
+				shared_blob = blob;
+				shared_memory = memory;
+			}
+			return shared_memory;
 		}
 
 		private async DarwinRemoteHelper obtain (Cancellable? cancellable) throws Error, IOError {

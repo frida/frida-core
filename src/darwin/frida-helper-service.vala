@@ -218,6 +218,24 @@ namespace Frida {
 			return yield backend.inject_library_blob (pid, name, blob, entrypoint, data, cancellable);
 		}
 
+		public async MappedLibraryBlob mmap_library (UnixInputStream memory, uint64 size, Cancellable? cancellable)
+				throws Error, IOError {
+			void * address = Posix.mmap (null, (size_t) size, Posix.PROT_READ, Posix.MAP_SHARED, memory.fd, 0);
+			if (address == Posix.MAP_FAILED)
+				throw new Error.PERMISSION_DENIED ("Unable to map library: %s", strerror (errno));
+
+			unowned uint8[] data = (uint8[]) address;
+			data.length = (int) size;
+			try {
+				MappedLibraryBlob? blob = yield backend.try_mmap (new Bytes.static (data), cancellable);
+				if (blob == null)
+					throw new Error.NOT_SUPPORTED ("Mapping libraries is not supported by this build");
+				return blob;
+			} finally {
+				Posix.munmap (address, (size_t) size);
+			}
+		}
+
 		public async void demonitor (uint id, Cancellable? cancellable) throws Error, IOError {
 			yield backend.demonitor (id, cancellable);
 		}
