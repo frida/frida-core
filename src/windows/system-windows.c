@@ -190,6 +190,54 @@ frida_temporary_directory_get_system_tmp (void)
   return g_strdup (g_get_tmp_dir ());
 }
 
+gpointer
+_frida_file_lock_open (const gchar * path, gboolean create, GError ** error)
+{
+  WCHAR * path_utf16;
+  HANDLE handle;
+  DWORD last_error;
+
+  path_utf16 = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
+  handle = CreateFileW (path_utf16, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      NULL, create ? OPEN_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  last_error = GetLastError ();
+  g_free (path_utf16);
+
+  if (handle != INVALID_HANDLE_VALUE)
+    return handle;
+
+  if (last_error == ERROR_FILE_NOT_FOUND || last_error == ERROR_PATH_NOT_FOUND)
+    return NULL;
+
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_PERMISSION_DENIED,
+      "Unable to open %s: 0x%08lx",
+      path, last_error);
+  return NULL;
+}
+
+void
+_frida_file_lock_close (gpointer handle)
+{
+  CloseHandle (handle);
+}
+
+gboolean
+_frida_file_lock_acquire (gpointer handle, gboolean exclusive, gboolean wait, gboolean * busy)
+{
+  OVERLAPPED overlapped = { 0, };
+  DWORD flags;
+
+  flags = (exclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0) | (wait ? 0 : LOCKFILE_FAIL_IMMEDIATELY);
+  *busy = FALSE;
+  if (LockFileEx (handle, flags, 0, 1, 0, &overlapped))
+    return TRUE;
+
+  *busy = GetLastError () == ERROR_LOCK_VIOLATION;
+  return FALSE;
+}
+
 static gboolean
 frida_add_process_metadata (GHashTable * parameters, guint pid, HANDLE process, FridaEnumerateProcessesOperation * op)
 {
