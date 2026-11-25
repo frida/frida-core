@@ -78,7 +78,7 @@ namespace Frida {
 
 #if HAVE_EMBEDDED_ASSETS
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
-			agent = new AgentResource (blob.name, copy_to_aligned_pages (blob.data), tempdir);
+			agent = new AgentResource (blob.name, copy_to_aligned_pages (blob.data), blob.digest);
 #endif
 
 #if IOS || TVOS
@@ -160,7 +160,7 @@ namespace Frida {
 #else
 			string path;
 #if HAVE_EMBEDDED_ASSETS
-			path = agent.get_file ().path;
+			path = agent.get_path ();
 #else
 			path = agent_path;
 #endif

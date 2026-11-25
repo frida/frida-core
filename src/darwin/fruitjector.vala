@@ -78,7 +78,7 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			var blob = yield helper.try_mmap (resource.blob, cancellable);
 			if (blob == null)
-				return yield inject_library_file (pid, resource.get_file ().path, entrypoint, data, cancellable);
+				return yield inject_library_file (pid, resource.get_path (), entrypoint, data, cancellable);
 
 			var id = yield helper.inject_library_blob (pid, resource.name, blob, entrypoint, data, cancellable);
 			pid_by_id[id] = pid;
@@ -128,24 +128,21 @@ namespace Frida {
 			construct;
 		}
 
-		public TemporaryDirectory? tempdir {
+		public string digest {
 			get;
 			construct;
 		}
 
-		private TemporaryFile _file;
+		private string? _path;
 
-		public AgentResource (string name, Bytes blob, TemporaryDirectory? tempdir = null) {
-			Object (name: name, blob: blob, tempdir: tempdir);
+		public AgentResource (string name, Bytes blob, string digest) {
+			Object (name: name, blob: blob, digest: digest);
 		}
 
-		public TemporaryFile get_file () throws Error {
-			if (_file == null) {
-				var stream = new MemoryInputStream.from_bytes (blob);
-				_file = new TemporaryFile.from_stream (name, stream, tempdir);
-				FileUtils.chmod (_file.path, 0755);
-			}
-			return _file;
+		public string get_path () throws Error {
+			if (_path == null)
+				_path = ResourceDirectory.open ({ name + " " + digest }).provide (name, blob, digest, 0755);
+			return _path;
 		}
 	}
 }

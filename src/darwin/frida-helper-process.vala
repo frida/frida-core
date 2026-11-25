@@ -50,7 +50,7 @@ namespace Frida {
 
 		private ResourceStore get_resource_store () throws Error {
 			if (_resource_store == null)
-				_resource_store = new ResourceStore (tempdir);
+				_resource_store = new ResourceStore ();
 			return _resource_store;
 		}
 
@@ -506,31 +506,23 @@ namespace Frida {
 			private set;
 		}
 
-		private TemporaryDirectory tempdir;
+#if HAVE_EMBEDDED_ASSETS
+		private ResourceDirectory resources;
+#endif
 
 #if MACOS && ARM64
 		private bool thinned = false;
 #endif
 
-		public ResourceStore (TemporaryDirectory tempdir) throws Error {
-			this.tempdir = tempdir;
+		public ResourceStore () throws Error {
 #if HAVE_EMBEDDED_ASSETS
-			FileUtils.chmod (tempdir.path, 0755);
-
 			var blob = Frida.Data.Helper.get_frida_helper_blob ();
-			helper = new TemporaryHelperFile (
-				new TemporaryFile.from_stream ("frida-helper",
-					new MemoryInputStream.from_data (blob.data, null),
-					tempdir));
-			FileUtils.chmod (helper.path, 0700);
+			resources = ResourceDirectory.open ({ blob.name + " " + blob.digest });
+			helper = new InstalledHelperFile.for_path (
+				resources.provide (blob.name, new Bytes.static (blob.data), blob.digest, 0700));
 #else
 			helper = new InstalledHelperFile.for_path (Frida.helper_path);
 #endif
-		}
-
-		~ResourceStore () {
-			if (helper is TemporaryHelperFile)
-				((TemporaryHelperFile) helper).file.destroy ();
 		}
 
 		public bool maybe_thin_helper_to_basic_abi () {
@@ -576,15 +568,9 @@ namespace Frida {
 				if (arm64e_offset == 0 || arm64_offset == 0)
 					return false;
 
-				var thin_file = new TemporaryFile.from_stream ("frida-helper-arm64",
-					new MemoryInputStream.from_data (universal_data[arm64_offset:arm64_offset + arm64_size], null),
-					tempdir);
-				FileUtils.chmod (thin_file.path, 0700);
-
-				if (helper is TemporaryHelperFile)
-					((TemporaryHelperFile) helper).file.destroy ();
-
-				helper = new TemporaryHelperFile (thin_file);
+				var thin = new Bytes (universal_data[arm64_offset:arm64_offset + arm64_size]);
+				helper = new InstalledHelperFile.for_path (resources.provide ("frida-helper-arm64", thin,
+					Checksum.compute_for_bytes (SHA256, thin), 0700));
 				thinned = true;
 
 				return true;
