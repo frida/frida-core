@@ -9,9 +9,6 @@ namespace Frida {
 
 		private Cancellable io_cancellable = new Cancellable ();
 #if HAVE_EMBEDDED_IDUND
-		private TemporaryDirectory daemon_dir = new TemporaryDirectory ();
-		private TemporaryFile? daemon_file;
-
 #if WINDOWS
 		private const string DAEMON_FILENAME = "idund.exe";
 #else
@@ -48,13 +45,11 @@ namespace Frida {
 			var blob = Frida.Data.Idund.get_idund_blob ();
 #endif
 			try {
-				daemon_file = new TemporaryFile.from_stream (DAEMON_FILENAME, new MemoryInputStream.from_data (blob.data, null),
-					daemon_dir);
+				return ResourceDirectory.open ({ DAEMON_FILENAME + " " + blob.digest })
+					.provide (DAEMON_FILENAME, new Bytes.static (blob.data), blob.digest, 0700);
 			} catch (Error e) {
 				throw new Efni.Error.PERMISSION_DENIED ("%s", e.message);
 			}
-			FileUtils.chmod (daemon_file.path, 0700);
-			return daemon_file.path;
 		}
 #endif
 
