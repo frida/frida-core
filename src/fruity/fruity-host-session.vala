@@ -2766,7 +2766,30 @@ namespace Frida {
 		}
 
 		private void on_message (Idun.XpcMessage msg) {
-			message (msg.body);
+			if (msg.body != null)
+				message (msg.body);
+
+			if ((msg.flags & Idun.MessageFlags.WANTS_REPLY) != 0)
+				acknowledge.begin (msg);
+		}
+
+		private async void acknowledge (Idun.XpcMessage msg) {
+			var builder = new Idun.XpcBodyBuilder ();
+			builder.begin_dictionary ();
+			Variant? channel_id = (msg.body != null && msg.body.is_of_type (VariantType.VARDICT))
+				? msg.body.lookup_value ("XPCSideChannel.uniqueIdentifier", VariantType.STRING)
+				: null;
+			if (channel_id != null) {
+				builder
+					.set_member_name ("XPCSideChannel.uniqueIdentifier")
+					.add_string_value (channel_id.get_string ());
+			}
+			builder.end_dictionary ();
+
+			try {
+				yield connection.reply (msg, builder.build ());
+			} catch (GLib.Error e) {
+			}
 		}
 
 		private static void add_vardict_values (Variant dict, Idun.XpcBodyBuilder builder) throws Error {
