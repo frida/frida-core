@@ -16,6 +16,7 @@ static GMainContext * main_context;
 extern void _frida_init_asset_paths (void);
 extern void _frida_deinit_asset_paths (void);
 #endif
+extern void _frida_destroy_shared_agent_container (void);
 
 static gpointer run_main_loop (gpointer data);
 static gboolean dummy_callback (gpointer data);
@@ -89,6 +90,8 @@ frida_unref (gpointer obj)
 void
 frida_shutdown (void)
 {
+  _frida_destroy_shared_agent_container ();
+
   if (runtime == FRIDA_RUNTIME_OTHER)
   {
     GSource * source;
@@ -109,6 +112,8 @@ frida_shutdown (void)
 void
 frida_deinit (void)
 {
+  _frida_destroy_shared_agent_container ();
+
   if (runtime == FRIDA_RUNTIME_OTHER)
   {
     g_assert (main_loop != NULL);

@@ -102,6 +102,11 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
+		GLib.Test.add_func ("/HostSession/system-session-should-outlive-device-manager", () => {
+			var h = new Harness ((h) => Local.system_session_should_outlive_device_manager.begin (h as Harness));
+			h.run ();
+		});
+
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
 			var h = new Harness ((h) => Linux.backend.begin (h as Harness));
@@ -1107,6 +1112,42 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 #endif
+
+		private async void system_session_should_outlive_device_manager (Harness h) {
+			try {
+				var first_manager = new DeviceManager ();
+				var first_session = yield attach_to_system_session (first_manager);
+				yield load_script_in (first_session);
+
+				var second_manager = new DeviceManager ();
+				var second_session = yield attach_to_system_session (second_manager);
+				yield load_script_in (second_session);
+
+				yield first_manager.close ();
+
+				yield load_script_in (second_session);
+				yield second_manager.close ();
+
+				var third_manager = new DeviceManager ();
+				yield load_script_in (yield attach_to_system_session (third_manager));
+				yield third_manager.close ();
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private async Session attach_to_system_session (DeviceManager manager) throws GLib.Error {
+			var device = yield manager.get_device_by_type (DeviceType.LOCAL);
+			return yield device.attach (0);
+		}
+
+		private async void load_script_in (Session session) throws GLib.Error {
+			var script = yield session.create_script ("1;");
+			yield script.load ();
+		}
 
 		private async void connected_should_be_emitted_once (Harness h) {
 			try {

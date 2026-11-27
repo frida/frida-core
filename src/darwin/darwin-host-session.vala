@@ -46,8 +46,6 @@ namespace Frida {
 			}
 		}
 
-		private AgentContainer? system_session_container;
-
 		private Fruitjector fruitjector;
 		private AgentResource? agent;
 #if IOS || TVOS
@@ -111,11 +109,6 @@ namespace Frida {
 			injector.uninjected.disconnect (on_uninjected);
 			yield injector.close (cancellable);
 
-			if (system_session_container != null) {
-				yield system_session_container.destroy (cancellable);
-				system_session_container = null;
-			}
-
 			yield helper.close (cancellable);
 			helper.output.disconnect (on_output);
 			helper.gating_cancelled.disconnect (on_spawn_gating_cancelled);
@@ -165,11 +158,11 @@ namespace Frida {
 			path = agent_path;
 #endif
 
-			system_session_container = yield AgentContainer.create (path, cancellable);
+			var container = yield obtain_shared_agent_container (path, cancellable);
 
-			connection = system_session_container.connection;
+			connection = container.connection;
 
-			return system_session_container;
+			return container;
 #endif
 		}
 
