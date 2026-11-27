@@ -2,6 +2,7 @@
 url = https://github.com/frida/idun.git
 revision = 1fd0cfe888aab21a3e87b7cb9222e4ef088b2737
 depth = 1
+diff_files = idun.diff
 
 [provide]
 dependency_names = idun-1.0
