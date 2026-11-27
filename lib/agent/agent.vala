@@ -2069,6 +2069,13 @@ namespace Frida.Agent {
 	private bool gc_scheduled = false;
 
 	public void _on_pending_thread_garbage (void * data) {
+		Runner.shared_mutex.lock ();
+		var runner = Runner.shared_instance;
+		Runner.shared_mutex.unlock ();
+
+		if (runner == null)
+			return;
+
 		gc_mutex.lock ();
 		gc_generation++;
 		bool already_scheduled = gc_scheduled;
@@ -2076,13 +2083,6 @@ namespace Frida.Agent {
 		gc_mutex.unlock ();
 
 		if (already_scheduled)
-			return;
-
-		Runner.shared_mutex.lock ();
-		var runner = Runner.shared_instance;
-		Runner.shared_mutex.unlock ();
-
-		if (runner == null)
 			return;
 
 		runner.schedule_timeout (50, () => {
