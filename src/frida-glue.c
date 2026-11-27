@@ -17,6 +17,7 @@ extern void _frida_init_asset_paths (void);
 extern void _frida_deinit_asset_paths (void);
 #endif
 
+static gboolean frida_shutdown_glib (void);
 static gpointer run_main_loop (gpointer data);
 static gboolean dummy_callback (gpointer data);
 static gboolean stop_main_loop (gpointer data);
@@ -106,6 +107,61 @@ frida_shutdown (void)
   }
 }
 
+/*
+ * GLib's shutdown joins the shared GDBus worker thread, and that worker exits
+ * only once the last GDBusConnection object is finalized. A connection that
+ * outlives its session — frida's own agent connection can, after a local
+ * attach — therefore makes frida_deinit() block for good. A teardown that can
+ * hang forever is worse than one that gives up: this waits for the shutdown to
+ * finish, and if it does not, leaves it to the process to reclaim the thread.
+ */
+static GMutex shutdown_lock;
+static GCond shutdown_cond;
+static gboolean shutdown_finished = FALSE;
+
+static gpointer
+run_glib_shutdown (gpointer data)
+{
+  gio_shutdown ();
+  glib_shutdown ();
+
+  g_mutex_lock (&shutdown_lock);
+  shutdown_finished = TRUE;
+  g_cond_signal (&shutdown_cond);
+  g_mutex_unlock (&shutdown_lock);
+
+  return NULL;
+}
+
+static gboolean
+frida_shutdown_glib (void)
+{
+  GThread * worker = g_thread_try_new ("frida-glib-shutdown", run_glib_shutdown, NULL, NULL);
+  if (worker == NULL)
+  {
+    gio_shutdown ();
+    glib_shutdown ();
+    return TRUE;
+  }
+
+  g_mutex_lock (&shutdown_lock);
+  while (!shutdown_finished)
+  {
+    gint64 deadline = g_get_monotonic_time () + 5 * G_TIME_SPAN_SECOND;
+    if (!g_cond_wait_until (&shutdown_cond, &shutdown_lock, deadline))
+      break;
+  }
+  gboolean finished = shutdown_finished;
+  g_mutex_unlock (&shutdown_lock);
+
+  if (finished)
+    g_thread_join (worker);
+  else
+    g_thread_unref (worker);
+
+  return finished;
+}
+
 void
 frida_deinit (void)
 {
@@ -126,8 +182,7 @@ frida_deinit (void)
 
   gum_shutdown ();
 #ifdef HAVE_FRIDA_GLIB
-  gio_shutdown ();
-  glib_shutdown ();
+  gboolean glib_shut_down = frida_shutdown_glib ();
 #endif
 
 #ifndef HAVE_EMBEDDED_ASSETS
@@ -136,8 +191,12 @@ frida_deinit (void)
 
   gum_deinit ();
 #ifdef HAVE_FRIDA_GLIB
-  gio_deinit ();
-  glib_deinit ();
+  /* `gio_deinit` runs the very same shutdown that was just given up on. */
+  if (glib_shut_down)
+  {
+    gio_deinit ();
+    glib_deinit ();
+  }
 #endif
 }
 
