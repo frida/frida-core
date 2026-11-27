@@ -31,8 +31,6 @@ namespace Frida {
 			construct;
 		}
 
-		private AgentContainer system_session_container;
-
 		private AgentDescriptor? agent;
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
@@ -103,11 +101,6 @@ namespace Frida {
 			injector.uninjected.disconnect (on_uninjected);
 			yield injector.close (cancellable);
 
-			if (system_session_container != null) {
-				yield system_session_container.destroy (cancellable);
-				system_session_container = null;
-			}
-
 			foreach (var process in process_by_pid.values)
 				process.close ();
 			process_by_pid.clear ();
@@ -144,11 +137,11 @@ namespace Frida {
 
 			var agent_path = path_template.expand (arch);
 
-			system_session_container = yield AgentContainer.create (agent_path, cancellable);
+			var container = yield obtain_shared_agent_container (agent_path, cancellable);
 
-			connection = system_session_container.connection;
+			connection = container.connection;
 
-			return system_session_container;
+			return container;
 		}
 
 		public override async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,

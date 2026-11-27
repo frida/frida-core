@@ -30,8 +30,6 @@ namespace Frida {
 			construct;
 		}
 
-		private AgentContainer system_session_container;
-
 		private AgentDescriptor? agent;
 
 #if ANDROID
@@ -139,11 +137,6 @@ namespace Frida {
 			injector.uninjected.disconnect (on_uninjected);
 			yield injector.close (cancellable);
 
-			if (system_session_container != null) {
-				yield system_session_container.destroy (cancellable);
-				system_session_container = null;
-			}
-
 			yield helper.close (cancellable);
 			helper.output.disconnect (on_output);
 
@@ -172,24 +165,25 @@ namespace Frida {
 			if (path == null)
 				path = tpl.expand (arch_name);
 
+			AgentContainer container;
 #if HAVE_EMBEDDED_ASSETS
 			try {
 #endif
-				system_session_container = yield AgentContainer.create (path, cancellable);
+				container = yield obtain_shared_agent_container (path, cancellable);
 #if HAVE_EMBEDDED_ASSETS
 			} catch (Error e) {
 				if (MemoryFileDescriptor.is_supported ()) {
 					path = agent.get_path_template ().expand (arch_name);
-					system_session_container = yield AgentContainer.create (path, cancellable);
+					container = yield obtain_shared_agent_container (path, cancellable);
 				} else {
 					throw e;
 				}
 			}
 #endif
 
-			connection = system_session_container.connection;
+			connection = container.connection;
 
-			return system_session_container;
+			return container;
 		}
 
 		public override async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,

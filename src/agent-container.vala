@@ -1,6 +1,91 @@
 using Efni;
 
 namespace Frida {
+	public async AgentContainer obtain_shared_agent_container (string agent_filename, Cancellable? cancellable)
+			throws Error, IOError {
+		var future = shared_agent_container_request;
+		if (future == null) {
+			var promise = new Promise<AgentContainer> ();
+			future = promise.future;
+			shared_agent_container_request = future;
+			shared_agent_container_context = MainContext.ref_thread_default ();
+
+			try {
+				promise.resolve (yield AgentContainer.create (agent_filename, cancellable));
+			} catch (GLib.Error e) {
+				shared_agent_container_request = null;
+				shared_agent_container_context = null;
+				promise.reject (e);
+			}
+		}
+
+		return yield future.wait_async (cancellable);
+	}
+
+	public void _destroy_shared_agent_container () {
+		var future = shared_agent_container_request;
+		if (future == null)
+			return;
+		shared_agent_container_request = null;
+
+		var container = future.value;
+		var context = (owned) shared_agent_container_context;
+
+		if (context.acquire ()) {
+			destroy_while_iterating (container, context);
+			context.release ();
+		} else {
+			destroy_on_owner_thread (container, context);
+		}
+	}
+
+	private void destroy_while_iterating (AgentContainer container, MainContext context) {
+		var loop = new MainLoop (context);
+
+		context.push_thread_default ();
+		container.destroy.begin (null, (obj, res) => {
+			try {
+				container.destroy.end (res);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
+			loop.quit ();
+		});
+		loop.run ();
+		context.pop_thread_default ();
+	}
+
+	private void destroy_on_owner_thread (AgentContainer container, MainContext context) {
+		var mutex = Mutex ();
+		var cond = Cond ();
+		bool destroyed = false;
+
+		var source = new IdleSource ();
+		source.set_callback (() => {
+			container.destroy.begin (null, (obj, res) => {
+				try {
+					container.destroy.end (res);
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+				mutex.lock ();
+				destroyed = true;
+				cond.signal ();
+				mutex.unlock ();
+			});
+			return false;
+		});
+		source.attach (context);
+
+		mutex.lock ();
+		while (!destroyed)
+			cond.wait (mutex);
+		mutex.unlock ();
+	}
+
+	private Future<AgentContainer>? shared_agent_container_request;
+	private MainContext? shared_agent_container_context;
+
 	public sealed class AgentContainer : Object, AgentSessionProvider {
 		public DBusConnection connection {
 			get;
@@ -99,6 +184,19 @@ namespace Frida {
 #endif
 
 			module = null;
+		}
+
+		public async void close_sessions (Gee.Collection<AgentSessionId?> ids, Cancellable? cancellable) throws IOError {
+			foreach (var id in ids) {
+				try {
+					AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id),
+						DO_NOT_LOAD_PROPERTIES, cancellable);
+					yield session.close (cancellable);
+				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
+				}
+			}
 		}
 
 		private void start_worker_thread () {

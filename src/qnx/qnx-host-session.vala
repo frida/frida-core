@@ -14,8 +14,6 @@ namespace Frida {
 	}
 
 	public sealed class QnxHostSession : LocalHostSession {
-		private AgentContainer system_session_container;
-
 		private AgentDescriptor agent_desc;
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
@@ -40,11 +38,6 @@ namespace Frida {
 
 			injector.uninjected.disconnect (on_uninjected);
 			yield injector.close (cancellable);
-
-			if (system_session_container != null) {
-				yield system_session_container.destroy (cancellable);
-				system_session_container = null;
-			}
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
@@ -54,11 +47,11 @@ namespace Frida {
 			PipeTransport.set_temp_directory (qinjector.temp_directory);
 
 			var agent_filename = qinjector.resource_store.ensure_copy_of (agent_desc);
-			system_session_container = yield AgentContainer.create (agent_filename, cancellable);
+			var container = yield obtain_shared_agent_container (agent_filename, cancellable);
 
-			connection = system_session_container.connection;
+			connection = container.connection;
 
-			return system_session_container;
+			return container;
 		}
 
 		public override async HostApplicationInfo get_frontmost_application (HashTable<string, Variant> options,

@@ -1412,7 +1412,10 @@ namespace Frida {
 
 				provider.child_gating_changed.disconnect (on_child_gating_changed);
 
-				if (connection != null) {
+				var container = provider as AgentContainer;
+				if (container != null) {
+					yield container.close_sessions (sessions, cancellable);
+				} else if (connection != null) {
 					try {
 						yield connection.close (cancellable);
 					} catch (GLib.Error e) {
